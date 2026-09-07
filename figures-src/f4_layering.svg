@@ -1,0 +1,437 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="1281.6pt" height="748.8pt" viewBox="0 0 1281.6 748.8" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-09-06T14:27:45.743077</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 748.8 
+L 1281.6 748.8 
+L 1281.6 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 0 748.8 
+L 1281.6 748.8 
+L 1281.6 0 
+L 0 0 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #ffffff"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="21.6" y="31.477969" transform="rotate(-0 21.6 31.477969)">Figure 5-1   Data Layering and Subject Domains</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 9.62px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #4b5563" x="21.6" y="59.149697" transform="rotate(-0 21.6 59.149697)">One database instance, seven schemas; mart and ai are parallel projections of core, never separate pipelines</text>
+   </g>
+   <g id="patch_3">
+    <path d="M 28.8 345.6 
+L 230.4 345.6 
+Q 237.6 345.6 237.6 338.4 
+L 237.6 108 
+Q 237.6 100.8 230.4 100.8 
+L 28.8 100.8 
+Q 21.6 100.8 21.6 108 
+L 21.6 338.4 
+Q 21.6 345.6 28.8 345.6 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #ffffff; stroke: #1d4ed8; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 288 345.6 
+L 504 345.6 
+Q 511.2 345.6 511.2 338.4 
+L 511.2 108 
+Q 511.2 100.8 504 100.8 
+L 288 100.8 
+Q 280.8 100.8 280.8 108 
+L 280.8 338.4 
+Q 280.8 345.6 288 345.6 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #ffffff; stroke: #1d4ed8; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 561.6 345.6 
+L 792 345.6 
+Q 799.2 345.6 799.2 338.4 
+L 799.2 108 
+Q 799.2 100.8 792 100.8 
+L 561.6 100.8 
+Q 554.4 100.8 554.4 108 
+L 554.4 338.4 
+Q 554.4 345.6 561.6 345.6 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #ffffff; stroke: #1d4ed8; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 864 288 
+L 1252.8 288 
+Q 1260 288 1260 280.8 
+L 1260 108 
+Q 1260 100.8 1252.8 100.8 
+L 864 100.8 
+Q 856.8 100.8 856.8 108 
+L 856.8 280.8 
+Q 856.8 288 864 288 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #ffffff; stroke: #6d28d9; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 864 460.8 
+L 1252.8 460.8 
+Q 1260 460.8 1260 453.6 
+L 1260 309.6 
+Q 1260 302.4 1252.8 302.4 
+L 864 302.4 
+Q 856.8 302.4 856.8 309.6 
+L 856.8 453.6 
+Q 856.8 460.8 864 460.8 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #ffffff; stroke: #b45309; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 28.8 547.2 
+L 619.2 547.2 
+Q 626.4 547.2 626.4 540 
+L 626.4 468 
+Q 626.4 460.8 619.2 460.8 
+L 28.8 460.8 
+Q 21.6 460.8 21.6 468 
+L 21.6 540 
+Q 21.6 547.2 28.8 547.2 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #f1f3f6; stroke: #334155; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 662.4 547.2 
+L 1252.8 547.2 
+Q 1260 547.2 1260 540 
+L 1260 468 
+Q 1260 460.8 1252.8 460.8 
+L 662.4 460.8 
+Q 655.2 460.8 655.2 468 
+L 655.2 540 
+Q 655.2 547.2 662.4 547.2 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #f1f3f6; stroke: #334155; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 28.8 720 
+L 1252.8 720 
+Q 1260 720 1260 712.8 
+L 1260 583.2 
+Q 1260 576 1252.8 576 
+L 28.8 576 
+Q 21.6 576 21.6 583.2 
+L 21.6 712.8 
+Q 21.6 720 28.8 720 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #f8fafc; stroke: #1d4ed8; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 879.84 182.88 
+L 1236.96 182.88 
+Q 1242 182.88 1242 177.84 
+L 1242 169.2 
+Q 1242 164.16 1236.96 164.16 
+L 879.84 164.16 
+Q 874.8 164.16 874.8 169.2 
+L 874.8 177.84 
+Q 874.8 182.88 879.84 182.88 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #f3eefc; stroke: #6d28d9; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 879.84 205.2 
+L 1236.96 205.2 
+Q 1242 205.2 1242 200.16 
+L 1242 191.52 
+Q 1242 186.48 1236.96 186.48 
+L 879.84 186.48 
+Q 874.8 186.48 874.8 191.52 
+L 874.8 200.16 
+Q 874.8 205.2 879.84 205.2 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #f3eefc; stroke: #6d28d9; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 879.84 227.52 
+L 1236.96 227.52 
+Q 1242 227.52 1242 222.48 
+L 1242 213.84 
+Q 1242 208.8 1236.96 208.8 
+L 879.84 208.8 
+Q 874.8 208.8 874.8 213.84 
+L 874.8 222.48 
+Q 874.8 227.52 879.84 227.52 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #f3eefc; stroke: #6d28d9; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_14">
+    <path d="M 879.84 249.84 
+L 1236.96 249.84 
+Q 1242 249.84 1242 244.8 
+L 1242 236.16 
+Q 1242 231.12 1236.96 231.12 
+L 879.84 231.12 
+Q 874.8 231.12 874.8 236.16 
+L 874.8 244.8 
+Q 874.8 249.84 879.84 249.84 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #f3eefc; stroke: #6d28d9; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_15">
+    <path d="M 879.84 272.16 
+L 1236.96 272.16 
+Q 1242 272.16 1242 267.12 
+L 1242 258.48 
+Q 1242 253.44 1236.96 253.44 
+L 879.84 253.44 
+Q 874.8 253.44 874.8 258.48 
+L 874.8 267.12 
+Q 874.8 272.16 879.84 272.16 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #f3eefc; stroke: #6d28d9; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_16">
+    <path d="M 879.84 384.48 
+L 1236.96 384.48 
+Q 1242 384.48 1242 379.44 
+L 1242 370.08 
+Q 1242 365.04 1236.96 365.04 
+L 879.84 365.04 
+Q 874.8 365.04 874.8 370.08 
+L 874.8 379.44 
+Q 874.8 384.48 879.84 384.48 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #fdf4e7; stroke: #b45309; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_17">
+    <path d="M 879.84 408.24 
+L 1236.96 408.24 
+Q 1242 408.24 1242 403.2 
+L 1242 393.84 
+Q 1242 388.8 1236.96 388.8 
+L 879.84 388.8 
+Q 874.8 388.8 874.8 393.84 
+L 874.8 403.2 
+Q 874.8 408.24 879.84 408.24 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #fdf4e7; stroke: #b45309; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_18">
+    <path d="M 879.84 432 
+L 1236.96 432 
+Q 1242 432 1242 426.96 
+L 1242 417.6 
+Q 1242 412.56 1236.96 412.56 
+L 879.84 412.56 
+Q 874.8 412.56 874.8 417.6 
+L 874.8 426.96 
+Q 874.8 432 879.84 432 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #fdf4e7; stroke: #b45309; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_19">
+    <path d="M 879.84 455.76 
+L 1236.96 455.76 
+Q 1242 455.76 1242 450.72 
+L 1242 441.36 
+Q 1242 436.32 1236.96 436.32 
+L 879.84 436.32 
+Q 874.8 436.32 874.8 441.36 
+L 874.8 450.72 
+Q 874.8 455.76 879.84 455.76 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #fdf4e7; stroke: #b45309; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_3">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="324" y="492.549063" transform="rotate(-0 324 492.549063)">meta</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(226.013438 522.576375)">contract registry  .  mapping registry  .  metric registry  .  lineage</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(227.487188 530.206875)">watermarks and run state  .  value profiles  .  clarification queue</text>
+   </g>
+   <g id="text_5">
+    <text style="font-weight: 700; font-size: 8.6px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="957.6" y="492.549063" transform="rotate(-0 957.6 492.549063)">audit</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(872.0625 522.576375)">who queried or exported what, and when  .  append-only</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(853.991719 530.206875)">retention aligned with the business data  ( 8 years, to be confirmed )</text>
+   </g>
+   <g id="patch_20">
+    <path d="M 239.76 223.2 
+Q 259.2 223.2 276.403932 223.2 
+" clip-path="url(#p4e18d3ed34)" style="fill: none; stroke: #1d4ed8; stroke-width: 2; stroke-linecap: round"/>
+    <path d="M 271.603932 220.8 
+L 276.403932 223.2 
+L 271.603932 225.6 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #1d4ed8; stroke: #1d4ed8; stroke-width: 2; stroke-linecap: round"/>
+   </g>
+   <g id="patch_21">
+    <path d="M 513.36 223.2 
+Q 532.8 223.2 550.003932 223.2 
+" clip-path="url(#p4e18d3ed34)" style="fill: none; stroke: #1d4ed8; stroke-width: 2; stroke-linecap: round"/>
+    <path d="M 545.203932 220.8 
+L 550.003932 223.2 
+L 545.203932 225.6 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #1d4ed8; stroke: #1d4ed8; stroke-width: 2; stroke-linecap: round"/>
+   </g>
+   <g id="text_7">
+    <text style="font-weight: 700; font-size: 5.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6d28d9" x="1058.4" y="175.097781" transform="rotate(-0 1058.4 175.097781)">Call Handling</text>
+   </g>
+   <g id="text_8">
+    <text style="font-weight: 700; font-size: 5.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6d28d9" x="1058.4" y="197.440438" transform="rotate(-0 1058.4 197.440438)">Incident Response</text>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 5.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6d28d9" x="1058.4" y="219.715125" transform="rotate(-0 1058.4 219.715125)">Resources &amp; Duty</text>
+   </g>
+   <g id="text_10">
+    <text style="font-weight: 700; font-size: 5.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6d28d9" x="1058.4" y="242.057781" transform="rotate(-0 1058.4 242.057781)">Performance &amp; Quality</text>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 5.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6d28d9" x="1058.4" y="264.377781" transform="rotate(-0 1058.4 264.377781)">System Operations</text>
+   </g>
+   <g id="text_12">
+    <text style="font-weight: 700; font-size: 5.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #b45309" x="1058.4" y="376.279781" transform="rotate(-0 1058.4 376.279781)">incident_wide   .   call_wide</text>
+   </g>
+   <g id="text_13">
+    <text style="font-weight: 700; font-size: 5.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #b45309" x="1058.4" y="400.039781" transform="rotate(-0 1058.4 400.039781)">agent_daily_wide</text>
+   </g>
+   <g id="text_14">
+    <text style="font-weight: 700; font-size: 5.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #b45309" x="1058.4" y="423.857781" transform="rotate(-0 1058.4 423.857781)">media index  ( object store link )</text>
+   </g>
+   <g id="text_15">
+    <text style="font-weight: 700; font-size: 5.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #b45309" x="1058.4" y="447.640438" transform="rotate(-0 1058.4 447.640438)">export snapshots  ( Parquet )</text>
+   </g>
+   <g id="patch_22">
+    <path d="M 801.36 172.8 
+Q 828 172.8 852.403932 172.8 
+" clip-path="url(#p4e18d3ed34)" style="fill: none; stroke: #6d28d9; stroke-width: 2; stroke-linecap: round"/>
+    <path d="M 847.603932 170.4 
+L 852.403932 172.8 
+L 847.603932 175.2 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #6d28d9; stroke: #6d28d9; stroke-width: 2; stroke-linecap: round"/>
+   </g>
+   <g id="patch_23">
+    <path d="M 801.36 316.8 
+Q 828 345.6 853.121616 372.758504 
+" clip-path="url(#p4e18d3ed34)" style="fill: none; stroke: #b45309; stroke-width: 2; stroke-linecap: round"/>
+    <path d="M 851.624053 367.605126 
+L 853.121616 372.758504 
+L 848.100376 370.864527 
+z
+" clip-path="url(#p4e18d3ed34)" style="fill: #b45309; stroke: #b45309; stroke-width: 2; stroke-linecap: round"/>
+   </g>
+   <g id="text_16">
+    <text style="font-weight: 700; font-size: 9.6px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1d4ed8" x="129.6" y="135.849" transform="rotate(-0 129.6 135.849)">raw</text>
+   </g>
+   <g id="text_17">
+    <text style="font-weight: 700; font-size: 6.4px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="129.6" y="163.021" transform="rotate(-0 129.6 163.021)">Landing</text>
+   </g>
+   <g id="text_18">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(43.2 191.759062)">source-shaped, one table per</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(43.2 199.389562)">source table</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(43.2 207.020062)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(43.2 214.650562)">full original payload kept</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(43.2 222.281062)">as JSONB</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(43.2 229.911562)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(43.2 237.542062)">run_id, contract_version,</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(43.2 245.339437)">source watermark on every row</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(43.2 252.969937)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(43.2 260.600437)">never overwritten, never</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(43.2 268.230937)">corrected</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(43.2 275.861437)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(43.2 283.491937)">retained for the contract term</text>
+   </g>
+   <g id="text_19">
+    <text style="font-weight: 700; font-size: 9.6px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1d4ed8" x="396" y="135.8115" transform="rotate(-0 396 135.8115)">staging</text>
+   </g>
+   <g id="text_20">
+    <text style="font-weight: 700; font-size: 6.4px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="396" y="163.021" transform="rotate(-0 396 163.021)">Cleansing and mapping</text>
+   </g>
+   <g id="text_21">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(302.4 191.759062)">one model per source,</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(302.4 199.389562)">no cross-source joins</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(302.4 207.020062)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(302.4 214.650562)">type normalisation,</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(302.4 222.281062)">de-duplication</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(302.4 229.911562)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(302.4 237.542062)">soft-delete and late-arrival</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(302.4 245.172562)">handling</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(302.4 252.803062)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(302.4 260.433562)">semantic mapping applied here</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(302.4 268.064062)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(302.4 275.694562)">fully rebuildable from raw</text>
+   </g>
+   <g id="text_22">
+    <text style="font-weight: 700; font-size: 9.6px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1d4ed8" x="676.8" y="135.849" transform="rotate(-0 676.8 135.849)">core</text>
+   </g>
+   <g id="text_23">
+    <text style="font-weight: 700; font-size: 6.4px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="676.8" y="163.021" transform="rotate(-0 676.8 163.021)">Single source of truth</text>
+   </g>
+   <g id="text_24">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(576 191.759062)">conformed facts and dimensions</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(576 199.389562)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(576 207.020062)">slowly changing dimensions,</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(576 214.650562)">Type 2  ( as it was then )</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(576 222.281062)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(576 229.911562)">globally unique keys,</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(576 237.542062)">dim_site on every fact</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(576 245.339437)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(576 252.969937)">day-close version and</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(576 260.600437)">correction flags</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(576 268.230937)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(576 275.861437)">retained 8 years, partitioned by day</text>
+   </g>
+   <g id="text_25">
+    <text style="font-weight: 700; font-size: 9.6px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6d28d9" x="1058.4" y="132.249" transform="rotate(-0 1058.4 132.249)">mart</text>
+   </g>
+   <g id="text_26">
+    <text style="font-weight: 700; font-size: 6.4px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="1058.4" y="155.821" transform="rotate(-0 1058.4 155.821)">Subject marts  ( BI )</text>
+   </g>
+   <g id="text_27">
+    <text style="font-weight: 700; font-size: 9.6px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #b45309" x="1058.4" y="333.849" transform="rotate(-0 1058.4 333.849)">ai</text>
+   </g>
+   <g id="text_28">
+    <text style="font-weight: 700; font-size: 6.4px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="1058.4" y="357.421" transform="rotate(-0 1058.4 357.421)">AI data layer</text>
+   </g>
+   <g id="text_29">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1d4ed8" x="640.8" y="602.710656" transform="rotate(-0 640.8 602.710656)">Two rules that hold the model together</text>
+   </g>
+   <g id="text_30">
+    <text style="font-size: 6.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #4b5563" x="43.2" y="635.886938" transform="rotate(-0 43.2 635.886938)">1.   core is the only source of truth.  mart and ai are both built from core.  Neither may run its own pipeline back to raw — that is how one organisation ends up with two different answers to "how many incidents last quarter".</text>
+   </g>
+   <g id="text_31">
+    <text style="font-size: 6.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #4b5563" x="43.2" y="679.086938" transform="rotate(-0 43.2 679.086938)">2.   raw is never overwritten and never corrected.  Every fix, every reinterpretation of a field, every change of business rule is made by rebuilding the layers above it.  This is what makes "understand it later" a workable strategy.</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p4e18d3ed34">
+   <rect x="0" y="0" width="1281.6" height="748.8"/>
+  </clipPath>
+ </defs>
+</svg>

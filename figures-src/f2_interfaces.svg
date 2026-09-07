@@ -1,0 +1,683 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="1238.4pt" height="921.6pt" viewBox="0 0 1238.4 921.6" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-09-06T14:27:44.520110</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 921.6 
+L 1238.4 921.6 
+L 1238.4 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 0 921.6 
+L 1238.4 921.6 
+L 1238.4 0 
+L 0 0 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 384.48 864 
+L 810.72 864 
+Q 820.8 864 820.8 853.92 
+L 820.8 197.28 
+Q 820.8 187.2 810.72 187.2 
+L 384.48 187.2 
+Q 374.4 187.2 374.4 197.28 
+L 374.4 853.92 
+Q 374.4 864 384.48 864 
+L 384.48 864 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #1d4ed8; stroke-width: 1.6; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="21.6" y="31.477969" transform="rotate(-0 21.6 31.477969)">Figure 3-2   External Interface Topology</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 9.62px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #4b5563" x="21.6" y="59.149697" transform="rotate(-0 21.6 59.149697)">Protocol, direction and cadence of every interface crossing the system boundary</text>
+   </g>
+   <g id="patch_4">
+    <path d="M 399.6 835.2 
+L 475.2 835.2 
+Q 482.4 835.2 482.4 828 
+L 482.4 252 
+Q 482.4 244.8 475.2 244.8 
+L 399.6 244.8 
+Q 392.4 244.8 392.4 252 
+L 392.4 828 
+Q 392.4 835.2 399.6 835.2 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #eef7f5; stroke: #0f766e; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 514.8 590.4 
+L 637.2 590.4 
+Q 644.4 590.4 644.4 583.2 
+L 644.4 252 
+Q 644.4 244.8 637.2 244.8 
+L 514.8 244.8 
+Q 507.6 244.8 507.6 252 
+L 507.6 583.2 
+Q 507.6 590.4 514.8 590.4 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #eef2fd; stroke: #1d4ed8; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 514.8 835.2 
+L 637.2 835.2 
+Q 644.4 835.2 644.4 828 
+L 644.4 684 
+Q 644.4 676.8 637.2 676.8 
+L 514.8 676.8 
+Q 507.6 676.8 507.6 684 
+L 507.6 828 
+Q 507.6 835.2 514.8 835.2 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #f3eefc; stroke: #6d28d9; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 676.8 835.2 
+L 795.6 835.2 
+Q 802.8 835.2 802.8 828 
+L 802.8 252 
+Q 802.8 244.8 795.6 244.8 
+L 676.8 244.8 
+Q 669.6 244.8 669.6 252 
+L 669.6 828 
+Q 669.6 835.2 676.8 835.2 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #fdf4e7; stroke: #b45309; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 28.8 302.4 
+L 331.2 302.4 
+Q 338.4 302.4 338.4 295.2 
+L 338.4 226.8 
+Q 338.4 219.6 331.2 219.6 
+L 28.8 219.6 
+Q 21.6 219.6 21.6 226.8 
+L 21.6 295.2 
+Q 21.6 302.4 28.8 302.4 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff; stroke-dasharray: 4.07,1.76; stroke-dashoffset: 0; stroke: #6b7280; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 28.8 414.72 
+L 331.2 414.72 
+Q 338.4 414.72 338.4 407.52 
+L 338.4 339.12 
+Q 338.4 331.92 331.2 331.92 
+L 28.8 331.92 
+Q 21.6 331.92 21.6 339.12 
+L 21.6 407.52 
+Q 21.6 414.72 28.8 414.72 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff; stroke-dasharray: 4.07,1.76; stroke-dashoffset: 0; stroke: #6b7280; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 28.8 527.04 
+L 331.2 527.04 
+Q 338.4 527.04 338.4 519.84 
+L 338.4 451.44 
+Q 338.4 444.24 331.2 444.24 
+L 28.8 444.24 
+Q 21.6 444.24 21.6 451.44 
+L 21.6 519.84 
+Q 21.6 527.04 28.8 527.04 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff; stroke-dasharray: 4.07,1.76; stroke-dashoffset: 0; stroke: #6b7280; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 28.8 639.36 
+L 331.2 639.36 
+Q 338.4 639.36 338.4 632.16 
+L 338.4 563.76 
+Q 338.4 556.56 331.2 556.56 
+L 28.8 556.56 
+Q 21.6 556.56 21.6 563.76 
+L 21.6 632.16 
+Q 21.6 639.36 28.8 639.36 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff; stroke-dasharray: 4.07,1.76; stroke-dashoffset: 0; stroke: #6b7280; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 28.8 751.68 
+L 331.2 751.68 
+Q 338.4 751.68 338.4 744.48 
+L 338.4 676.08 
+Q 338.4 668.88 331.2 668.88 
+L 28.8 668.88 
+Q 21.6 668.88 21.6 676.08 
+L 21.6 744.48 
+Q 21.6 751.68 28.8 751.68 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff; stroke-dasharray: 4.07,1.76; stroke-dashoffset: 0; stroke: #6b7280; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 28.8 864 
+L 331.2 864 
+Q 338.4 864 338.4 856.8 
+L 338.4 788.4 
+Q 338.4 781.2 331.2 781.2 
+L 28.8 781.2 
+Q 21.6 781.2 21.6 788.4 
+L 21.6 856.8 
+Q 21.6 864 28.8 864 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff; stroke-dasharray: 4.07,1.76; stroke-dashoffset: 0; stroke: #6b7280; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_14">
+    <path d="M 864 302.4 
+L 1209.6 302.4 
+Q 1216.8 302.4 1216.8 295.2 
+L 1216.8 226.8 
+Q 1216.8 219.6 1209.6 219.6 
+L 864 219.6 
+Q 856.8 219.6 856.8 226.8 
+L 856.8 295.2 
+Q 856.8 302.4 864 302.4 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff; stroke: #be123c; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_15">
+    <path d="M 864 396 
+L 1209.6 396 
+Q 1216.8 396 1216.8 388.8 
+L 1216.8 320.4 
+Q 1216.8 313.2 1209.6 313.2 
+L 864 313.2 
+Q 856.8 313.2 856.8 320.4 
+L 856.8 388.8 
+Q 856.8 396 864 396 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff; stroke: #be123c; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_16">
+    <path d="M 864 489.6 
+L 1209.6 489.6 
+Q 1216.8 489.6 1216.8 482.4 
+L 1216.8 414 
+Q 1216.8 406.8 1209.6 406.8 
+L 864 406.8 
+Q 856.8 406.8 856.8 414 
+L 856.8 482.4 
+Q 856.8 489.6 864 489.6 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff; stroke: #be123c; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_17">
+    <path d="M 864 583.2 
+L 1209.6 583.2 
+Q 1216.8 583.2 1216.8 576 
+L 1216.8 507.6 
+Q 1216.8 500.4 1209.6 500.4 
+L 864 500.4 
+Q 856.8 500.4 856.8 507.6 
+L 856.8 576 
+Q 856.8 583.2 864 583.2 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff; stroke: #be123c; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_18">
+    <path d="M 864 676.8 
+L 1209.6 676.8 
+Q 1216.8 676.8 1216.8 669.6 
+L 1216.8 601.2 
+Q 1216.8 594 1209.6 594 
+L 864 594 
+Q 856.8 594 856.8 601.2 
+L 856.8 669.6 
+Q 856.8 676.8 864 676.8 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff; stroke: #be123c; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_19">
+    <path d="M 864 770.4 
+L 1209.6 770.4 
+Q 1216.8 770.4 1216.8 763.2 
+L 1216.8 694.8 
+Q 1216.8 687.6 1209.6 687.6 
+L 864 687.6 
+Q 856.8 687.6 856.8 694.8 
+L 856.8 763.2 
+Q 856.8 770.4 864 770.4 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff; stroke: #be123c; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_20">
+    <path d="M 864 864 
+L 1209.6 864 
+Q 1216.8 864 1216.8 856.8 
+L 1216.8 788.4 
+Q 1216.8 781.2 1209.6 781.2 
+L 864 781.2 
+Q 856.8 781.2 856.8 788.4 
+L 856.8 856.8 
+Q 856.8 864 864 864 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #ffffff; stroke: #be123c; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_21">
+    <path d="M 381.6 914.4 
+L 579.6 914.4 
+Q 586.8 914.4 586.8 907.2 
+L 586.8 881.28 
+Q 586.8 874.08 579.6 874.08 
+L 381.6 874.08 
+Q 374.4 874.08 374.4 881.28 
+L 374.4 907.2 
+Q 374.4 914.4 381.6 914.4 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #f1f3f6; stroke: #334155; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_22">
+    <path d="M 615.6 914.4 
+L 813.6 914.4 
+Q 820.8 914.4 820.8 907.2 
+L 820.8 881.28 
+Q 820.8 874.08 813.6 874.08 
+L 615.6 874.08 
+Q 608.4 874.08 608.4 881.28 
+L 608.4 907.2 
+Q 608.4 914.4 615.6 914.4 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #f1f3f6; stroke: #334155; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_3">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="180" y="249.982656" transform="rotate(-0 180 249.982656)">Legacy Archive</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4b5563" x="180" y="282.444844" transform="rotate(-0 180 282.444844)">Hexagon . PostgreSQL . from 2016 . multi-version schema</text>
+   </g>
+   <g id="text_5">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="180" y="362.334687" transform="rotate(-0 180 362.334687)">DS CAD Presentation DB</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4b5563" x="180" y="394.764844" transform="rotate(-0 180 394.764844)">read-only account on base tables</text>
+   </g>
+   <g id="text_7">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="180" y="474.622656" transform="rotate(-0 180 474.622656)">ICP Telephony</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4b5563" x="180" y="507.084844" transform="rotate(-0 180 507.084844)">REST API only, no DB replication</text>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="180" y="586.974688" transform="rotate(-0 180 586.974688)">External Kafka</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4b5563" x="180" y="619.404844" transform="rotate(-0 180 619.404844)">reserved, not enabled at go-live</text>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="180" y="699.294688" transform="rotate(-0 180 699.294688)">File Drop</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4b5563" x="180" y="731.724844" transform="rotate(-0 180 731.724844)">manual and fallback feeds</text>
+   </g>
+   <g id="text_13">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="180" y="811.582656" transform="rotate(-0 180 811.582656)">AI Package  —  inference write-back</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4b5563" x="180" y="844.044844" transform="rotate(-0 180 844.044844)">model id, version, run time, confidence</text>
+   </g>
+   <g id="text_15">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="1036.8" y="250.014687" transform="rotate(-0 1036.8 250.014687)">BI Portal &amp; Dashboards</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4b5563" x="1036.8" y="282.444844" transform="rotate(-0 1036.8 282.444844)">custom shell, Superset behind it</text>
+   </g>
+   <g id="text_17">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="1036.8" y="343.582656" transform="rotate(-0 1036.8 343.582656)">Wall Display</text>
+   </g>
+   <g id="text_18">
+    <text style="font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4b5563" x="1036.8" y="376.044844" transform="rotate(-0 1036.8 376.044844)">unattended, self-recovering</text>
+   </g>
+   <g id="text_19">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="1036.8" y="437.214688" transform="rotate(-0 1036.8 437.214688)">Mobile App</text>
+   </g>
+   <g id="text_20">
+    <text style="font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4b5563" x="1036.8" y="469.644844" transform="rotate(-0 1036.8 469.644844)">aggregate-only management view, pull on open</text>
+   </g>
+   <g id="text_21">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="1036.8" y="530.782656" transform="rotate(-0 1036.8 530.782656)">Report &amp; Alert Delivery</text>
+   </g>
+   <g id="text_22">
+    <text style="font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4b5563" x="1036.8" y="563.244844" transform="rotate(-0 1036.8 563.244844)">scheduled reports, AR and EN as separate documents</text>
+   </g>
+   <g id="text_23">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="1036.8" y="624.414688" transform="rotate(-0 1036.8 624.414688)">ESB &amp; External Applications</text>
+   </g>
+   <g id="text_24">
+    <text style="font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4b5563" x="1036.8" y="656.844844" transform="rotate(-0 1036.8 656.844844)">incident and alert web services, database data services</text>
+   </g>
+   <g id="text_25">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="1036.8" y="717.982656" transform="rotate(-0 1036.8 717.982656)">AI Package  —  consumption</text>
+   </g>
+   <g id="text_26">
+    <text style="font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4b5563" x="1036.8" y="750.444844" transform="rotate(-0 1036.8 750.444844)">wide-table supply, semantic catalogue, narrative generation</text>
+   </g>
+   <g id="text_27">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="1036.8" y="811.614688" transform="rotate(-0 1036.8 811.614688)">HudHud Map Service</text>
+   </g>
+   <g id="text_28">
+    <text style="font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4b5563" x="1036.8" y="844.044844" transform="rotate(-0 1036.8 844.044844)">embedded component and tiles, deployed on premises</text>
+   </g>
+   <g id="text_29">
+    <text style="font-weight: 700; font-size: 7.4px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="480.6" y="896.253031" transform="rotate(-0 480.6 896.253031)">MOI Directory  (AD / LDAP)</text>
+   </g>
+   <g id="text_30">
+    <text style="font-weight: 700; font-size: 7.4px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="714.6" y="896.281938" transform="rotate(-0 714.6 896.281938)">NTP  (shared with CAD / ICP)</text>
+   </g>
+   <g id="patch_23">
+    <path d="M 483.84 475.2 
+Q 495 475.2 503.923932 475.2 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #1d4ed8; stroke-width: 2; stroke-linecap: round"/>
+    <path d="M 499.123932 472.8 
+L 503.923932 475.2 
+L 499.123932 477.6 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #1d4ed8; stroke: #1d4ed8; stroke-width: 2; stroke-linecap: round"/>
+   </g>
+   <g id="patch_24">
+    <path d="M 576 593.852461 
+Q 576 633.6 576 673.347539 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #6d28d9; stroke-width: 1.8; stroke-linecap: round"/>
+    <path d="M 573.6 598.652461 
+L 576 593.852461 
+L 578.4 598.652461 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #6d28d9; stroke: #6d28d9; stroke-width: 1.8; stroke-linecap: round"/>
+    <path d="M 578.4 668.547539 
+L 576 673.347539 
+L 573.6 668.547539 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #6d28d9; stroke: #6d28d9; stroke-width: 1.8; stroke-linecap: round"/>
+   </g>
+   <g id="patch_25">
+    <path d="M 645.84 475.2 
+Q 657 475.2 665.923932 475.2 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #b45309; stroke-width: 2; stroke-linecap: round"/>
+    <path d="M 661.123932 472.8 
+L 665.923932 475.2 
+L 661.123932 477.6 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #b45309; stroke: #b45309; stroke-width: 2; stroke-linecap: round"/>
+   </g>
+   <g id="patch_26">
+    <path d="M 340.56 261.36 
+Q 365.4 261.36 388.339342 261.36 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #6b7280; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 383.539342 258.96 
+L 388.339342 261.36 
+L 383.539342 263.76 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #6b7280; stroke: #6b7280; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_27">
+    <path d="M 340.56 373.68 
+Q 365.4 373.68 388.339342 373.68 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #6b7280; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 383.539342 371.28 
+L 388.339342 373.68 
+L 383.539342 376.08 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #6b7280; stroke: #6b7280; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_28">
+    <path d="M 340.56 486 
+Q 365.4 486 388.339342 486 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #6b7280; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 383.539342 483.6 
+L 388.339342 486 
+L 383.539342 488.4 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #6b7280; stroke: #6b7280; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_29">
+    <path d="M 340.56 598.32 
+Q 365.4 598.32 388.339342 598.32 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #6b7280; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 383.539342 595.92 
+L 388.339342 598.32 
+L 383.539342 600.72 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #6b7280; stroke: #6b7280; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_30">
+    <path d="M 340.56 710.64 
+Q 365.4 710.64 388.339342 710.64 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #6b7280; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 383.539342 708.24 
+L 388.339342 710.64 
+L 383.539342 713.04 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #6b7280; stroke: #6b7280; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_31">
+    <path d="M 340.56 822.96 
+Q 365.4 822.96 388.339342 822.96 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #6b7280; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 383.539342 820.56 
+L 388.339342 822.96 
+L 383.539342 825.36 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #6b7280; stroke: #6b7280; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_32">
+    <path d="M 804.96 261.36 
+Q 829.8 261.36 852.739342 261.36 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 847.939342 258.96 
+L 852.739342 261.36 
+L 847.939342 263.76 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #be123c; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_33">
+    <path d="M 804.96 354.96 
+Q 829.8 354.96 852.739342 354.96 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 847.939342 352.56 
+L 852.739342 354.96 
+L 847.939342 357.36 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #be123c; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_34">
+    <path d="M 804.96 448.56 
+Q 829.8 448.56 852.739342 448.56 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 847.939342 446.16 
+L 852.739342 448.56 
+L 847.939342 450.96 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #be123c; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_35">
+    <path d="M 804.96 542.16 
+Q 829.8 542.16 852.739342 542.16 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 847.939342 539.76 
+L 852.739342 542.16 
+L 847.939342 544.56 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #be123c; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_36">
+    <path d="M 804.96 635.76 
+Q 829.8 635.76 852.739342 635.76 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 847.939342 633.36 
+L 852.739342 635.76 
+L 847.939342 638.16 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #be123c; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_37">
+    <path d="M 804.96 729.36 
+Q 829.8 729.36 852.739342 729.36 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 847.939342 726.96 
+L 852.739342 729.36 
+L 847.939342 731.76 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #be123c; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_38">
+    <path d="M 804.96 822.96 
+Q 829.8 822.96 852.739342 822.96 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+    <path d="M 847.939342 820.56 
+L 852.739342 822.96 
+L 847.939342 825.36 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #be123c; stroke: #be123c; stroke-width: 1.7; stroke-linecap: round"/>
+   </g>
+   <g id="patch_39">
+    <path d="M 480.24 864.72 
+Q 480.24 868.68 480.24 870.851146 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #334155; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 482.64 866.051146 
+L 480.24 870.851146 
+L 477.84 866.051146 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #334155; stroke: #334155; stroke-width: 1.6; stroke-linecap: round"/>
+   </g>
+   <g id="patch_40">
+    <path d="M 714.24 864.72 
+Q 714.24 868.68 714.24 870.851146 
+" clip-path="url(#pe0ac3fad9d)" style="fill: none; stroke: #334155; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 716.64 866.051146 
+L 714.24 870.851146 
+L 711.84 866.051146 
+z
+" clip-path="url(#pe0ac3fad9d)" style="fill: #334155; stroke: #334155; stroke-width: 1.6; stroke-linecap: round"/>
+   </g>
+   <g id="text_31">
+    <text style="font-weight: 700; font-size: 7.6px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #6b7280" x="21.6" y="88.497125" transform="rotate(-0 21.6 88.497125)">Inbound   IF-01 . . IF-05 . IF-07</text>
+   </g>
+   <g id="text_32">
+    <text style="font-weight: 700; font-size: 7.6px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: #be123c" x="1216.8" y="88.497125" transform="rotate(-0 1216.8 88.497125)">Outbound   IF-30 . . IF-41</text>
+   </g>
+   <g id="text_33">
+    <text style="font-weight: 700; font-size: 7px; font-family: 'DejaVu Sans', sans-serif; fill: #1d4ed8" transform="translate(407.44125 119.82575)">Rule:  every external interface terminates in the Ingestion layer (inbound) or the Service layer (outbound).</text>
+    <text style="font-weight: 700; font-size: 7px; font-family: 'DejaVu Sans', sans-serif; fill: #1d4ed8" transform="translate(441.810703 128.782687)">No external party connects to the database, and no internal component calls out directly.</text>
+   </g>
+   <g id="text_34">
+    <text style="font-weight: 700; font-size: 9.6px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #111827" x="597.6" y="171.8115" transform="rotate(-0 597.6 171.8115)">BI &amp; Data Warehouse Subsystem</text>
+   </g>
+   <g id="text_35">
+    <text style="font-weight: 700; font-size: 8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f766e" x="437.4" y="275.8075" transform="rotate(-0 437.4 275.8075)">INGESTION</text>
+   </g>
+   <g id="text_36">
+    <text style="font-size: 5.9px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(422.622344 479.366394)">connector</text>
+    <text style="font-size: 5.9px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(425.783453 486.869719)">runtime</text>
+    <text style="font-size: 5.9px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(437.4 494.373044)"/>
+    <text style="font-size: 5.9px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(425.14782 501.876369)">contract</text>
+    <text style="font-size: 5.9px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(426.094125 509.379694)">registry</text>
+    <text style="font-size: 5.9px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(437.4 516.883019)"/>
+    <text style="font-size: 5.9px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(418.428734 524.386344)">expectations</text>
+    <text style="font-size: 5.9px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(418.060906 531.889669)">&amp; quarantine</text>
+   </g>
+   <g id="text_37">
+    <text style="font-weight: 700; font-size: 8.4px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1d4ed8" x="576" y="275.917875" transform="rotate(-0 576 275.917875)">STORAGE</text>
+   </g>
+   <g id="text_38">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(547.715625 397.225125)">PostgreSQL cluster</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(554.404688 404.855625)">object storage</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(549.036094 412.486125)">backup repository</text>
+   </g>
+   <g id="text_39">
+    <text style="font-weight: 700; font-size: 8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6d28d9" x="576" y="707.8075" transform="rotate(-0 576 707.8075)">PROCESSING</text>
+   </g>
+   <g id="text_40">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(544.498594 761.040375)">batch . near-realtime</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(550.415625 768.670875)">realtime . quality</text>
+   </g>
+   <g id="text_41">
+    <text style="font-weight: 700; font-size: 8.4px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #b45309" x="736.2" y="275.917875" transform="rotate(-0 736.2 275.917875)">SERVICE</text>
+   </g>
+   <g id="text_42">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(708.563437 475.133625)">semantic &amp; metric</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(721.839844 482.764125)">query API</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(715.700625 490.394625)">record search</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(715.515469 498.025125)">realtime push</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(708.339375 505.655625)">alerting &amp; delivery</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(711.549375 513.286125)">report rendering</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(715.155469 520.916625)">media service</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(713.851875 528.547125)">AI data service</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(712.115625 536.177625)">identity &amp; authz</text>
+   </g>
+   <g id="text_43">
+    <text style="font-weight: 700; font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6b7280" x="180" y="290.292844" transform="rotate(-0 180 290.292844)">IF-01   libpq / TLS   one-time full load</text>
+   </g>
+   <g id="text_44">
+    <text style="font-weight: 700; font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6b7280" x="180" y="402.612844" transform="rotate(-0 180 402.612844)">IF-02   libpq / TLS   watermark incremental, 1 min</text>
+   </g>
+   <g id="text_45">
+    <text style="font-weight: 700; font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6b7280" x="180" y="514.910578" transform="rotate(-0 180 514.910578)">IF-03   HTTPS / REST-JSON   polling 2-10 s</text>
+   </g>
+   <g id="text_46">
+    <text style="font-weight: 700; font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6b7280" x="180" y="627.230578" transform="rotate(-0 180 627.230578)">IF-04   Kafka / SASL+TLS   consumer group</text>
+   </g>
+   <g id="text_47">
+    <text style="font-weight: 700; font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6b7280" x="180" y="739.572844" transform="rotate(-0 180 739.572844)">IF-05   SFTP   on arrival, checksum manifest</text>
+   </g>
+   <g id="text_48">
+    <text style="font-weight: 700; font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6b7280" x="180" y="851.892844" transform="rotate(-0 180 851.892844)">IF-07   REST-JSON or file drop   into raw, never into business facts</text>
+   </g>
+   <g id="text_49">
+    <text style="font-weight: 700; font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #be123c" x="1036.8" y="290.292844" transform="rotate(-0 1036.8 290.292844)">IF-30   HTTPS / REST-JSON   interactive</text>
+   </g>
+   <g id="text_50">
+    <text style="font-weight: 700; font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #be123c" x="1036.8" y="383.892844" transform="rotate(-0 1036.8 383.892844)">IF-31   HTTPS + WSS   push 2-10 s</text>
+   </g>
+   <g id="text_51">
+    <text style="font-weight: 700; font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #be123c" x="1036.8" y="477.470578" transform="rotate(-0 1036.8 477.470578)">IF-40   HTTPS via DMZ reverse proxy   MDM distributed</text>
+   </g>
+   <g id="text_52">
+    <text style="font-weight: 700; font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #be123c" x="1036.8" y="571.070578" transform="rotate(-0 1036.8 571.070578)">IF-34   e-mail gateway / SMS gateway / portal   contractor operated</text>
+   </g>
+   <g id="text_53">
+    <text style="font-weight: 700; font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #be123c" x="1036.8" y="664.670578" transform="rotate(-0 1036.8 664.670578)">IF-33   HTTPS / REST + ESB adapter   mandatory  ( 1.6.2.29 / .31.1 / .31.2 )</text>
+   </g>
+   <g id="text_54">
+    <text style="font-weight: 700; font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #be123c" x="1036.8" y="758.270578" transform="rotate(-0 1036.8 758.270578)">IF-37 / IF-38 / IF-39   HTTPS / REST-JSON   structured queries only, no SQL</text>
+   </g>
+   <g id="text_55">
+    <text style="font-weight: 700; font-size: 5.7px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #be123c" x="1036.8" y="851.870578" transform="rotate(-0 1036.8 851.870578)">IF-41   HTTPS on the internal network   we supply the aggregates</text>
+   </g>
+   <g id="text_56">
+    <text style="font-weight: 700; font-size: 5.9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: #334155" x="464.4" y="848.348031" transform="rotate(-0 464.4 848.348031)">IF-35  LDAPS</text>
+   </g>
+   <g id="text_57">
+    <text style="font-weight: 700; font-size: 5.9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #334155" x="730.08" y="848.348031" transform="rotate(-0 730.08 848.348031)">IF-36  NTP</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pe0ac3fad9d">
+   <rect x="0" y="0" width="1238.4" height="921.6"/>
+  </clipPath>
+ </defs>
+</svg>

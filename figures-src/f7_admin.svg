@@ -1,0 +1,405 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="1281.6pt" height="777.6pt" viewBox="0 0 1281.6 777.6" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-09-06T14:27:47.607920</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 777.6 
+L 1281.6 777.6 
+L 1281.6 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 0 777.6 
+L 1281.6 777.6 
+L 1281.6 0 
+L 0 0 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #ffffff"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="21.6" y="31.477969" transform="rotate(-0 21.6 31.477969)">Figure 9-1   Management Console Function Map</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 9.62px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #4b5563" x="21.6" y="59.149697" transform="rotate(-0 21.6 59.149697)">Eleven management screens in four domains; every screen is part of the delivered system, not a database tool</text>
+   </g>
+   <g id="patch_3">
+    <path d="M 28.8 288 
+L 309.6 288 
+Q 316.8 288 316.8 280.8 
+L 316.8 136.8 
+Q 316.8 129.6 309.6 129.6 
+L 28.8 129.6 
+Q 21.6 129.6 21.6 136.8 
+L 21.6 280.8 
+Q 21.6 288 28.8 288 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #ffffff; stroke: #0f766e; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 28.8 460.8 
+L 309.6 460.8 
+Q 316.8 460.8 316.8 453.6 
+L 316.8 309.6 
+Q 316.8 302.4 309.6 302.4 
+L 28.8 302.4 
+Q 21.6 302.4 21.6 309.6 
+L 21.6 453.6 
+Q 21.6 460.8 28.8 460.8 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #ffffff; stroke: #0f766e; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 28.8 633.6 
+L 309.6 633.6 
+Q 316.8 633.6 316.8 626.4 
+L 316.8 482.4 
+Q 316.8 475.2 309.6 475.2 
+L 28.8 475.2 
+Q 21.6 475.2 21.6 482.4 
+L 21.6 626.4 
+Q 21.6 633.6 28.8 633.6 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #ffffff; stroke: #0f766e; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 338.4 288 
+L 619.2 288 
+Q 626.4 288 626.4 280.8 
+L 626.4 136.8 
+Q 626.4 129.6 619.2 129.6 
+L 338.4 129.6 
+Q 331.2 129.6 331.2 136.8 
+L 331.2 280.8 
+Q 331.2 288 338.4 288 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #ffffff; stroke: #6d28d9; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 338.4 460.8 
+L 619.2 460.8 
+Q 626.4 460.8 626.4 453.6 
+L 626.4 309.6 
+Q 626.4 302.4 619.2 302.4 
+L 338.4 302.4 
+Q 331.2 302.4 331.2 309.6 
+L 331.2 453.6 
+Q 331.2 460.8 338.4 460.8 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #ffffff; stroke: #6d28d9; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 338.4 633.6 
+L 619.2 633.6 
+Q 626.4 633.6 626.4 626.4 
+L 626.4 482.4 
+Q 626.4 475.2 619.2 475.2 
+L 338.4 475.2 
+Q 331.2 475.2 331.2 482.4 
+L 331.2 626.4 
+Q 331.2 633.6 338.4 633.6 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #ffffff; stroke: #6d28d9; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 648 288 
+L 928.8 288 
+Q 936 288 936 280.8 
+L 936 136.8 
+Q 936 129.6 928.8 129.6 
+L 648 129.6 
+Q 640.8 129.6 640.8 136.8 
+L 640.8 280.8 
+Q 640.8 288 648 288 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #ffffff; stroke: #be123c; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 648 460.8 
+L 928.8 460.8 
+Q 936 460.8 936 453.6 
+L 936 309.6 
+Q 936 302.4 928.8 302.4 
+L 648 302.4 
+Q 640.8 302.4 640.8 309.6 
+L 640.8 453.6 
+Q 640.8 460.8 648 460.8 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #ffffff; stroke: #be123c; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 648 633.6 
+L 928.8 633.6 
+Q 936 633.6 936 626.4 
+L 936 482.4 
+Q 936 475.2 928.8 475.2 
+L 648 475.2 
+Q 640.8 475.2 640.8 482.4 
+L 640.8 626.4 
+Q 640.8 633.6 648 633.6 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #ffffff; stroke: #be123c; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 957.6 288 
+L 1238.4 288 
+Q 1245.6 288 1245.6 280.8 
+L 1245.6 136.8 
+Q 1245.6 129.6 1238.4 129.6 
+L 957.6 129.6 
+Q 950.4 129.6 950.4 136.8 
+L 950.4 280.8 
+Q 950.4 288 957.6 288 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #ffffff; stroke: #334155; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 957.6 460.8 
+L 1238.4 460.8 
+Q 1245.6 460.8 1245.6 453.6 
+L 1245.6 309.6 
+Q 1245.6 302.4 1238.4 302.4 
+L 957.6 302.4 
+Q 950.4 302.4 950.4 309.6 
+L 950.4 453.6 
+Q 950.4 460.8 957.6 460.8 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #ffffff; stroke: #334155; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_14">
+    <path d="M 957.6 633.6 
+L 1238.4 633.6 
+Q 1245.6 633.6 1245.6 626.4 
+L 1245.6 482.4 
+Q 1245.6 475.2 1238.4 475.2 
+L 957.6 475.2 
+Q 950.4 475.2 950.4 482.4 
+L 950.4 626.4 
+Q 950.4 633.6 957.6 633.6 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #ffffff; stroke: #334155; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_15">
+    <path d="M 28.8 756 
+L 1238.4 756 
+Q 1245.6 756 1245.6 748.8 
+L 1245.6 676.8 
+Q 1245.6 669.6 1238.4 669.6 
+L 28.8 669.6 
+Q 21.6 669.6 21.6 676.8 
+L 21.6 748.8 
+Q 21.6 756 28.8 756 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #f8fafc; stroke: #1d4ed8; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_16">
+    <path d="M 26.64 115.2 
+L 311.76 115.2 
+Q 316.8 115.2 316.8 110.16 
+L 316.8 77.04 
+Q 316.8 72 311.76 72 
+L 26.64 72 
+Q 21.6 72 21.6 77.04 
+L 21.6 110.16 
+Q 21.6 115.2 26.64 115.2 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #eef7f5; stroke: #0f766e; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_17">
+    <path d="M 336.24 115.2 
+L 621.36 115.2 
+Q 626.4 115.2 626.4 110.16 
+L 626.4 77.04 
+Q 626.4 72 621.36 72 
+L 336.24 72 
+Q 331.2 72 331.2 77.04 
+L 331.2 110.16 
+Q 331.2 115.2 336.24 115.2 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #f3eefc; stroke: #6d28d9; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_18">
+    <path d="M 645.84 115.2 
+L 930.96 115.2 
+Q 936 115.2 936 110.16 
+L 936 77.04 
+Q 936 72 930.96 72 
+L 645.84 72 
+Q 640.8 72 640.8 77.04 
+L 640.8 110.16 
+Q 640.8 115.2 645.84 115.2 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #fdeef1; stroke: #be123c; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_19">
+    <path d="M 955.44 115.2 
+L 1240.56 115.2 
+Q 1245.6 115.2 1245.6 110.16 
+L 1245.6 77.04 
+Q 1245.6 72 1240.56 72 
+L 955.44 72 
+Q 950.4 72 950.4 77.04 
+L 950.4 110.16 
+Q 950.4 115.2 955.44 115.2 
+z
+" clip-path="url(#p9a1c3d5f02)" style="fill: #f1f3f6; stroke: #334155; stroke-width: 1.1; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_3">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f766e" x="169.2" y="95.862687" transform="rotate(-0 169.2 95.862687)">DATA</text>
+   </g>
+   <g id="text_4">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #6d28d9" x="478.8" y="95.862687" transform="rotate(-0 478.8 95.862687)">ANALYTICS</text>
+   </g>
+   <g id="text_5">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #be123c" x="788.4" y="95.862687" transform="rotate(-0 788.4 95.862687)">SECURITY</text>
+   </g>
+   <g id="text_6">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #334155" x="1098" y="95.862687" transform="rotate(-0 1098 95.862687)">PLATFORM</text>
+   </g>
+   <g id="text_7">
+    <text style="font-weight: 700; font-size: 7.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="39.6" y="160.521844" transform="rotate(-0 39.6 160.521844)">M-01   Source Ingestion</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(39.6 188.159063)">watermark, last success, lag,</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(39.6 195.789562)">quarantined rows, contract version</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(39.6 203.420062)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(39.6 211.050563)">hot-adjustable: enable, interval,</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(39.6 218.681063)">batch size, rate limit  ( audited )</text>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 7.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="39.6" y="333.321844" transform="rotate(-0 39.6 333.321844)">M-02   Job Scheduling</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(39.6 360.959063)">run history, dependency view</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(39.6 368.589563)">failure re-run, backfill</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(39.6 376.220063)">SLA breach alerts</text>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 7.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="39.6" y="506.121844" transform="rotate(-0 39.6 506.121844)">M-03   Data Quality</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(39.6 533.759063)">rule results, quarantine review</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(39.6 541.389563)">release or discard a held batch</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(39.6 549.020062)">clarification queue for unknown</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(39.6 556.650562)">code values, ranked by impact</text>
+   </g>
+   <g id="text_13">
+    <text style="font-weight: 700; font-size: 7.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="349.2" y="160.521844" transform="rotate(-0 349.2 160.521844)">M-04   Metric Dictionary</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(349.2 188.159063)">definition, rule, grain, lineage</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(349.2 195.789562)">change history and version</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(349.2 203.420062)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(349.2 211.050563)">read-only, aimed at the business</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(349.2 218.681063)">reader rather than the engineer</text>
+   </g>
+   <g id="text_15">
+    <text style="font-weight: 700; font-size: 7.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="349.2" y="333.352312" transform="rotate(-0 349.2 333.352312)">M-05   Reports &amp; Dashboards</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(349.2 360.959063)">publish and withdraw, parameters</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(349.2 368.589563)">visibility by role</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(349.2 376.220063)">subscription and delivery</text>
+   </g>
+   <g id="text_17">
+    <text style="font-weight: 700; font-size: 7.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="349.2" y="506.152312" transform="rotate(-0 349.2 506.152312)">M-10   Reference Data</text>
+   </g>
+   <g id="text_18">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(349.2 533.759063)">code tables, shifts, duty level,</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(349.2 541.389563)">sectors, units</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(349.2 549.020062)">bilingual dimension names where</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(349.2 556.650562)">the source provides only one</text>
+   </g>
+   <g id="text_19">
+    <text style="font-weight: 700; font-size: 7.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="658.8" y="160.552312" transform="rotate(-0 658.8 160.552312)">M-06   Users &amp; Permissions</text>
+   </g>
+   <g id="text_20">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 188.159063)">four roles: call taker, dispatcher,</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 195.789562)">supervisor, administrator</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 203.420062)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 211.050563)">field-level visibility matrix</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 218.681063)">department row filter for</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 226.311563)">dispatchers and supervisors ( on )</text>
+   </g>
+   <g id="text_21">
+    <text style="font-weight: 700; font-size: 7.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="658.8" y="333.321844" transform="rotate(-0 658.8 333.321844)">M-07   Audit Query</text>
+   </g>
+   <g id="text_22">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 360.959063)">who queried or exported what,</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 368.589563)">and when</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 376.220063)">append-only, retained with the</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 383.850563)">business data</text>
+   </g>
+   <g id="text_23">
+    <text style="font-weight: 700; font-size: 7.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="658.8" y="506.121844" transform="rotate(-0 658.8 506.121844)">M-11   Classification &amp; Discovery</text>
+   </g>
+   <g id="text_24">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 533.759063)">periodic scan of the databases and</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 541.389563)">object storage for sensitive content</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 549.020062)">scan interval configurable</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 556.650562)">labels drive the masking rules</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(658.8 564.281062)">and the field visibility defaults</text>
+   </g>
+   <g id="text_25">
+    <text style="font-weight: 700; font-size: 7.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="968.4" y="160.521844" transform="rotate(-0 968.4 160.521844)">M-08   Runtime Monitoring</text>
+   </g>
+   <g id="text_26">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(968.4 188.159063)">availability, replication lag,</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(968.4 195.789562)">query latency distribution,</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(968.4 203.420062)">resource headroom</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(968.4 211.050563)"/>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(968.4 218.681063)">this is the SLA evidence store</text>
+   </g>
+   <g id="text_27">
+    <text style="font-weight: 700; font-size: 7.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="968.4" y="333.352312" transform="rotate(-0 968.4 333.352312)">M-09   Backup &amp; Restore</text>
+   </g>
+   <g id="text_28">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(968.4 360.959063)">backup status, recoverable point</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(968.4 368.589563)">in time, restore drill record</text>
+   </g>
+   <g id="text_29">
+    <text style="font-weight: 700; font-size: 7.8px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #111827" x="968.4" y="506.121844" transform="rotate(-0 968.4 506.121844)">Design note</text>
+   </g>
+   <g id="text_30">
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(968.4 533.759063)">Structural configuration ships</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(968.4 541.389563)">through Git and a release.</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(968.4 549.020062)">Runtime parameters can be changed</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(968.4 556.650562)">live, with an audit entry.  The</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(968.4 564.281062)">split exists because 03:00 is not</text>
+    <text style="font-size: 6px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(968.4 571.911562)">the time for a release.</text>
+   </g>
+   <g id="text_31">
+    <text style="font-weight: 700; font-size: 8.2px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1d4ed8" x="633.6" y="697.782688" transform="rotate(-0 633.6 697.782688)">What these screens are for</text>
+   </g>
+   <g id="text_32">
+    <text style="font-size: 6.8px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(384.290219 723.312425)">An operator must be able to answer three questions without opening a database client:  is the data current, is it trustworthy, and who has seen it.</text>
+    <text style="font-size: 6.8px; font-family: 'DejaVu Sans', sans-serif; fill: #4b5563" transform="translate(407.135562 731.960325)">M-01 and M-02 answer the first, M-03 and M-04 the second, M-06 and M-07 the third.  The rest keep the platform alive and provable.</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p9a1c3d5f02">
+   <rect x="0" y="0" width="1281.6" height="777.6"/>
+  </clipPath>
+ </defs>
+</svg>
