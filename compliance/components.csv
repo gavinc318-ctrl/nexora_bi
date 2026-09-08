@@ -1,0 +1,20 @@
+组件,用途,层,许可,OSI 认可,治理,首次公开发布,使用关系,传染性判定,健康度,版本基线,依据
+PostgreSQL,唯一的数据库,L2,PostgreSQL License (BSD 类),是,社区与 PostgreSQL 全球开发组,1996,独立服务,无,低风险,待冻结,DD-01
+PostGIS,坐标转换 · 点在面内 · 网格聚合,L2,GPLv2,是,OSGeo 基金会,2001,数据库扩展 · 经 SQL 使用,不构成衍生作品,低风险,待冻结,DD-33
+Patroni,数据库角色变更的唯一权威,L2,MIT,是,Zalando（单一公司）,2015,独立进程,无,中风险 · 需持续关注,待冻结,DD-20
+etcd,仲裁,L2,Apache 2.0,是,CNCF,2013,独立服务,无,低风险,待冻结,DD-20
+HAProxy,读写分流,L2,GPLv2（含 LGPL 例外）,是,社区与 HAProxy Technologies,2001,独立进程,不链接,低风险,待冻结,HLD 3.2.2
+pgBouncer,连接池,L2,ISC,是,社区,2007,独立进程,无,低风险,待冻结,HLD 3.2.2
+Apache Airflow,批量编排,L3,Apache 2.0,是,ASF,2015,独立服务,无,低风险,待冻结,DD-44
+dbt-core,模型构建,L3,Apache 2.0,是,dbt Labs（单一公司）,2016,命令行工具,无,中风险 · 需持续关注,待冻结,DD-05
+Apache Superset,后端查询引擎,L4,Apache 2.0,是,ASF,2015,独立服务 · 不直接暴露,无,低风险,待冻结,DD-13
+Keycloak,身份联邦,L4,Apache 2.0,是,CNCF,2014,独立服务,无,低风险,待冻结,HLD 10.1
+SeaweedFS,对象存储,L2,Apache 2.0,是,以单一维护者为主,2011,独立服务 · S3 API,无,中风险 · 复核重点,待冻结,DD-47
+WeasyPrint,PDF 渲染,L4,BSD 3-Clause,是,Kozea 与社区,2011,Python 库 · 直接 import,宽松许可可 import,中风险 · 需持续关注,待冻结,DD-16
+python-docx,Word 渲染,L4,MIT,是,社区,2013,Python 库 · 直接 import,宽松许可可 import,低风险,待冻结,DD-16
+Prometheus,监控采集与告警评估,L6,Apache 2.0,是,CNCF,2012,独立服务,无,低风险,待冻结,DD-43
+Ansible (ansible-core),部署自动化,L6,GPLv3,是,Red Hat,2012,命令行工具,不链接,低风险,待冻结,DD-11
+Podman,容器运行时,L6,Apache 2.0,是,Red Hat,2018,独立进程,无,低风险,待冻结,DD-11
+React,前端与移动薄壳,L5,MIT,是,Meta 与社区,2013,前端库 · 直接引用,宽松许可可引用,低风险,待冻结,DD-14 · DD-30
+TypeScript,前端语言与工具链,L5,Apache 2.0,是,Microsoft,2012,编译工具,无,低风险,待冻结,DD-14
+MCP SDK,可选增补层,L4,MIT,是,社区,2024,Python 库 · 直接 import,宽松许可可 import,不足五年 · 仅作可选项,待冻结,DD-29
