@@ -1,0 +1,964 @@
+# =====================================================================
+# OSS911 BI/DW  指标定义  metrics.yaml
+#
+# 本文件是指标口径的唯一权威（LD-03 第 5 章）。库内的 meta.metric_registry
+# 是部署时同步的只读副本；M-04 指标字典界面只读。
+#
+# 三条规则，违反其一不得合并：
+#   1. grain 必填。含糊的「平均到场时长」不允许存在——按出警单、按派警单、
+#      按接警单是三个不同的定义，各占一个编码。
+#   2. aggregation 必填。指标是可上报的数，不是事实表上的度量列。
+#   3. 口径变更（分母、过滤、时间边界、粒度）必须递增 version。历史报表不自动
+#      重算：旧版本的数保持原样，新版本自生效日起用。
+#
+# entity_date 决定归日：
+#   date_key        发生类——当日派单量、当日出动量，封账即完整
+#   closed_date_key 结案类——当日结案数、处置时长，按 CAD 上手动关闭的日期归属
+# =====================================================================
+version: 1
+generated_from: HD-05 指标注册表（初稿），按 LD-03 修正粒度与聚合
+metrics:
+  - code: M-C01
+    domain: 接警话务
+    name_zh: "呼入量"
+    grain: call   # 通话
+    aggregation: count
+    measure: "1"
+    entity_date: date_key
+    definition: "进入话务平台的呼叫数"
+    dimensions: [dim_date, dim_site, dim_agent, dim_shift]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.20"
+    notes: "需确认是否含未进入排队的呼叫"
+  - code: M-C02
+    domain: 接警话务
+    name_zh: "应答量"
+    grain: call   # 通话
+    aggregation: count
+    measure: "1"
+    entity_date: date_key
+    definition: "坐席应答的呼叫数"
+    dimensions: [dim_date, dim_site, dim_agent, dim_shift]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.20"
+    notes: ""
+  - code: M-C03
+    domain: 接警话务
+    name_zh: "放弃量"
+    grain: call   # 通话
+    aggregation: count
+    measure: "1"
+    entity_date: date_key
+    definition: "主叫在应答前挂断的呼叫数"
+    dimensions: [dim_date, dim_site, dim_agent, dim_shift]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.20"
+    notes: "与未接的区别须在口径中写明"
+  - code: M-C04
+    domain: 接警话务
+    name_zh: "应答率"
+    grain: call   # 通话
+    aggregation: ratio
+    measure: "应答量 / 呼入量"
+    entity_date: date_key
+    definition: "应答量除以呼入量"
+    dimensions: [dim_date, dim_site, dim_agent, dim_shift]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.20"
+    notes: ""
+  - code: M-C05
+    domain: 接警话务
+    name_zh: "X 秒应答率"
+    grain: call   # 通话
+    aggregation: ratio
+    measure: "等待不超过 X 秒即被应答的比例"
+    entity_date: date_key
+    definition: "等待不超过 X 秒即被应答的比例"
+    dimensions: [dim_date, dim_site, dim_agent, dim_shift]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.20"
+    notes: "X 的取值待 MOI 确认"
+  - code: M-C06
+    domain: 接警话务
+    name_zh: "平均等待时长"
+    grain: call   # 通话
+    aggregation: avg
+    measure: "answered_at - offered_at"
+    entity_date: date_key
+    definition: "呼入到应答的平均时长"
+    dimensions: [dim_date, dim_site, dim_agent, dim_shift]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.20"
+    notes: ""
+  - code: M-C07
+    domain: 接警话务
+    name_zh: "平均通话时长"
+    grain: call   # 通话
+    aggregation: avg
+    measure: "ended_at - answered_at"
+    entity_date: date_key
+    definition: "应答到挂断的平均时长"
+    dimensions: [dim_date, dim_site, dim_agent, dim_shift]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.20"
+    notes: ""
+  - code: M-C08
+    domain: 接警话务
+    name_zh: "应答前振铃次数"
+    grain: call   # 通话
+    aggregation: count
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "应答前主叫听到的振铃次数"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: "1.6.2.20"
+    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+  - code: M-C09
+    domain: 接警话务
+    name_zh: "呈现给坐席的呼叫数"
+    grain: call   # 通话
+    aggregation: count
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "分配到某坐席的呼叫数"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: "1.6.2.20"
+    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+  - code: M-C10
+    domain: 接警话务
+    name_zh: "坐席实际处理数"
+    grain: call   # 通话
+    aggregation: count
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "该坐席实际应答的呼叫数"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: "1.6.2.20"
+    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+  - code: M-C11
+    domain: 接警话务
+    name_zh: "挂断方"
+    grain: call   # 通话
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "挂断由坐席方还是主叫方发起"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: "1.6.2.20"
+    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+  - code: M-C12
+    domain: 接警话务
+    name_zh: "未接呼叫数"
+    grain: call   # 通话
+    aggregation: count
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "呈现但未被任何坐席应答的呼叫数"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: "1.6.2.20"
+    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+  - code: M-C13
+    domain: 接警话务
+    name_zh: "转接呼叫数"
+    grain: call   # 通话
+    aggregation: count
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "被转接的呼叫数"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: "1.6.2.20"
+    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+  - code: M-C14
+    domain: 接警话务
+    name_zh: "骚扰呼叫数"
+    grain: call   # 通话
+    aggregation: count
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "被标记为骚扰或恶意的呼叫数"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: "1.6.2.20"
+    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+  - code: M-C15
+    domain: 接警话务
+    name_zh: "同一主叫失败次数"
+    grain: call   # 通话
+    aggregation: count
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "同一主叫在时间窗内的未接通次数"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_call]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: "1.6.2.20"
+    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+  - code: M-I01
+    domain: 警情处置
+    name_zh: "警情量"
+    grain: intake   # 接警单
+    aggregation: count
+    measure: "1"
+    entity_date: date_key
+    definition: "建立的接警单数量。多人报同一事件由 CAD 合并到同一张接警单，故本指标不重复计数"
+    dimensions: [dim_date, dim_site, dim_incident_type, dim_sector, dim_priority, dim_channel]
+    source_tables: [core.fact_intake]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.16.1"
+    notes: ""
+  - code: M-I02
+    domain: 警情处置
+    name_zh: "派单率"
+    grain: intake   # 接警单
+    aggregation: ratio
+    measure: "count(distinct 有派警单的接警单) / count(接警单)"
+    entity_date: date_key
+    definition: "形成派警单的接警单占全部接警单的比例"
+    dimensions: [dim_date, dim_site]
+    source_tables: [core.fact_intake, core.fact_dispatch_order]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: "现状约 30%"
+  - code: M-I03
+    domain: 警情处置
+    name_zh: "受理时长"
+    grain: intake   # 接警单
+    aggregation: avg
+    measure: "created_at - 首呼 answered_at"
+    entity_date: date_key
+    definition: "首呼应答到接警单建立的时长"
+    dimensions: [dim_date, dim_site]
+    source_tables: [core.fact_intake, core.fact_call, core.bridge_call_intake]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: "分母仅含有首呼关联的接警单。非电话渠道无首呼，须显式排除；关联率与未关联原因作为数据质量指标单列"
+  - code: M-I04
+    domain: 警情处置
+    name_zh: "派单时长"
+    grain: dispatch_order   # 派警单
+    aggregation: avg
+    measure: "issued_at - intake.created_at"
+    entity_date: date_key
+    definition: "接警单建立到派警单下发的时长。每个警种各一个数"
+    dimensions: [dim_date, dim_site, dim_agency_type, dim_incident_type]
+    source_tables: [core.fact_dispatch_order, core.fact_intake]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: "仅计 order_kind 为 initial 的派警单；增派与改派单独统计，否则改派会抹掉原派单的超时"
+  - code: M-I05
+    domain: 警情处置
+    name_zh: "到场时长（按出警单）"
+    grain: turnout   # 出警单
+    aggregation: avg
+    measure: "arrived_at - dispatch.issued_at"
+    entity_date: date_key
+    definition: "单张出警单从派警单下发到该警员到场的时长。资源效率口径，不是响应口径"
+    dimensions: [dim_date, dim_site, dim_agency_type, dim_unit, dim_officer]
+    source_tables: [core.fact_turnout, core.fact_dispatch_order]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.16.4"
+    notes: ""
+  - code: M-I20
+    domain: 警情处置
+    name_zh: "警种到场时长（按派警单）"
+    grain: dispatch_order   # 派警单
+    aggregation: min
+    measure: "min(turnout.arrived_at) - issued_at"
+    entity_date: date_key
+    definition: "该派警单下首名警员到场的时长。回答「这个警种多久到的」，取最早到场而非平均"
+    dimensions: [dim_date, dim_site, dim_agency_type, dim_sector]
+    source_tables: [core.fact_turnout, core.fact_dispatch_order]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.16.4"
+    notes: "后到的警员属增援。用均值会把增援时间算进响应时长，使数字失去业务含义"
+  - code: M-I21
+    domain: 警情处置
+    name_zh: "首个到场时长（按接警单）"
+    grain: intake   # 接警单
+    aggregation: min
+    measure: "min(全部出警单 arrived_at) - intake.created_at"
+    entity_date: date_key
+    definition: "全案最早到场时长，跨全部警种。回答「多久有人到现场」"
+    dimensions: [dim_date, dim_site, dim_incident_type, dim_sector]
+    source_tables: [core.fact_turnout, core.fact_intake]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.16.4"
+    notes: "与 M-I05、M-I20 是三个不同的定义而非三种平均，各占一个编码"
+  - code: M-I06
+    domain: 警情处置
+    name_zh: "处置时长均值（按出警单）"
+    grain: turnout   # 出警单
+    aggregation: avg
+    measure: "ended_at - arrived_at"
+    entity_date: closed_date_key
+    definition: "出警单从到场到本单结束的时长。CAD 上手动关闭，含操作员延迟"
+    dimensions: [dim_date, dim_site, dim_agency_type, dim_unit, dim_disposition]
+    source_tables: [core.fact_turnout]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.16.3"
+    notes: "不作截断以保真。对外主口径见 M-I22 中位数——均值受手动关闭的长尾污染最重"
+  - code: M-I22
+    domain: 警情处置
+    name_zh: "处置时长中位数（按出警单）"
+    grain: turnout   # 出警单
+    aggregation: median
+    measure: "ended_at - arrived_at"
+    entity_date: closed_date_key
+    definition: "处置时长的中位数，对外发布的主口径"
+    dimensions: [dim_date, dim_site, dim_agency_type, dim_unit]
+    source_tables: [core.fact_turnout]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.16.3"
+    notes: ""
+  - code: M-I23
+    domain: 警情处置
+    name_zh: "处置时长 P90（按出警单）"
+    grain: turnout   # 出警单
+    aggregation: p90
+    measure: "ended_at - arrived_at"
+    entity_date: closed_date_key
+    definition: "处置时长的 90 分位，与中位数并列呈现以看尾部"
+    dimensions: [dim_date, dim_site, dim_agency_type, dim_unit]
+    source_tables: [core.fact_turnout]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.16.3"
+    notes: ""
+  - code: M-I07
+    domain: 警情处置
+    name_zh: "响应时长（按出警单）"
+    grain: turnout   # 出警单
+    aggregation: avg
+    measure: "arrived_at - intake.created_at"
+    entity_date: date_key
+    definition: "受理到该警员到场的时长"
+    dimensions: [dim_date, dim_site, dim_agency_type, dim_incident_type]
+    source_tables: [core.fact_turnout, core.fact_intake]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.2.16.4"
+    notes: ""
+  - code: M-I08
+    domain: 警情处置
+    name_zh: "全过程时长（按接警单）"
+    grain: intake   # 接警单
+    aggregation: avg
+    measure: "closed_at - 首呼 offered_at"
+    entity_date: closed_date_key
+    definition: "首呼振铃到全案结案的时长"
+    dimensions: [dim_date, dim_site]
+    source_tables: [core.fact_intake, core.fact_call, core.bridge_call_intake]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: "无首呼的接警单排除出分母。closed_at 若由下层派生（is_closed_derived 为真）须在报表上标注"
+  - code: M-I10
+    domain: 警情处置
+    name_zh: "超时派单数"
+    grain: dispatch_order   # 派警单
+    aggregation: count
+    measure: "1"
+    entity_date: date_key
+    definition: "派单时长超过阈值的派警单数量"
+    dimensions: [dim_date, dim_site, dim_agency_type]
+    source_tables: [core.fact_dispatch_order]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: "阈值待 MOI 确认，可按警种分别设定"
+  - code: M-I11
+    domain: 警情处置
+    name_zh: "撤案数"
+    grain: intake   # 接警单
+    aggregation: count
+    measure: "1"
+    entity_date: date_key
+    definition: "撤销或作废的接警单数量"
+    dimensions: [dim_date, dim_site, dim_disposition]
+    source_tables: [core.fact_intake]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: "依赖软删除的表达方式 IR-03"
+  - code: M-I12
+    domain: 警情处置
+    name_zh: "媒体附件数"
+    grain: intake   # 接警单
+    aggregation: sum
+    measure: "media_count"
+    entity_date: date_key
+    definition: "接警单携带的照片与视频数量"
+    dimensions: [dim_date, dim_site]
+    source_tables: [core.fact_intake]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.5.7.4"
+    notes: "容量估算依赖 IR-27"
+  - code: M-I13
+    domain: 警情处置
+    name_zh: "热点强度"
+    grain: grid_window   # 网格时窗
+    aggregation: count
+    measure: "1"
+    entity_date: date_key
+    definition: "单位网格与时间窗内的警情密度，在 srid_analysis 投影下计算"
+    dimensions: [dim_date, dim_site, dim_incident_type]
+    source_tables: [core.fact_intake]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.5.7.5"
+    notes: "网格边长、时间窗与判定阈值为可配置参数，取值待业务确认"
+  - code: M-I24
+    domain: 警情处置
+    name_zh: "结案数"
+    grain: intake   # 接警单
+    aggregation: count
+    measure: "1"
+    entity_date: closed_date_key
+    definition: "按 CAD 上关闭日期统计的结案接警单数。跨日关闭的单据计入关闭当日"
+    dimensions: [dim_date, dim_site, dim_incident_type, dim_disposition]
+    source_tables: [core.fact_intake]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""
+  - code: M-I25
+    domain: 警情处置
+    name_zh: "当日发生警情的最终结案率"
+    grain: intake   # 接警单
+    aggregation: ratio
+    measure: "count(已结案) / count(全部)"
+    entity_date: date_key
+    definition: "按发生日看该批接警单截至查询时点的结案比例"
+    dimensions: [dim_date, dim_site]
+    source_tables: [core.fact_intake]
+    version: 1
+    depends_unverified: false
+    retrospective: true
+    published: true
+    rfp: ""
+    notes: "回溯类：数值随时间推移而变化，不适用封账不变性。报表上须写明「截至查询时点」。此类指标数量须严格控制"
+  - code: M-R01
+    domain: 资源与勤务
+    name_zh: "在岗坐席数"
+    grain: agent_day   # 坐席日
+    aggregation: count
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "某时刻在岗的坐席数"
+    dimensions: [dim_date, dim_site, dim_agent, dim_shift]
+    source_tables: [core.fact_agent_state]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""
+  - code: M-R02
+    domain: 资源与勤务
+    name_zh: "在岗时长"
+    grain: agent_day   # 坐席日
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "坐席累计在岗时长"
+    dimensions: [dim_date, dim_site, dim_agent, dim_shift]
+    source_tables: [core.fact_agent_state]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""
+  - code: M-R03
+    domain: 资源与勤务
+    name_zh: "状态时长"
+    grain: agent_day   # 坐席日
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "就绪、通话、事后处理、离席各状态时长"
+    dimensions: [dim_date, dim_site, dim_agent, dim_shift]
+    source_tables: [core.fact_agent_state]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: "精度受 IR-09 影响；measure_method 为 sampled 时须在报表上标注测量方式"
+  - code: M-R04
+    domain: 资源与勤务
+    name_zh: "占用率"
+    grain: agent_day   # 坐席日
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "通话与事后处理时长占在岗时长的比例"
+    dimensions: [dim_date, dim_site, dim_agent, dim_shift]
+    source_tables: [core.fact_agent_state]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""
+  - code: M-R05
+    domain: 资源与勤务
+    name_zh: "警员出动次数"
+    grain: turnout   # 出警单
+    aggregation: count
+    measure: "1"
+    entity_date: date_key
+    definition: "出警单数量。一张派警单出三名警员即三次出动——这一条最容易算错"
+    dimensions: [dim_date, dim_site, dim_agency_type, dim_unit, dim_officer]
+    source_tables: [core.fact_turnout]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""
+  - code: M-R06
+    domain: 资源与勤务
+    name_zh: "资源可用率"
+    grain: unit_day   # 单位日
+    aggregation: ratio
+    measure: "可用时长 / 总时长"
+    entity_date: date_key
+    definition: "资源处于可用状态的时间占比"
+    dimensions: [dim_date, dim_site, dim_unit]
+    source_tables: [core.fact_turnout]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: ""
+    notes: "依赖 IR-41：CAD 若仅有派单时的快照而无状态时间序列，本指标无法计算"
+  - code: M-R07
+    domain: 资源与勤务
+    name_zh: "勤务级别"
+    grain: day   # 日
+    aggregation: n/a
+    measure: "dim_date.duty_level_code"
+    entity_date: date_key
+    definition: "朝觐期与平时的勤务标识，用于分组而非直接比较"
+    dimensions: [dim_date, dim_site]
+    source_tables: [core.dim_date]
+    version: 2
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: ""
+    notes: "客户现未使用勤务级别，本指标随之不发布；接口自 CAD 保留为非必选项，启用时无需改模型（DD-54）"
+  - code: M-R08
+    domain: 资源与勤务
+    name_zh: "未关闭出警单数"
+    grain: turnout   # 出警单
+    aggregation: count
+    measure: "1"
+    entity_date: date_key
+    definition: "超过阈值仍未关闭的出警单数量"
+    dimensions: [dim_date, dim_site, dim_agency_type, dim_unit]
+    source_tables: [core.fact_turnout]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: "数据质量指标。与处置时长并列呈现，避免「时长看着不错」掩盖「两百张单子没关」"
+  - code: M-R09
+    domain: 资源与勤务
+    name_zh: "最长未关闭时长"
+    grain: turnout   # 出警单
+    aggregation: max
+    measure: "now() - assigned_at"
+    entity_date: date_key
+    definition: "当前未关闭出警单中受领至今的最长时长"
+    dimensions: [dim_date, dim_site, dim_agency_type]
+    source_tables: [core.fact_turnout]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: "数据质量指标"
+  - code: M-P01
+    domain: 绩效与质量
+    name_zh: "个人处理量"
+    grain: month   # 月
+    aggregation: count
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "坐席在期间内处理的呼叫与警情数"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_call, core.fact_intake]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""
+  - code: M-P02
+    domain: 绩效与质量
+    name_zh: "质检得分"
+    grain: month   # 月
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "抽检评分"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: []
+    version: 2
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: ""
+    notes: "不在本项目范围。复核与质检属 IRMS（RFP 2.3.9.7），本系统既不采集也不计算；条目保留仅为说明该口径的归属，永不发布（DD-55）"
+  - code: M-P03
+    domain: 绩效与质量
+    name_zh: "满意度得分"
+    grain: month   # 月
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "客户反馈的满意度评分"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_citizen_feedback]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: "1.6.2.17"
+    notes: "依赖 IR-28"
+  - code: M-P04
+    domain: 绩效与质量
+    name_zh: "反馈量"
+    grain: month   # 月
+    aggregation: count
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "收到的客户反馈数"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_citizen_feedback]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: "1.6.2.17"
+    notes: "依赖 IR-28"
+  - code: M-P05
+    domain: 绩效与质量
+    name_zh: "投诉量"
+    grain: month   # 月
+    aggregation: count
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "投诉性反馈数"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_citizen_feedback]
+    version: 1
+    depends_unverified: true
+    retrospective: false
+    published: false
+    rfp: "1.6.2.17"
+    notes: "依赖 IR-28"
+  - code: M-S01
+    domain: 系统运行
+    name_zh: "可用性"
+    grain: component_day   # 组件日
+    aggregation: ratio
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "按日计算的可用时间占比"
+    dimensions: [dim_date, dim_site]
+    source_tables: [audit.sla_daily]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: "1.6.6.1"
+    notes: "判定口径依赖 IR-21"
+  - code: M-S02
+    domain: 系统运行
+    name_zh: "MTTR"
+    grain: component_day   # 组件日
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "平均修复时长"
+    dimensions: [dim_date, dim_site]
+    source_tables: [meta.run_log]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: "工单数据来源待确认"
+  - code: M-S03
+    domain: 系统运行
+    name_zh: "MTBF"
+    grain: component_day   # 组件日
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "平均无故障间隔"
+    dimensions: [dim_date, dim_site]
+    source_tables: [meta.run_log]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""
+  - code: M-S04
+    domain: 系统运行
+    name_zh: "复制延迟"
+    grain: source_day   # 数据源日
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "主备与主副本之间的延迟"
+    dimensions: [dim_date, dim_site]
+    source_tables: [meta.run_log]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""
+  - code: M-S05
+    domain: 系统运行
+    name_zh: "查询时延分布"
+    grain: source_day   # 数据源日
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "P50 / P95 / P99 查询响应时间"
+    dimensions: [dim_date, dim_site]
+    source_tables: [meta.run_log]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: "按 REQ-PRF-04 的定义测量"
+  - code: M-S06
+    domain: 系统运行
+    name_zh: "水位延迟"
+    grain: source_day   # 数据源日
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "各数据源当前水位与实时的差距"
+    dimensions: [dim_date, dim_site]
+    source_tables: [meta.run_log]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""
+  - code: M-S07
+    domain: 系统运行
+    name_zh: "拉取成功率"
+    grain: source_day   # 数据源日
+    aggregation: ratio
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "接入任务的成功比例"
+    dimensions: [dim_date, dim_site]
+    source_tables: [meta.run_log]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""
+  - code: M-S08
+    domain: 系统运行
+    name_zh: "隔离批次数"
+    grain: source_day   # 数据源日
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "被期望校验隔离的批次数"
+    dimensions: [dim_date, dim_site]
+    source_tables: [meta.run_log]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""
+  - code: M-S09
+    domain: 系统运行
+    name_zh: "未映射值占比"
+    grain: source_day   # 数据源日
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "未映射代码值占记录数的比例"
+    dimensions: [dim_date, dim_site]
+    source_tables: [meta.run_log]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: "超 0.5% 告警"
+  - code: M-S10
+    domain: 系统运行
+    name_zh: "对账差异率"
+    grain: source_day   # 数据源日
+    aggregation: ratio
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "与源系统自身报表的差异比例"
+    dimensions: [dim_date, dim_site]
+    source_tables: [meta.run_log]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""
+  - code: M-S11
+    domain: 系统运行
+    name_zh: "容量利用率"
+    grain: component_day   # 组件日
+    aggregation: ratio
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "CPU、内存、存储与连接数的利用率"
+    dimensions: [dim_date, dim_site]
+    source_tables: [meta.run_log]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""
+  - code: M-S12
+    domain: 系统运行
+    name_zh: "查询与导出次数"
+    grain: source_day   # 数据源日
+    aggregation: avg
+    measure: "见 definition"
+    entity_date: date_key
+    definition: "按用户与对象的访问统计"
+    dimensions: [dim_date, dim_site]
+    source_tables: [meta.run_log]
+    version: 1
+    depends_unverified: false
+    retrospective: false
+    published: true
+    rfp: ""
+    notes: ""

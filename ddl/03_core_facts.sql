@@ -122,7 +122,8 @@ CREATE TABLE core.fact_dispatch_order (
                        CHECK (order_kind IN ('initial','additional','redispatch')),
     issued_at          timestamptz NOT NULL,             -- 下发
     acknowledged_at    timestamptz,
-    closed_at          timestamptz,
+    closed_at          timestamptz,                      -- CAD 上手动关闭，是点击时间而非实际结束时间
+    closed_date_key    integer,                          -- 结案类指标按此归日，与事件日 date_key 并存
     is_cancelled       boolean     NOT NULL DEFAULT false,
     cancelled_at       timestamptz,
     source_tz_offset   interval,
@@ -157,7 +158,8 @@ CREATE TABLE core.fact_turnout (
     assigned_at        timestamptz NOT NULL,             -- 受领
     enroute_at         timestamptz,                      -- 出动
     arrived_at         timestamptz,                      -- 到场
-    ended_at           timestamptz,                      -- 本出警单结束
+    ended_at           timestamptz,                      -- 本出警单结束（CAD 上手动关闭）
+    closed_date_key    integer,                          -- 结案类指标按此归日，与事件日 date_key 并存
     is_cancelled       boolean     NOT NULL DEFAULT false,
     arrival_location   geometry(Point, 4326),
     source_tz_offset   interval,
@@ -171,6 +173,8 @@ CREATE TABLE core.fact_turnout (
     PRIMARY KEY (turnout_sk, date_key)
 ) PARTITION BY RANGE (date_key);
 COMMENT ON TABLE core.fact_turnout IS '到场时长与处置时长的粒度在此，按警员各一个数。M-R05 单位出动次数按本表计：一张派警单出三名警员即三次出动';
+COMMENT ON COLUMN core.fact_turnout.ended_at IS '出警单在 CAD 上由人工关闭，故此值含操作员延迟。处置时长的主口径用中位数与 P90 而非均值——均值受长尾污染最重';
+COMMENT ON COLUMN core.fact_turnout.closed_date_key IS '发生类指标（出动量）按 date_key 归日，结案类指标（结案数、处置时长）按本列归日。跨日关闭的单据若按事件日归，业务想看的当日结案数就取不到';
 
 -- ---------------------------------------------------------------------
 -- 反馈单 —— 出警单 × 第 N 次反馈（警员的处置反馈）

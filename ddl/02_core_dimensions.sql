@@ -38,7 +38,7 @@ CREATE TABLE core.dim_date (
     hijri_day        smallint,
     hijri_label_ar   text,
     is_hajj_season   boolean     NOT NULL DEFAULT false, -- 由 M-10 人工维护
-    duty_level_code  text                                -- 当日勤务级别，M-10 人工维护
+    duty_level_code  text                                -- 当日勤务级别。客户现未使用，接口保留、非必选（DD-54）；启用时由 CAD 提供，不做人工维护
 );
 COMMENT ON COLUMN core.dim_date.is_hajj_season IS '朝觐期标识。人工维护，用于分组对比而非直接比较（M-R07）';
 
@@ -223,4 +223,4 @@ CREATE TABLE core.dim_shift (
     is_current       boolean     GENERATED ALWAYS AS (valid_to = 'infinity') STORED,
     UNIQUE (site_sk, src_natural_key, valid_from)
 );
-COMMENT ON TABLE core.dim_shift IS '班次。计划排班为旁路数据源（M-10 人工维护或文件导入），实际在岗由 ICP 登录/登出事件推算（R-22）';
+COMMENT ON TABLE core.dim_shift IS '班次为派生时间带，不维护排班计划（DD-53）。本表只登记时间窗口定义（start_time/end_time），由 M-10 人工维护、行数极少、走 SCD2 以免改窗口时改写历史。事件按自身时间戳归班；在岗时长由 fact_agent_state 的上岗区间与窗口求交得出';

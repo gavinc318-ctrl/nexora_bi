@@ -78,7 +78,7 @@ G3 = [31.1 + i*26.30 for i in range(3)]
 # ---------------- L0 数据源层 ----------------
 band(3, 15, 'L0', 'L0', 'Data\nSources', dashed=True)
 for x, (t, s, ifc) in zip(G5, [
-    ('Legacy Archive', 'Hexagon . PostgreSQL\none-time full load  (from 2016)', 'IF-01'),
+    ('Legacy Archive', 'Hexagon . SQL Server (archive replica)\none-time full load  (from 2016)', 'IF-01'),
     ('DS CAD\nPresentation DB', 'read-only account\nwatermark incremental', 'IF-02'),
     ('ICP Telephony', 'REST API only\nno DB replication', 'IF-03'),
     ('External Kafka', 'reserved . not enabled', 'IF-04'),
@@ -90,7 +90,7 @@ for x, (t, s, ifc) in zip(G5, [
 # ---------------- L1 接入层 ----------------
 band(18.5, 32.5, 'L1', 'L1', 'Ingestion')
 for x, (t, s) in zip(G5, [
-    ('Connector Runtime', 'pg_read . rest_api\nkafka_consume . file_drop'),
+    ('Connector Runtime', 'pg_read . mssql_read . rest_api\nkafka_consume . file_drop'),
     ('Source Contract\nRegistry', 'Git authoritative\nDB copy read-only'),
     ('Watermark &\nRun State', 'run_id . from/to watermark\nrow count . outcome'),
     ('Expectations &\nQuarantine', 'batch-level validation\nreject whole batch'),

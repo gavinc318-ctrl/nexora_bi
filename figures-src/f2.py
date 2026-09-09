@@ -43,8 +43,8 @@ arrow(ax, 89.7, 62, 92.8, 62, 'svc', 2.0)
 
 # ---- 入向 ----
 for y, t, s, i in [
-    (86.0, 'Legacy Archive', 'Hexagon . PostgreSQL . from 2016 . multi-version schema',
-     'IF-01   libpq / TLS   one-time full load'),
+    (86.0, 'Legacy Archive', 'Hexagon . SQL Server archive replica . from 2016 . multi-version schema',
+     'IF-01   TDS / TLS (FreeTDS)   one-time full load'),
     (70.4, 'DS CAD Presentation DB', 'read-only account on base tables',
      'IF-02   libpq / TLS   watermark incremental, 1 min'),
     (54.8, 'ICP Telephony', 'REST API only, no DB replication',

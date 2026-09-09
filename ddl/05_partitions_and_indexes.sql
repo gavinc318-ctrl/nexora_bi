@@ -97,3 +97,9 @@ CREATE INDEX ix_dim_officer_cur ON core.dim_officer    (site_sk, src_natural_key
 CREATE INDEX ix_dim_agent_cur  ON core.dim_agent       (site_sk, src_natural_key) WHERE is_current;
 CREATE INDEX ix_dim_type_cur   ON core.dim_incident_type (site_sk, src_natural_key) WHERE is_current;
 CREATE INDEX ix_dim_sector_cur ON core.dim_sector      (site_sk, src_natural_key) WHERE is_current;
+
+-- 结案类指标按 closed_date_key 归日，需各自的索引（LD-03）
+CREATE INDEX ix_disp_closed    ON core.fact_dispatch_order (closed_date_key) WHERE closed_date_key IS NOT NULL;
+CREATE INDEX ix_turnout_closed ON core.fact_turnout (closed_date_key) WHERE closed_date_key IS NOT NULL;
+-- 未关闭单据的数据质量监控：ended_at 为空且已超期的出警单
+CREATE INDEX ix_turnout_open   ON core.fact_turnout (assigned_at) WHERE ended_at IS NULL AND NOT is_cancelled;
