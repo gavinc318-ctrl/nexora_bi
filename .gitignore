@@ -1,0 +1,10 @@
+# macOS
+.DS_Store
+
+# Word / Excel 打开文件时产生的锁文件
+~$*.docx
+~$*.xlsx
+
+# Python
+__pycache__/
+*.pyc
