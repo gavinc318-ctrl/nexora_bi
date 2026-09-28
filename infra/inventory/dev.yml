@@ -1,0 +1,35 @@
+# 开发环境 inventory
+#
+# 版本号集中在这里，剧本里不写死。
+# 八年合同期内必然跨一次 OS 大版本与一次 PG 大版本，参数化是为了让那次跨版本廉价。
+all:
+  hosts:
+    dev01:
+      ansible_host: CHANGE_ME          # 目标机 IP
+      ansible_user: CHANGE_ME
+  vars:
+    # ---- 版本基线（与 compliance/components.csv 保持一致）----
+    os_release: noble                   # Ubuntu 24.04 LTS
+    postgres_version: 16
+    postgis_version: 3                  # 实装后按实际版本回填
+    python_version: "3.12"              # 24.04 默认
+
+    # ---- 本地化：与生产一致，不用开发机的默认值 ----
+    system_timezone: Asia/Riyadh
+    system_locale: en_US.UTF-8
+
+    # ---- LVM 卷（与 runbook/01-install-os.md 的分卷表一致）----
+    lvm_volumes:
+      - { name: root,       size: 80G,  mount: / }
+      - { name: containers, size: 80G,  mount: /var/lib/containers }
+      - { name: pgdata,     size: 350G, mount: /var/lib/postgresql }
+      - { name: pgwal,      size: 40G,  mount: /var/lib/postgresql/wal }
+      - { name: seaweedfs,  size: 60G,  mount: /var/lib/seaweedfs }
+      - { name: buildcache, size: 60G,  mount: /var/cache/build }
+      - { name: pgbackup,   size: 50G,  mount: /var/backups/pg }
+      # 余 80G 不分配，留给 LVM 在线扩容
+
+    # ---- 容器网络：单机上模拟生产的两个网段 ----
+    podman_networks:
+      - { name: internal, subnet: "10.89.10.0/24" }   # 库、服务层、编排、身份
+      - { name: dmz,      subnet: "10.89.20.0/24" }   # 仅反向代理
