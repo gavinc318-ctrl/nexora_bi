@@ -115,3 +115,17 @@
   **新增任何 command 任务时先问一句：它在 --check 下会怎样**
 
 判断口诀：**只读 → `check_mode: false`；会改状态 → 什么都不加，让它在 check 下跳过。**
+
+### 现象：剧本说网络已创建，`podman run --network internal` 却报 network not found
+
+- **原因** —— rootful 与 rootless 是两套独立的 podman。剧本带 `become: true`，
+  网络建在 root 那套（`/etc/containers/networks/`）；不加 sudo 敲 `podman`
+  走的是 rootless 那套（`~/.local/share/containers`），两者互不相通。
+  一个旁证：rootless 下 `podman run` 会**重新拉一遍镜像**——若是同一套存储，
+  镜像早就在了
+- **处置** —— `sudo podman network ls` 确认网络在 root 那套；
+  本环境所有 podman 命令一律加 `sudo`
+- **附带风险** —— rootless 的镜像存储在家目录，也就是**根卷**上，
+  正是「镜像存储必须落独立卷」那条断言要防的情况。误用 rootless
+  拉几个大镜像就能撑满根卷。清理：`podman rmi <镜像>`（不加 sudo，清的是 rootless 那套）
+- **预防** —— 已写入 runbook/03 开头。新人上手先读那一段

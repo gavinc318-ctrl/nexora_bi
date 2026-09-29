@@ -14,23 +14,53 @@ ansible-playbook playbooks/10-runtime.yml -e ansible_connection=local -K   # cha
 ansible-playbook playbooks/99-verify.yml  -e ansible_connection=local -K
 ```
 
+## 本环境的 podman 命令一律加 sudo
+
+**这是本步最容易踩的坑，先读完再往下。**
+
+剧本带 `become: true`，所有容器与网络都建在 **rootful** podman 下
+（`/etc/containers/networks/`、`/var/lib/containers/storage`）。
+
+直接敲 `podman`（不加 sudo）走的是 **rootless** podman——它有自己的存储
+（`~/.local/share/containers`）、自己的网络配置，与 root 那一套**完全不相通**。
+两者都叫 podman，`podman --version` 也都能跑，但看到的东西是两个世界。
+
+典型症状：剧本明明创建成功，`podman run --network internal` 却报
+`unable to find network with name or ID internal`。此时 `sudo podman network ls`
+能看到，`podman network ls` 看不到。
+
+还有一层代价：rootless 的镜像存储在家目录下，也就是**根卷**上——
+正是 10-runtime 那条「镜像存储必须在独立卷」断言要防的情况。
+误用 rootless 拉几个大镜像就能把根卷撑满。
+
+一句话规矩：**本环境的 podman 命令一律 `sudo podman`。**
+
+```bash
+sudo podman ps
+sudo podman network ls
+sudo podman images
+```
+
+为什么不改用 rootless：这是共用开发机，rootful 意味着全队看到同一套容器；
+rootless 则每人一套，`podman ps` 各看各的，排障时说不清在说哪个。见本文末尾的取舍说明。
+
 ## 手工验证网络确实隔离
 
 剧本的断言只确认网段「存在」。**存在不等于隔离有效**，跑一次真实验证：
 
 ```bash
 # 在两个网段各起一个临时容器
-podman run -d --name t-int --network internal  docker.io/library/alpine sleep 600
-podman run -d --name t-dmz --network dmz       docker.io/library/alpine sleep 600
+sudo podman run -d --name t-int --network internal docker.io/library/alpine sleep 600
+sudo podman run -d --name t-dmz --network dmz      docker.io/library/alpine sleep 600
 
 # 同网段内按名字能解析、能通（验证 aardvark-dns 在工作）
-podman run --rm --network internal docker.io/library/alpine ping -c1 -W2 t-int
+sudo podman run --rm --network internal docker.io/library/alpine ping -c1 -W2 t-int
 
 # 跨网段应当不通 —— 这条「失败」才是对的
-podman run --rm --network dmz docker.io/library/alpine ping -c1 -W2 t-int ; echo "退出码 $?（非 0 才正确）"
+sudo podman run --rm --network dmz docker.io/library/alpine ping -c1 -W2 t-int ; echo "退出码 $?（非 0 才正确）"
 
 # 清理
-podman rm -f t-int t-dmz
+sudo podman rm -f t-int t-dmz
 ```
 
 第三条命令**必须失败**。若它成功了，说明两个网段实际是连通的，
