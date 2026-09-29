@@ -1,0 +1,60 @@
+# OSS911 开发环境 PostgreSQL 参数
+# 由 infra/playbooks/20-database.yml 从 files/postgresql-oss911.conf.j2 生成，勿手改
+#
+# ★ 这是【开发环境】的取值。生产的数据库虚机是专用机，按 RS-01（禁用超分、
+#   内存 100% 预留、禁用交换）另有一套，不要把这份复制过去。
+#   本机同时跑 Superset、Airflow 与前端构建，内存必须留给它们。
+
+# ---- 内存 ----
+# 本机 64 GB，但不是专用库机。shared_buffers 取 8 GB 而非惯用的 25%（16 GB），
+# 把余量留给其它组件；effective_cache_size 是给规划器的提示而非实际占用。
+shared_buffers = 8GB
+effective_cache_size = 24GB
+maintenance_work_mem = 1GB
+work_mem = 32MB
+
+# ---- 连接 ----
+# 应用一律经 pgBouncer（21-connection.yml），故直连数不需要很大。
+max_connections = 100
+
+# ---- WAL ----
+# WAL 在独立卷上（见 00-base 的卷表）。分开是为了排障：
+# WAL 涨满与数据涨满是两种故障，合卷时症状都是「磁盘满」。
+wal_level = replica
+max_wal_size = 4GB
+min_wal_size = 1GB
+checkpoint_completion_target = 0.9
+
+# ---- 时区：与系统一致 ----
+# 日切、封账、按关闭日归日全部依赖它。开发环境用 UTC 会让一整类口径缺陷
+# 在开发阶段完全看不见（DD-53 · LD-03 第 4 章）。
+timezone = '{{ system_timezone }}'
+log_timezone = '{{ system_timezone }}'
+
+# ---- 日志：排障用，开发环境可以放宽 ----
+logging_collector = on
+log_directory = 'log'
+log_filename = 'postgresql-%Y-%m-%d.log'
+log_rotation_age = 1d
+log_line_prefix = '%m [%p] %q%u@%d '
+log_checkpoints = on
+log_connections = on
+log_disconnections = on
+log_lock_waits = on
+log_temp_files = 0
+# 开发环境记录所有超过 200ms 的语句，用于及早发现口径正确但写法低效的查询
+log_min_duration_statement = 200
+
+# ---- 超时：防止一条忘记结束的事务拖垮清理 ----
+# 分析副本上长事务的后果不是「那个查询慢」，而是主库清理被阻塞、WAL 累积、
+# 磁盘增长——一个人的疏忽通过复制链路反噬写入侧。硬超时是唯一可靠的防线。
+statement_timeout = 0
+idle_in_transaction_session_timeout = 300000
+
+# ---- 规划器：SSD ----
+random_page_cost = 1.1
+effective_io_concurrency = 200
+
+# ---- 自动清理：分区表多，调紧一点 ----
+autovacuum_max_workers = 4
+autovacuum_naptime = 30s

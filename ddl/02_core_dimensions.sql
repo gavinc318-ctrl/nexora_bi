@@ -3,6 +3,24 @@
 -- 缓变维一律 Type 2「按当时」记录（DD-12）：维度存生效与失效时间，
 -- 事实关联当时那一版。目的只有一个——去年打印的报表今年重跑数值不变。
 -- 双语名称：源系统仅提供单语时由 M-10 维护对照（REQ-RPT-09）
+--
+-- 排序规则策略（DD-63）
+--   集群默认 LC_COLLATE=C —— 字节序，与 OS 的 libc 解耦。glibc 大版本升级会改变
+--   排序规则，而绑在 glibc 上的文本索引会【静默】失效（索引按旧规则排、查询按新规则
+--   找，查不到本该查到的行且不报错）。八年合同期内必然发生一次 OS 大版本升级，
+--   故集群默认必须是 C。
+--
+--   语言相关的排序显式用 ICU，并声明在【列】上而非写在查询里：
+--     name_ar  COLLATE "ar-x-icu"    面向用户的阿拉伯语名称
+--     name_en  COLLATE "en-x-icu"    面向用户的英文名称
+--   声明在列上，ORDER BY name_ar 自动使用该规则——不依赖每条查询都记得写 COLLATE，
+--   而漏写 COLLATE 不会报错，只是排序不对，阿语母语者一眼看得出、我们看不出。
+--
+--   编码、代码值、自然键、英阿混排的自由文本（不参与自然语言排序的）一律保持 C。
+--
+--   ICU 版本变化由 PostgreSQL 的 collation version 管理：版本不符时会告警，
+--   按 infra/runbook 的检查脚本找出受影响的索引并 REINDEX。这比 glibc 的静默失效
+--   好在「它会告诉你」。
 -- =====================================================================
 
 -- 通用的 Type 2 列约定（每张 SCD 维度都有）：
@@ -16,8 +34,8 @@
 CREATE TABLE core.dim_site (
     site_sk          uuid        PRIMARY KEY,
     site_code        text        NOT NULL UNIQUE,        -- 'MKK' 麦加 · 'MDN' 麦地那（预留）
-    name_ar          text        NOT NULL,
-    name_en          text        NOT NULL,
+    name_ar          text COLLATE "ar-x-icu"        NOT NULL,
+    name_en          text COLLATE "en-x-icu"        NOT NULL,
     is_active        boolean     NOT NULL DEFAULT true,
     built_at         timestamptz NOT NULL DEFAULT now()
 );
@@ -47,8 +65,8 @@ CREATE TABLE core.dim_agency_type (                      -- 警种
     site_sk          uuid        NOT NULL REFERENCES core.dim_site,
     src_natural_key  text        NOT NULL,               -- CAD 警种编码
     code             text        NOT NULL,
-    name_ar          text        NOT NULL,
-    name_en          text        NOT NULL,
+    name_ar          text COLLATE "ar-x-icu"        NOT NULL,
+    name_en          text COLLATE "en-x-icu"        NOT NULL,
     valid_from       timestamptz NOT NULL,
     valid_to         timestamptz NOT NULL DEFAULT 'infinity',
     is_current       boolean     GENERATED ALWAYS AS (valid_to = 'infinity') STORED,
@@ -66,8 +84,8 @@ CREATE TABLE core.dim_unit (                             -- 处置单位，隶�
     agency_type_sk   uuid        NOT NULL REFERENCES core.dim_agency_type,
     src_natural_key  text        NOT NULL,
     code             text        NOT NULL,
-    name_ar          text        NOT NULL,
-    name_en          text        NOT NULL,
+    name_ar          text COLLATE "ar-x-icu"        NOT NULL,
+    name_en          text COLLATE "en-x-icu"        NOT NULL,
     sector_sk        uuid,                               -- 驻地辖区，见 dim_sector
     valid_from       timestamptz NOT NULL,
     valid_to         timestamptz NOT NULL DEFAULT 'infinity',
@@ -85,8 +103,8 @@ CREATE TABLE core.dim_officer (                          -- 警员（出警）
     unit_sk          uuid        NOT NULL REFERENCES core.dim_unit,
     agency_type_sk   uuid        NOT NULL REFERENCES core.dim_agency_type,
     src_natural_key  text        NOT NULL,               -- 警号
-    name_ar          text,
-    name_en          text,
+    name_ar          text COLLATE "ar-x-icu",
+    name_en          text COLLATE "en-x-icu",
     rank_code        text,
     valid_from       timestamptz NOT NULL,
     valid_to         timestamptz NOT NULL DEFAULT 'infinity',
@@ -104,8 +122,8 @@ CREATE TABLE core.dim_agent (                            -- 坐席（接警员 /
     site_sk          uuid        NOT NULL REFERENCES core.dim_site,
     src_natural_key  text        NOT NULL,               -- 工号
     login_id         text,
-    name_ar          text,
-    name_en          text,
+    name_ar          text COLLATE "ar-x-icu",
+    name_en          text COLLATE "en-x-icu",
     role_code        text        NOT NULL,               -- call_taker · dispatcher · supervisor
     agency_type_sk   uuid        REFERENCES core.dim_agency_type,  -- 调度员与主管的派驻警种；接警员为空
     team_code        text,                               -- 班组
@@ -125,8 +143,8 @@ CREATE TABLE core.dim_incident_type (
     site_sk          uuid        NOT NULL REFERENCES core.dim_site,
     src_natural_key  text        NOT NULL,
     code             text        NOT NULL,
-    name_ar          text        NOT NULL,
-    name_en          text        NOT NULL,
+    name_ar          text COLLATE "ar-x-icu"        NOT NULL,
+    name_en          text COLLATE "en-x-icu"        NOT NULL,
     parent_sk        uuid,                               -- 分类层级
     level_no         smallint    NOT NULL DEFAULT 1,
     mapping_state    text        NOT NULL DEFAULT 'mapped_unverified'
@@ -147,8 +165,8 @@ CREATE TABLE core.dim_sector (                           -- 辖区
     site_sk          uuid        NOT NULL REFERENCES core.dim_site,
     src_natural_key  text        NOT NULL,
     code             text        NOT NULL,
-    name_ar          text        NOT NULL,
-    name_en          text        NOT NULL,
+    name_ar          text COLLATE "ar-x-icu"        NOT NULL,
+    name_en          text COLLATE "en-x-icu"        NOT NULL,
     parent_sk        uuid,
     boundary         geometry(MultiPolygon, 4326),       -- 仅用于网格聚合与呈现，辖区归属以 CAD 字段为准（DD-32）
     valid_from       timestamptz NOT NULL,
@@ -168,8 +186,8 @@ CREATE TABLE core.dim_channel (                          -- 警情来源渠道
     site_sk          uuid        NOT NULL REFERENCES core.dim_site,
     src_natural_key  text        NOT NULL,
     code             text        NOT NULL,               -- phone · self_initiated · patrol · vms · mds · sms
-    name_ar          text        NOT NULL,
-    name_en          text        NOT NULL,
+    name_ar          text COLLATE "ar-x-icu"        NOT NULL,
+    name_en          text COLLATE "en-x-icu"        NOT NULL,
     has_call         boolean     NOT NULL,               -- 决定该渠道的接警单是否应有关联通话
     UNIQUE (site_sk, src_natural_key)
 );
@@ -180,8 +198,8 @@ CREATE TABLE core.dim_priority (
     site_sk          uuid        NOT NULL REFERENCES core.dim_site,
     src_natural_key  text        NOT NULL,
     code             text        NOT NULL,
-    name_ar          text        NOT NULL,
-    name_en          text        NOT NULL,
+    name_ar          text COLLATE "ar-x-icu"        NOT NULL,
+    name_en          text COLLATE "en-x-icu"        NOT NULL,
     rank_order       smallint    NOT NULL,
     UNIQUE (site_sk, src_natural_key)
 );
@@ -191,8 +209,8 @@ CREATE TABLE core.dim_disposition (                      -- 处置结果 / 结�
     site_sk          uuid        NOT NULL REFERENCES core.dim_site,
     src_natural_key  text        NOT NULL,
     code             text        NOT NULL,
-    name_ar          text        NOT NULL,
-    name_en          text        NOT NULL,
+    name_ar          text COLLATE "ar-x-icu"        NOT NULL,
+    name_en          text COLLATE "en-x-icu"        NOT NULL,
     is_cancelled     boolean     NOT NULL DEFAULT false, -- 撤案类
     mapping_state    text        NOT NULL DEFAULT 'mapped_unverified'
                      CHECK (mapping_state IN ('verified','mapped_unverified','unknown')),
@@ -204,8 +222,8 @@ CREATE TABLE core.dim_call_result (
     site_sk          uuid        NOT NULL REFERENCES core.dim_site,
     src_natural_key  text        NOT NULL,
     code             text        NOT NULL,               -- answered · abandoned · missed · transferred · malicious
-    name_ar          text        NOT NULL,
-    name_en          text        NOT NULL,
+    name_ar          text COLLATE "ar-x-icu"        NOT NULL,
+    name_en          text COLLATE "en-x-icu"        NOT NULL,
     UNIQUE (site_sk, src_natural_key)
 );
 
@@ -214,8 +232,8 @@ CREATE TABLE core.dim_shift (
     site_sk          uuid        NOT NULL REFERENCES core.dim_site,
     src_natural_key  text        NOT NULL,
     code             text        NOT NULL,
-    name_ar          text        NOT NULL,
-    name_en          text        NOT NULL,
+    name_ar          text COLLATE "ar-x-icu"        NOT NULL,
+    name_en          text COLLATE "en-x-icu"        NOT NULL,
     start_time       time        NOT NULL,
     end_time         time        NOT NULL,
     valid_from       timestamptz NOT NULL,

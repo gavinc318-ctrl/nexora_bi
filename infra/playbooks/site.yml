@@ -2,6 +2,7 @@
 # site.yml —— 完整构建。离网重建时跑这一个。
 - ansible.builtin.import_playbook: 00-base.yml
 - ansible.builtin.import_playbook: 10-runtime.yml
+- ansible.builtin.import_playbook: 20-database.yml
 # 后续阶段按顺序加入：
 # - import_playbook: 20-database.yml      PostgreSQL + PostGIS + pgBouncer + HAProxy
 # - import_playbook: 30-pipeline.yml      Airflow + dbt

@@ -1,0 +1,171 @@
+---
+# 20-database —— PostgreSQL 16 + PostGIS
+#
+# 本步只做数据库本体。pgBouncer 与 HAProxy 在 21-connection.yml。
+# 分开的理由：集群创建是【一次性不可逆】的——locale 在 initdb 时确定，
+# 事后更改要重建整个集群。先把它验对，再往上叠连接层。
+#
+# ★ 最要紧的一件事：Ubuntu 的 postgresql 包会在安装时自动建一个 main 集群，
+#   并沿用系统 locale（en_US.UTF-8）。那正是 DD-63 要避免的绑定 glibc 的情形。
+#   故必须在 apt install 之前写好 createcluster.conf 禁止自动建簇，
+#   再显式用 C locale 创建。顺序错了就得推倒重来。
+
+- name: PostgreSQL 与 PostGIS
+  hosts: all
+  become: true
+
+  tasks:
+
+    # ---------- 1. 先禁止自动建簇，再装包 ----------
+    - name: 建立 postgresql-common 配置目录
+      ansible.builtin.file:
+        path: /etc/postgresql-common
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: 禁止安装时自动创建集群
+      ansible.builtin.copy:
+        dest: /etc/postgresql-common/createcluster.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # 由 infra/playbooks/20-database.yml 管理，勿手改
+          #
+          # 必须在安装 postgresql 之前就位。Ubuntu 的 postgresql 包会在 postinst 里
+          # 自动建一个 main 集群并沿用系统 locale（en_US.UTF-8），而 DD-63 要求
+          # 集群默认 LC_COLLATE=C 以与 glibc 解耦。让它自动建出来再删重建，
+          # 既浪费时间又容易留下残留。
+          create_main_cluster = false
+
+    - name: 安装 PostgreSQL 与 PostGIS
+      ansible.builtin.apt:
+        name: "{{ database_packages }}"
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # ---------- 2. WAL 目录 ----------
+    # WAL 在独立卷上（00-base 已断言）。initdb 要求 waldir 为空且属主为 postgres。
+    - name: 建立 WAL 目录
+      ansible.builtin.file:
+        path: "{{ pg_waldir }}"
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: "0700"
+
+    # ---------- 3. 显式创建集群 ----------
+    - name: 查询已有集群
+      ansible.builtin.command:
+        cmd: pg_lsclusters --no-header
+      register: _clusters
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: 创建集群（locale=C，DD-63）
+      ansible.builtin.command:
+        cmd: >-
+          pg_createcluster {{ postgres_version }} {{ pg_cluster_name }}
+          --port {{ pg_port }}
+          --
+          --locale=C
+          --encoding=UTF8
+          --waldir={{ pg_waldir }}/{{ postgres_version }}-{{ pg_cluster_name }}
+      when:
+        - not ansible_check_mode
+        - (postgres_version | string + ' ' + pg_cluster_name) not in (_clusters.stdout | default(''))
+
+    - name: 启动并自启集群
+      ansible.builtin.systemd_service:
+        name: "postgresql@{{ postgres_version }}-{{ pg_cluster_name }}"
+        enabled: true
+        state: started
+
+    # ---------- 4. 验证 locale 真的是 C ----------
+    # 这一条是本剧本的核心断言。集群一旦建错，后面所有工作都建在错误的地基上，
+    # 而症状要到 OS 大版本升级那天才显形。
+    - name: 查询集群 locale 与编码
+      ansible.builtin.command:
+        cmd: >-
+          psql -tAc "SELECT datcollate || '|' || datctype || '|' ||
+          pg_encoding_to_char(encoding) FROM pg_database WHERE datname='postgres'"
+      become_user: postgres
+      register: _dblocale
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: 断言集群 locale 为 C、编码为 UTF8
+      ansible.builtin.assert:
+        that:
+          - _dblocale.stdout | trim == 'C|C|UTF8'
+        fail_msg: >-
+          集群 locale 为「{{ _dblocale.stdout | trim }}」，应为 C|C|UTF8（DD-63）。
+          locale 在 initdb 时确定，无法在线更改——必须删除集群重建：
+            sudo pg_dropcluster {{ postgres_version }} {{ pg_cluster_name }} --stop
+            重跑本剧本
+          若集群中已有数据，先备份。
+        success_msg: "集群 locale：{{ _dblocale.stdout | trim }}（符合 DD-63）"
+      when: not ansible_check_mode
+
+    # ---------- 5. 参数 ----------
+    - name: 下发 PostgreSQL 参数
+      ansible.builtin.template:
+        src: ../files/postgresql-oss911.conf.j2
+        dest: "/etc/postgresql/{{ postgres_version }}/{{ pg_cluster_name }}/conf.d/10-oss911.conf"
+        owner: postgres
+        group: postgres
+        mode: "0644"
+      notify: restart postgresql
+
+    # ---------- 6. 业务库与扩展 ----------
+    - name: 创建业务库
+      ansible.builtin.command:
+        cmd: >-
+          createdb --template=template0 --locale=C --encoding=UTF8 {{ pg_database }}
+      become_user: postgres
+      register: _createdb
+      changed_when: _createdb.rc == 0
+      failed_when: _createdb.rc != 0 and 'already exists' not in _createdb.stderr
+      when: not ansible_check_mode
+
+    - name: 启用扩展
+      ansible.builtin.command:
+        cmd: psql -d {{ pg_database }} -c "CREATE EXTENSION IF NOT EXISTS {{ item }}"
+      become_user: postgres
+      register: _ext
+      changed_when: "'CREATE EXTENSION' in _ext.stdout"
+      loop: "{{ pg_extensions }}"
+      when: not ansible_check_mode
+
+    - name: 断言 ICU 排序规则可用（DD-63 依赖它）
+      ansible.builtin.command:
+        cmd: >-
+          psql -d {{ pg_database }} -tAc
+          "SELECT count(*) FROM pg_collation WHERE collname IN ('ar-x-icu','en-x-icu')"
+      become_user: postgres
+      register: _icu
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: ICU 排序规则检查
+      ansible.builtin.assert:
+        that:
+          - _icu.stdout | trim == '2'
+        fail_msg: >-
+          ICU 排序规则 ar-x-icu / en-x-icu 不可用（找到 {{ _icu.stdout | trim }} 个）。
+          DD-63 的列级 collation 依赖它们，缺失则 DDL 无法执行。
+          检查 PostgreSQL 是否以 ICU 支持编译：psql -c "SHOW lc_collate" 与 pg_collation 表。
+        success_msg: "ICU 排序规则可用：ar-x-icu · en-x-icu"
+      when: not ansible_check_mode
+
+  handlers:
+    - name: restart postgresql
+      ansible.builtin.systemd_service:
+        name: "postgresql@{{ postgres_version }}-{{ pg_cluster_name }}"
+        state: restarted

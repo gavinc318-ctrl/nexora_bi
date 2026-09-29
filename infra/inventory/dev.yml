@@ -50,6 +50,20 @@ all:
       - python3-venv
       - python3-pip
 
+    # ---- 数据库 ----
+    pg_cluster_name: main
+    pg_port: 5432
+    pg_database: oss911
+    pg_waldir: /var/lib/postgresql/wal
+    database_packages:
+      - "postgresql-{{ postgres_version }}"
+      - "postgresql-{{ postgres_version }}-postgis-3"
+      - "postgresql-client-{{ postgres_version }}"
+      - postgresql-common
+    pg_extensions:
+      - postgis
+      - pgcrypto        # core.sk 的 UUID v5 需要 digest()
+
     # ---- 容器运行时包 ----
     # netavark 与 aardvark-dns 必须显式列出：它们在 Ubuntu 是 Recommends 而非
     # Depends，缺了之后容器之间无法按名字互相解析，而报错是「连接被拒绝」，
