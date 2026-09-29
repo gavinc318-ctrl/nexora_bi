@@ -58,6 +58,10 @@ all:
       - podman
       - netavark
       - aardvark-dns
+      # iptables 必须显式装：netavark 配置网桥时要调用它，而 minimal 装机不含。
+      # 缺了之后报的是「netavark: No such file or directory」——听起来像 netavark
+      # 自己不在，实际是 netavark 找不到 iptables。这条错误信息极具误导性。
+      - iptables
       - catatonit        # 容器内的 init，避免僵尸进程
       - uidmap           # 将来若改 rootless 要用
       - slirp4netns

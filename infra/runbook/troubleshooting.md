@@ -129,3 +129,23 @@
   正是「镜像存储必须落独立卷」那条断言要防的情况。误用 rootless
   拉几个大镜像就能撑满根卷。清理：`podman rmi <镜像>`（不加 sudo，清的是 rootless 那套）
 - **预防** —— 已写入 runbook/03 开头。新人上手先读那一段
+
+### 现象：`Error: netavark: No such file or directory (os error 2)`
+
+网络明明已创建（`sudo podman network ls` 看得到），起容器却报这个。
+
+- **原因** —— **报错信息是误导性的**。缺的不是 netavark 自己，是 netavark 配置
+  网桥时要调用的 `iptables`——Ubuntu Server minimal 装机不含 `iptables` 用户态包。
+  netavark 找不到它，把错误原样往上抛，于是看起来像 netavark 不存在
+- **确认** ——
+  ```bash
+  ls -l /usr/lib/podman/netavark    # 二进制在，说明不是 netavark 的问题
+  which iptables                     # 无输出即确诊
+  ```
+- **处置** —— `sudo apt install -y iptables`，或重跑 10-runtime（已加入 container_packages）
+- **预防** —— 已在 `container_packages` 中。这类**非正式依赖**（不在 Depends 里、
+  但缺了就不工作）尤其要写进剧本与 MANIFEST：离网重建时没人会想到要导入 iptables
+
+这是本项目第二次被 minimal 装机的缺包绊住（第一次是 `locales` 缺 `locale-gen`）。
+规律是：**minimal 镜像缺的不是「工具」，是「别人默认你有」的东西**，
+而报错往往指向调用方而不是缺失方。
