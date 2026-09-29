@@ -50,6 +50,18 @@ all:
       - python3-venv
       - python3-pip
 
+    # ---- 容器运行时包 ----
+    # netavark 与 aardvark-dns 必须显式列出：它们在 Ubuntu 是 Recommends 而非
+    # Depends，缺了之后容器之间无法按名字互相解析，而报错是「连接被拒绝」，
+    # 看不出是 DNS 的问题。
+    container_packages:
+      - podman
+      - netavark
+      - aardvark-dns
+      - catatonit        # 容器内的 init，避免僵尸进程
+      - uidmap           # 将来若改 rootless 要用
+      - slirp4netns
+
     # ---- LVM 卷：最小尺寸断言 ----
     # 剧本只校验不创建。卷在装机时手工建好，剧本负责发现漂移。
     required_mounts:

@@ -1,0 +1,113 @@
+---
+# 10-runtime —— 容器运行时与网络
+#
+# 这一步不起任何业务容器，只把「地基的地基」铺好：运行时、两个网段、
+# 镜像源配置。业务容器从 20-database.yml 起逐层加。
+#
+# 分开的理由：运行时出问题与容器出问题是两类故障，混在一个剧本里
+# 排障时分不清是哪一层。
+
+- name: 容器运行时
+  hosts: all
+  become: true
+
+  tasks:
+
+    # ---------- 1. 运行时包 ----------
+    # netavark 与 aardvark-dns 必须显式装。
+    # 它们在 Ubuntu 是 Recommends 而非 Depends，一旦有人用
+    # --no-install-recommends 装 podman，容器之间就无法按名字互相解析——
+    # 而报出来的错是「连接被拒绝」，看不出是 DNS 的问题。
+    - name: 安装容器运行时
+      ansible.builtin.apt:
+        name: "{{ container_packages }}"
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: 记录 podman 版本
+      ansible.builtin.command:
+        cmd: podman --version
+      register: _podman_ver
+      changed_when: false
+
+    - name: 显示 podman 版本
+      ansible.builtin.debug:
+        msg: "{{ _podman_ver.stdout }}（填入 artifacts/MANIFEST.md）"
+
+    # ---------- 2. 存储位置确认 ----------
+    # podman 默认 graphroot 是 /var/lib/containers/storage，
+    # 而该路径正好是独立卷（00-base 已断言）。确认一次，别假定。
+    - name: 查询 podman 存储路径
+      ansible.builtin.command:
+        cmd: podman info --format '{{ '{{' }} .Store.GraphRoot {{ '}}' }}'
+      register: _graphroot
+      changed_when: false
+
+    - name: 断言镜像存储落在独立卷上
+      ansible.builtin.assert:
+        that:
+          - _graphroot.stdout | trim is match('^/var/lib/containers')
+        fail_msg: >-
+          podman 存储在 {{ _graphroot.stdout | trim }}，不在 /var/lib/containers 卷上。
+          镜像会写进根卷，根卷满了整台机器都会出问题。
+        success_msg: "镜像存储：{{ _graphroot.stdout | trim }}"
+
+    # ---------- 3. 两个网段 ----------
+    # 单机上模拟生产的网络边界：服务层只在 internal，
+    # 反向代理在 dmz。移动端（IF-40）的请求必须真的穿过代理进来，
+    # 这样 LD-04 第 9 章与 LD-07 的移动端约束在开发环境就是真的在起作用，
+    # 而不是「代码里写了但没走过那条路」。
+    - name: 查询已有网络
+      ansible.builtin.command:
+        cmd: podman network ls --format '{{ '{{' }} .Name {{ '}}' }}'
+      register: _networks
+      changed_when: false
+
+    - name: 创建网段
+      ansible.builtin.command:
+        cmd: >-
+          podman network create
+          --subnet {{ item.subnet }}
+          {{ item.name }}
+      when: item.name not in _networks.stdout_lines
+      loop: "{{ podman_networks }}"
+      loop_control:
+        label: "{{ item.name }} {{ item.subnet }}"
+
+    # ---------- 4. 镜像源：现在有外网，将来只有内网镜像 ----------
+    # 现在不改默认源，但把文件建出来并写明将来怎么切，
+    # 免得到了离网那天才开始研究 registries.conf 的写法。
+    - name: 下发镜像源配置
+      ansible.builtin.copy:
+        dest: /etc/containers/registries.conf.d/10-oss911.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # OSS911 —— 由 infra/playbooks/10-runtime.yml 管理，勿手改
+          #
+          # 现阶段（开发机有外网）：使用上游默认源，仅限定搜索范围，
+          # 避免 podman 在多个源之间猜测导致拉到非预期的镜像。
+          unqualified-search-registries = ["docker.io", "quay.io"]
+
+          # 离网部署时改为内网镜像仓库：把下面三行取消注释并填入实际地址，
+          # 全部镜像拉取即改道内网。业务容器的镜像引用不需要改动。
+          #
+          # [[registry]]
+          # prefix = "docker.io"
+          # location = "registry.internal.oss911/docker-hub"
+          #
+          # [[registry]]
+          # prefix = "quay.io"
+          # location = "registry.internal.oss911/quay"
+
+    # ---------- 5. 不开自动更新 ----------
+    # 与 00-base 停用 unattended-upgrades 同理：镜像版本要可重建，
+    # 后台自动更新会让运行中的镜像与 MANIFEST 悄悄分叉。
+    - name: 停用 podman 自动更新
+      ansible.builtin.systemd_service:
+        name: podman-auto-update.timer
+        enabled: false
+        state: stopped
+      failed_when: false

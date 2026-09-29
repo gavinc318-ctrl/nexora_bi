@@ -97,3 +97,53 @@
       register: _sysstat
       changed_when: false
       failed_when: _sysstat.stdout | trim != "active"
+
+    # ---------- 容器运行时（10-runtime 之后才有意义）----------
+    - name: podman 可用
+      ansible.builtin.command:
+        cmd: podman --version
+      register: _podman
+      changed_when: false
+      failed_when: false
+
+    - name: 镜像存储在独立卷上
+      ansible.builtin.command:
+        cmd: podman info --format '{{ '{{' }} .Store.GraphRoot {{ '}}' }}'
+      register: _graphroot
+      changed_when: false
+      failed_when: false
+      when: _podman.rc == 0
+
+    - name: 断言镜像存储路径
+      ansible.builtin.assert:
+        that:
+          - _graphroot.stdout | trim is match('^/var/lib/containers')
+        fail_msg: "镜像存储在 {{ _graphroot.stdout | trim }}，不在独立卷上"
+        success_msg: "镜像存储：{{ _graphroot.stdout | trim }}"
+      when: _podman.rc == 0
+
+    - name: 两个网段都在
+      ansible.builtin.command:
+        cmd: podman network ls --format '{{ '{{' }} .Name {{ '}}' }}'
+      register: _nets
+      changed_when: false
+      failed_when: false
+      when: _podman.rc == 0
+
+    - name: 断言网段
+      ansible.builtin.assert:
+        that:
+          - item.name in _nets.stdout_lines
+        fail_msg: "网段 {{ item.name }} 缺失。重跑 playbooks/10-runtime.yml"
+      loop: "{{ podman_networks }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: _podman.rc == 0
+
+    - name: 容器 DNS 解析组件已装
+      ansible.builtin.command:
+        cmd: dpkg-query -W -f=${Status} aardvark-dns
+      register: _aardvark
+      changed_when: false
+      failed_when: "'install ok installed' not in _aardvark.stdout"
+      when: _podman.rc == 0
