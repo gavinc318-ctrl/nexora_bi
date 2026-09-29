@@ -1,0 +1,99 @@
+---
+# 99-verify —— 只读体检
+#
+# 与 00-base 的断言重叠是刻意的：00-base 在「构建时」把关，
+# 本剧本在「任何时候」把关。机器跑了三个月之后，有人手改过什么、
+# 卷满了没有、服务掉了没有，靠它发现。
+#
+# 这个剧本不改变任何东西，可以随时跑。
+
+- name: 开发环境体检
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: OS 与规格
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == os_distribution
+          - ansible_facts['distribution_release'] == os_release
+          - ansible_facts['memtotal_mb'] | int >= 60000
+          - ansible_facts['processor_vcpus'] | int >= 16
+        success_msg: >-
+          {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }} ·
+          {{ ansible_facts['processor_vcpus'] }} vCPU ·
+          {{ (ansible_facts['memtotal_mb'] | int / 1024) | round(1) }} GB
+
+    - name: 时区必须是 {{ system_timezone }}
+      ansible.builtin.command:
+        cmd: timedatectl show -p Timezone --value
+      register: _tz
+      changed_when: false
+      failed_when: _tz.stdout | trim != system_timezone
+
+    - name: 卷水位
+      ansible.builtin.set_fact:
+        _disk_report: >-
+          {{ ansible_facts['mounts']
+             | selectattr('mount', 'in', required_mounts | map(attribute='path') | list)
+             | map(attribute='mount') | list }}
+
+    - name: 报告各卷使用率，超过 80% 视为告警
+      ansible.builtin.assert:
+        that:
+          - (item.size_available | int) * 100 / (item.size_total | int) > 20
+        fail_msg: >-
+          {{ item.mount }} 剩余 {{ ((item.size_available | int) * 100 / (item.size_total | int)) | round(1) }}%，
+          低于 20%。扩容用预留空间：lvextend -L +NNG -r /dev/{{ vg_name }}/<lv>
+        success_msg: >-
+          {{ item.mount }} 剩余 {{ ((item.size_available | int) * 100 / (item.size_total | int)) | round(1) }}%
+      loop: "{{ ansible_facts['mounts'] | selectattr('mount', 'in', required_mounts | map(attribute='path') | list) | list }}"
+      loop_control:
+        label: "{{ item.mount }}"
+
+    - name: 内核参数已生效
+      ansible.builtin.command:
+        cmd: sysctl -n {{ item.key }}
+      register: _sysctl
+      changed_when: false
+      failed_when: _sysctl.stdout | trim != item.value
+      loop:
+        - { key: vm.swappiness,        value: "10" }
+        - { key: vm.overcommit_memory, value: "0" }
+        - { key: fs.file-max,          value: "2097152" }
+      loop_control:
+        label: "{{ item.key }} = {{ item.value }}"
+
+    - name: SSH 口令登录已关闭
+      ansible.builtin.command:
+        cmd: sshd -T
+      register: _sshd
+      changed_when: false
+
+    - name: 断言 SSH 加固项
+      ansible.builtin.assert:
+        that:
+          - "'passwordauthentication no' in _sshd.stdout_lines"
+          - "'permitrootlogin no' in _sshd.stdout_lines"
+        fail_msg: >-
+          SSH 加固未生效。注意 24.04 的实际配置在 /etc/ssh/sshd_config.d/ 里，
+          grep 主配置文件看不出来——以 sshd -T 的输出为准。
+
+    - name: 自动升级已停用
+      ansible.builtin.command:
+        cmd: systemctl is-enabled {{ item }}
+      register: _timer
+      changed_when: false
+      failed_when: "'disabled' not in _timer.stdout and 'masked' not in _timer.stdout"
+      loop:
+        - apt-daily-upgrade.timer
+      loop_control:
+        label: "{{ item }}"
+
+    - name: sysstat 在采集
+      ansible.builtin.command:
+        cmd: systemctl is-active sysstat
+      register: _sysstat
+      changed_when: false
+      failed_when: _sysstat.stdout | trim != "active"
