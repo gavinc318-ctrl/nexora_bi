@@ -25,15 +25,20 @@
         update_cache: true
         cache_valid_time: 3600
 
+    # 只读查询一律加 check_mode: false —— command 任务在 --check 下默认被跳过，
+    # 跳过之后 register 的变量是空的，后面的断言会拿空串去比而误报失败。
+    # 同时加 failed_when: false：check 模式下 apt 并未真装，命令本身会失败。
     - name: 记录 podman 版本
       ansible.builtin.command:
         cmd: podman --version
       register: _podman_ver
       changed_when: false
+      check_mode: false
+      failed_when: false
 
     - name: 显示 podman 版本
       ansible.builtin.debug:
-        msg: "{{ _podman_ver.stdout }}（填入 artifacts/MANIFEST.md）"
+        msg: "{{ _podman_ver.stdout | default('（check 模式，podman 尚未安装）') }}（填入 artifacts/MANIFEST.md）"
 
     # ---------- 2. 存储位置确认 ----------
     # podman 默认 graphroot 是 /var/lib/containers/storage，
@@ -43,15 +48,19 @@
         cmd: podman info --format '{{ '{{' }} .Store.GraphRoot {{ '}}' }}'
       register: _graphroot
       changed_when: false
+      check_mode: false
+      failed_when: false
 
+    # check 模式下 podman 可能还没装，此时跳过断言而不是误报失败。
     - name: 断言镜像存储落在独立卷上
       ansible.builtin.assert:
         that:
           - _graphroot.stdout | trim is match('^/var/lib/containers')
         fail_msg: >-
-          podman 存储在 {{ _graphroot.stdout | trim }}，不在 /var/lib/containers 卷上。
+          podman 存储在「{{ _graphroot.stdout | trim }}」，不在 /var/lib/containers 卷上。
           镜像会写进根卷，根卷满了整台机器都会出问题。
         success_msg: "镜像存储：{{ _graphroot.stdout | trim }}"
+      when: not ansible_check_mode and _graphroot.rc == 0
 
     # ---------- 3. 两个网段 ----------
     # 单机上模拟生产的网络边界：服务层只在 internal，
@@ -63,6 +72,8 @@
         cmd: podman network ls --format '{{ '{{' }} .Name {{ '}}' }}'
       register: _networks
       changed_when: false
+      check_mode: false
+      failed_when: false
 
     - name: 创建网段
       ansible.builtin.command:
@@ -70,7 +81,9 @@
           podman network create
           --subnet {{ item.subnet }}
           {{ item.name }}
-      when: item.name not in _networks.stdout_lines
+      when:
+        - not ansible_check_mode
+        - item.name not in (_networks.stdout_lines | default([]))
       loop: "{{ podman_networks }}"
       loop_control:
         label: "{{ item.name }} {{ item.subnet }}"

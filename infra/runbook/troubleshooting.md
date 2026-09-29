@@ -97,3 +97,21 @@
   Asia/Baghdad、Africa/Nairobi 共用的偏移，比偏移会让设错时区的机器悄悄通过
 - **处置** —— 比时区名：`timedatectl show -p Timezone --value`
 - **预防** —— 已改入 00-base 与 99-verify
+
+### 现象：`--check` 跑失败，断言里的值是空的
+
+例如：`podman 存储在「」，不在 /var/lib/containers 卷上`——注意引号里是空的。
+
+- **原因** —— `ansible.builtin.command` 在 `--check` 模式下**默认被跳过**
+  （Ansible 无法判断一条任意命令有没有副作用，所以一律不执行）。
+  跳过之后 `register` 的变量是空的，后面用它的断言就拿空串去比，必然失败。
+  这不是环境的问题，是剧本的问题
+- **处置** —— 给**只读**查询任务加 `check_mode: false`，让它在 check 模式下也真跑。
+  只读命令这么做是安全的；会改变状态的命令**不要**加
+- **额外一层** —— 若该查询依赖的东西在 check 模式下还不存在
+  （例如 apt 在 check 模式没真装，`podman info` 必然失败），
+  再加 `failed_when: false`，并给断言加 `when: not ansible_check_mode`
+- **预防** —— 已在 00-base（3 处）、10-runtime（3 处）、99-verify（9 处）全部处理。
+  **新增任何 command 任务时先问一句：它在 --check 下会怎样**
+
+判断口诀：**只读 → `check_mode: false`；会改状态 → 什么都不加，让它在 check 下跳过。**

@@ -57,6 +57,7 @@
         cmd: vgs --noheadings --units g -o vg_free {{ vg_name }}
       register: _vgfree
       changed_when: false
+      check_mode: false          # 只读查询，check 模式下也要真跑，否则下面的断言拿到空串
 
     - name: 提醒卷组预留不足
       ansible.builtin.assert:
@@ -74,6 +75,7 @@
         cmd: timedatectl show -p Timezone --value
       register: _tz_now
       changed_when: false
+      check_mode: false
 
     - name: 设置时区
       ansible.builtin.command:
@@ -103,6 +105,7 @@
         cmd: locale -a
       register: _locales
       changed_when: false
+      check_mode: false
 
     # locale -a 输出形如 en_US.utf8，与 en_US.UTF-8 写法不同，
     # 故两侧统一去掉连字符并转小写后再比。

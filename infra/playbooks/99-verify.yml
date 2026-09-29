@@ -30,6 +30,7 @@
         cmd: timedatectl show -p Timezone --value
       register: _tz
       changed_when: false
+      check_mode: false
       failed_when: _tz.stdout | trim != system_timezone
 
     - name: 卷水位
@@ -57,6 +58,7 @@
         cmd: sysctl -n {{ item.key }}
       register: _sysctl
       changed_when: false
+      check_mode: false
       failed_when: _sysctl.stdout | trim != item.value
       loop:
         - { key: vm.swappiness,        value: "10" }
@@ -70,6 +72,7 @@
         cmd: sshd -T
       register: _sshd
       changed_when: false
+      check_mode: false
 
     - name: 断言 SSH 加固项
       ansible.builtin.assert:
@@ -85,6 +88,7 @@
         cmd: systemctl is-enabled {{ item }}
       register: _timer
       changed_when: false
+      check_mode: false
       failed_when: "'disabled' not in _timer.stdout and 'masked' not in _timer.stdout"
       loop:
         - apt-daily-upgrade.timer
@@ -96,6 +100,7 @@
         cmd: systemctl is-active sysstat
       register: _sysstat
       changed_when: false
+      check_mode: false
       failed_when: _sysstat.stdout | trim != "active"
 
     # ---------- 容器运行时（10-runtime 之后才有意义）----------
@@ -104,6 +109,7 @@
         cmd: podman --version
       register: _podman
       changed_when: false
+      check_mode: false
       failed_when: false
 
     - name: 镜像存储在独立卷上
@@ -111,6 +117,7 @@
         cmd: podman info --format '{{ '{{' }} .Store.GraphRoot {{ '}}' }}'
       register: _graphroot
       changed_when: false
+      check_mode: false
       failed_when: false
       when: _podman.rc == 0
 
@@ -127,6 +134,7 @@
         cmd: podman network ls --format '{{ '{{' }} .Name {{ '}}' }}'
       register: _nets
       changed_when: false
+      check_mode: false
       failed_when: false
       when: _podman.rc == 0
 
@@ -145,5 +153,6 @@
         cmd: dpkg-query -W -f=${Status} aardvark-dns
       register: _aardvark
       changed_when: false
+      check_mode: false
       failed_when: "'install ok installed' not in _aardvark.stdout"
       when: _podman.rc == 0
