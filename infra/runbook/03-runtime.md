@@ -48,20 +48,46 @@ rootless 则每人一套，`podman ps` 各看各的，排障时说不清在说�
 
 剧本的断言只确认网段「存在」。**存在不等于隔离有效**，跑一次真实验证：
 
-```bash
-# 在两个网段各起一个临时容器
-sudo podman run -d --name t-int --network internal docker.io/library/alpine sleep 600
-sudo podman run -d --name t-dmz --network dmz      docker.io/library/alpine sleep 600
+**关键：必须按 IP 验证，按名字验证会骗人。**
 
-# 同网段内按名字能解析、能通（验证 aardvark-dns 在工作）
+跨网段按名字访问一定失败（aardvark-dns 按网段划分解析范围），看起来像隔离生效，
+其实只是名字查不到。而 podman 的桥接网段**默认不做 IP 层隔离**——两个网桥都在
+同一台宿主机上，宿主机在它们之间路由。本项目实测确认过：未加 `isolate=true` 时，
+dmz 的容器能直接 ping 通 internal 的 IP。
+
+```bash
+# 起一个容器并取它的 IP
+sudo podman run -d --name t-int --network internal docker.io/library/alpine sleep 600
+IP=$(sudo podman inspect t-int --format '{{ .NetworkSettings.Networks.internal.IPAddress }}')
+echo "t-int 的 IP：$IP"
+
+# 一、同网段按名字能通（验证 aardvark-dns 在工作）
 sudo podman run --rm --network internal docker.io/library/alpine ping -c1 -W2 t-int
 
-# 跨网段应当不通 —— 这条「失败」才是对的
-sudo podman run --rm --network dmz docker.io/library/alpine ping -c1 -W2 t-int ; echo "退出码 $?（非 0 才正确）"
+# 二、跨网段按名字不通 —— 只证明名字隔离，不证明网络隔离
+sudo podman run --rm --network dmz docker.io/library/alpine ping -c1 -W2 t-int ; echo "退出码 $?（非 0 正确）"
+
+# 三、★ 跨网段按 IP 不通 —— 这条才是隔离的真正判据
+sudo podman run --rm --network dmz docker.io/library/alpine ping -c1 -W2 "$IP" ; echo "退出码 $?（非 0 才正确）"
 
 # 清理
-sudo podman rm -f t-int t-dmz
+sudo podman rm -f t-int
 ```
+
+**第三条通了就是问题。** 此时 DMZ 边界是假的：服务层本该只能经反向代理访问，
+而 dmz 里任何容器都能直连 internal 的 IP。移动端（IF-40）的约束、LD-07 的边界，
+测出来都会「通过」，因为根本没有边界。
+
+处置：确认网段带 `isolate=true`。剧本创建时已带，若是早期建的旧网段则需重建：
+
+```bash
+sudo podman network rm -f internal dmz     # 会断开挂在其上的容器
+ansible-playbook playbooks/10-runtime.yml -e ansible_connection=local -K
+sudo podman network inspect internal --format '{{ .Options.isolate }}'   # 应为 true
+```
+
+剧本会校验已有网段的 `isolate`，不为真时报错并给出重建命令——但**不自动重建**，
+因为重建会断掉挂在上面的容器，那种事必须由人决定。
 
 第三条命令**必须失败**。若它成功了，说明两个网段实际是连通的，
 LD-04 第 9 章与 LD-07 关于移动端的约束在开发环境就是空的——

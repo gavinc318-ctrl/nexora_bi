@@ -75,11 +75,19 @@
       check_mode: false
       failed_when: false
 
+    # --opt isolate=true 是这一步的关键，不是可选优化。
+    # podman 的桥接网段默认【不隔离】：两个网桥都在同一台宿主机上，
+    # 宿主机会在它们之间路由，dmz 里的容器能直接 ping 通 internal 的 IP。
+    # 本项目实测确认过这一点。
+    #
+    # 容易被骗的地方：跨网段按【名字】访问会失败（aardvark-dns 按网段划分
+    # 解析范围），看起来像隔离生效了，其实只是名字查不到。必须按 IP 验证。
     - name: 创建网段
       ansible.builtin.command:
         cmd: >-
           podman network create
           --subnet {{ item.subnet }}
+          --opt isolate=true
           {{ item.name }}
       when:
         - not ansible_check_mode
@@ -87,6 +95,38 @@
       loop: "{{ podman_networks }}"
       loop_control:
         label: "{{ item.name }} {{ item.subnet }}"
+
+    # 已存在的网段要校验 isolate 是否为真。
+    # 不自动重建——重建会断掉挂在上面的容器，那种事必须由人决定。
+    - name: 查询已有网段的 isolate 设置
+      ansible.builtin.command:
+        cmd: podman network inspect {{ item.name }} --format '{{ '{{' }} .Options.isolate {{ '}}' }}'
+      register: _isolate
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      loop: "{{ podman_networks }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not ansible_check_mode
+
+    - name: 断言网段隔离已启用
+      ansible.builtin.assert:
+        that:
+          - item.stdout | trim == 'true'
+        fail_msg: >-
+          网段 {{ item.item.name }} 的 isolate 不为 true（实际「{{ item.stdout | trim }}」）。
+          未隔离时 dmz 的容器可直接按 IP 访问 internal，DMZ 边界形同虚设。
+          须手工重建该网段（会断开挂在其上的容器，故不由剧本自动执行）：
+            sudo podman network rm -f {{ item.item.name }}
+            重跑本剧本
+        success_msg: "{{ item.item.name }} 隔离已启用"
+      loop: "{{ _isolate.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name | default('') }}"
+      when:
+        - not ansible_check_mode
+        - _isolate.results is defined
 
     # ---------- 4. 镜像源：现在有外网，将来只有内网镜像 ----------
     # 现在不改默认源，但把文件建出来并写明将来怎么切，

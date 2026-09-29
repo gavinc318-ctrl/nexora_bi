@@ -169,3 +169,20 @@ Error: creating container storage: the container name "t-int" is already in use 
   多一个空格会让 podman 把后面的词当镜像名去拉）
 - **顺带** —— `sudo podman ps -a` 看不到不等于不存在。存储层的实况用
   `sudo podman ps -a --storage` 查
+
+### 现象：两个 podman 网段之间居然是通的
+
+- **原因** —— podman 的桥接网段**默认不做网段间隔离**。两个网桥都在同一台宿主机上，
+  宿主机会在它们之间路由。本项目实测：未加 `isolate=true` 时，
+  dmz 的容器可直接 ping 通 internal 容器的 IP
+- **为什么容易漏掉** —— 跨网段按**名字**访问会失败（`ping: bad address`），
+  因为 aardvark-dns 按网段划分解析范围。这看起来像隔离生效了，
+  但它只证明名字查不到，不证明包过不去。**必须按 IP 验证**
+- **处置** —— 网段创建时加 `--opt isolate=true`；已建的要删掉重建
+  （`podman network rm -f <名>` 会断开挂在其上的容器）
+- **预防** —— 10-runtime 创建时已带该选项，并对已有网段断言 `isolate` 为真。
+  runbook/03 的验证步骤以按 IP 的那条为准
+
+这一条是本项目「断言通过 ≠ 功能正确」的最好例子：剧本能断言网段存在、
+名字解析正常，但这些全对的情况下，安全边界仍然可以是零。
+**凡是「隔离」「拒绝」「不可达」类的设计，验证时必须让它真的失败一次。**
