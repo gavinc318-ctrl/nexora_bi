@@ -7,6 +7,9 @@ all:
     dev01:
       ansible_host: 10.55.223.118
       ansible_user: usr
+      # 控制节点就是这台机器本身（见 runbook/02）。在机器上自运行时加：
+      #   -e ansible_connection=local
+      # 保留 ansible_host 与 ansible_user 是为了将来从别处驱动时不用改 inventory。
   vars:
     # ---- 版本基线（与 compliance/components.csv 保持一致）----
     os_distribution: Ubuntu

@@ -67,12 +67,19 @@
           预留空间是 LVM 在线扩容的唯一依靠——用光了就只能停机加盘。
 
     # ---------- 3. 本地化 ----------
+    # 比时区名，不比 UTC 偏移：+03 是莫斯科、巴格达、内罗毕共用的偏移，
+    # 比偏移会让一个设错了时区的机器悄悄通过。
+    - name: 查询当前时区
+      ansible.builtin.command:
+        cmd: timedatectl show -p Timezone --value
+      register: _tz_now
+      changed_when: false
+
     - name: 设置时区
       ansible.builtin.command:
         cmd: timedatectl set-timezone {{ system_timezone }}
-      register: _tz
-      changed_when: false
-      when: ansible_facts['date_time']['tz'] != '+03'
+      when: _tz_now.stdout | trim != system_timezone
+      changed_when: true
 
     - name: 安装基线包
       ansible.builtin.apt:
@@ -81,11 +88,31 @@
         update_cache: true
         cache_valid_time: 3600
 
+    # 两步都必要：第一步管「声明」（/etc/locale.gen 决定系统重建时生成哪些），
+    # 第二步管「实际状态」（locale -a 是唯一可信的事实）。
+    # 只做第一步，则文件已有而 locale 未生成时不会补；
+    # 只做第二步，则 dpkg-reconfigure 或升级后可能被清掉。
+    - name: 在 /etc/locale.gen 中声明所需 locale
+      ansible.builtin.lineinfile:
+        path: /etc/locale.gen
+        regexp: '^#?\s*{{ system_locale | regex_escape }} UTF-8\s*$'
+        line: "{{ system_locale }} UTF-8"
+
+    - name: 查询已生成的 locale
+      ansible.builtin.command:
+        cmd: locale -a
+      register: _locales
+      changed_when: false
+
+    # locale -a 输出形如 en_US.utf8，与 en_US.UTF-8 写法不同，
+    # 故两侧统一去掉连字符并转小写后再比。
     - name: 生成 locale
       ansible.builtin.command:
         cmd: locale-gen {{ system_locale }}
-      register: _localegen
-      changed_when: "'up-to-date' not in _localegen.stdout"
+      when: >-
+        (system_locale | replace('-', '') | lower)
+        not in (_locales.stdout_lines | map('replace', '-', '') | map('lower') | list)
+      changed_when: true
 
     - name: 固化默认 locale
       ansible.builtin.copy:

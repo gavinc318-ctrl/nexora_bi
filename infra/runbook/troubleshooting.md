@@ -76,3 +76,24 @@
 - **原因** —— `sysstat` 装了但默认不采集，`/etc/default/sysstat` 里 `ENABLED="false"`
 - **处置** —— 见 00-base 的 sysstat 任务
 - **预防** —— 已在 00-base 中，99-verify 会断言服务为 active
+
+## Ansible
+
+### 现象：某个 command 任务每次跑都是 changed
+
+- **原因** —— `changed_when` 用「命令输出里有没有某个字符串」来判断，而猜错了字符串。
+  本项目已经踩过一次：`locale-gen` 的 `changed_when` 写成
+  `'up-to-date' not in stdout`，但 `locale-gen` 根本不输出这个词
+  （它输出 `Generating locales... done`），条件恒为真
+- **处置** —— 不要猜输出。改成**检查实际状态**：先用一个 `changed_when: false` 的
+  只读命令取当前状态（`locale -a`、`timedatectl show -p Timezone --value`、
+  `systemctl is-enabled`），再用 `when:` 决定要不要执行变更命令
+- **预防** —— 每次改完剧本连跑两遍，第二遍 `changed=0` 才算过。
+  这是 runbook/02 里那条「跑第三遍」的理由，不是手滑写重了
+
+### 现象：时区看起来对，但换台机器就不对了
+
+- **原因** —— 用 UTC 偏移判断时区。`+03` 是 Asia/Riyadh、Europe/Moscow、
+  Asia/Baghdad、Africa/Nairobi 共用的偏移，比偏移会让设错时区的机器悄悄通过
+- **处置** —— 比时区名：`timedatectl show -p Timezone --value`
+- **预防** —— 已改入 00-base 与 99-verify

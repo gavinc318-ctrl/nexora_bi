@@ -34,6 +34,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | ISO | ubuntu-24.04.5-live-server-amd64.iso | 24.04.5 | releases.ubuntu.com/24.04/ | （下载后填） | 2026-09-28 | 24.04 LTS 的当前点版本。选 24.04 而非 26.04：默认仓库即 PG 16，与已验证的 DDL 一致，零返工；生态成熟两年半（DD-62） | 在用 |
 | OS | 基线包集（见 inventory/dev.yml 的 base_packages） | 随 24.04 仓库 | Ubuntu noble 官方源 | 由 apt 源签名保证 | 2026-09-29 | 四组：基础操作、编辑器、卷管理、排障工具、Ansible 运行时。版本不单独钉——跟随 OS 源，由 24.04 的冻结版本保证一致性 | 在用 |
+| OS | ansible-core | 2.16.3-0ubuntu2 | Ubuntu noble 官方源 | 由 apt 源签名保证 | 2026-09-29 | 控制节点装在开发机自身而非 Mac：Ubuntu 源是离线环境唯一有对应物的供给链，Homebrew/pipx 在离网环境没有。用 ansible-core 而非 ansible 全家桶——后者含约百个 collection，与「只用 ansible.builtin」的纪律冲突 | 在用 |
 | OS | swap: /swap.img | 8 GB 文件 | 安装器创建 | — | 2026-09-29 | 装机默认。保留作兜底，但 vm.swappiness=10 使其不成为常规内存层；生产的库虚机按 RS-01 禁用交换 | 在用 |
 
 ---
