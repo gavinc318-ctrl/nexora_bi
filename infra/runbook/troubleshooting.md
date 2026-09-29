@@ -149,3 +149,23 @@
 这是本项目第二次被 minimal 装机的缺包绊住（第一次是 `locales` 缺 `locale-gen`）。
 规律是：**minimal 镜像缺的不是「工具」，是「别人默认你有」的东西**，
 而报错往往指向调用方而不是缺失方。
+
+### 现象：容器名被占用，但 `podman ps -a` 里没有它，`podman rm` 也删不掉
+
+```
+Error: creating container storage: the container name "t-int" is already in use by <id>
+```
+
+- **原因** —— 容器创建分两层：先在存储层占名建层，再登记进 podman 的容器数据库。
+  若在两者之间失败（本项目实测：netavark 缺 iptables，网络配置那步报错），
+  **名字被存储层占住但没进数据库**。于是 `podman ps -a` 看不到、`podman rm` 删不掉，
+  而创建时的重名检查却查得到
+- **处置** ——
+  ```bash
+  sudo podman rm --storage t-int        # 专清存储层残留
+  sudo podman rm --storage <报错里的 ID>  # 名字也对不上时用 ID
+  ```
+- **预防** —— 起临时容器时带 `--replace`（注意是 `--replace`，不是 `-- replace`；
+  多一个空格会让 podman 把后面的词当镜像名去拉）
+- **顺带** —— `sudo podman ps -a` 看不到不等于不存在。存储层的实况用
+  `sudo podman ps -a --storage` 查
