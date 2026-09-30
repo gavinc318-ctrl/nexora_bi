@@ -5,10 +5,17 @@
 # 分开的理由：集群创建是【一次性不可逆】的——locale 在 initdb 时确定，
 # 事后更改要重建整个集群。先把它验对，再往上叠连接层。
 #
-# ★ 最要紧的一件事：Ubuntu 的 postgresql 包会在安装时自动建一个 main 集群，
-#   并沿用系统 locale（en_US.UTF-8）。那正是 DD-63 要避免的绑定 glibc 的情形。
-#   故必须在 apt install 之前写好 createcluster.conf 禁止自动建簇，
-#   再显式用 C locale 创建。顺序错了就得推倒重来。
+# ★ 顺序不可颠倒：必须在 apt install 之前写好 createcluster.conf。
+#   Ubuntu 的 postgresql 包会在 postinst 里自动建一个 main 集群并沿用系统 locale
+#   （en_US.UTF-8），而 DD-63 要求集群默认 LC_COLLATE=C 以与 glibc 解耦。
+#
+# ★ 关于 --check：本剧本的 check 模式只能验到「装包之前」。
+#   装包之后的任务依赖包自身创建的东西——postgres 系统用户、
+#   /etc/postgresql/<ver>/<cluster>/ 目录、postgresql@ 服务单元——而 check 模式下
+#   apt 并未真装，这些都不存在。硬让它们在 check 下跑只会得到一串假失败，
+#   而假失败会教人忽略 --check，那比没有 check 更糟。
+#   故装包之后的任务整块跳过 check 模式。check 能告诉你的是：
+#   配置文件内容对不对、包清单会装什么；不能告诉你集群会不会建成功。
 
 - name: PostgreSQL 与 PostGIS
   hosts: all
@@ -16,7 +23,8 @@
 
   tasks:
 
-    # ---------- 1. 先禁止自动建簇，再装包 ----------
+    # ================= 装包前：check 模式下可验 =================
+
     - name: 建立 postgresql-common 配置目录
       ansible.builtin.file:
         path: /etc/postgresql-common
@@ -47,122 +55,151 @@
         update_cache: true
         cache_valid_time: 3600
 
-    # ---------- 2. WAL 目录 ----------
-    # WAL 在独立卷上（00-base 已断言）。initdb 要求 waldir 为空且属主为 postgres。
-    - name: 建立 WAL 目录
-      ansible.builtin.file:
-        path: "{{ pg_waldir }}"
-        state: directory
-        owner: postgres
-        group: postgres
-        mode: "0700"
+    # ================= 装包后：依赖包创建的用户、目录与服务 =================
+    # 整块跳过 check 模式，理由见文件头。
 
-    # ---------- 3. 显式创建集群 ----------
-    - name: 查询已有集群
-      ansible.builtin.command:
-        cmd: pg_lsclusters --no-header
-      register: _clusters
-      changed_when: false
-      check_mode: false
-      failed_when: false
-
-    - name: 创建集群（locale=C，DD-63）
-      ansible.builtin.command:
-        cmd: >-
-          pg_createcluster {{ postgres_version }} {{ pg_cluster_name }}
-          --port {{ pg_port }}
-          --
-          --locale=C
-          --encoding=UTF8
-          --waldir={{ pg_waldir }}/{{ postgres_version }}-{{ pg_cluster_name }}
-      when:
-        - not ansible_check_mode
-        - (postgres_version | string + ' ' + pg_cluster_name) not in (_clusters.stdout | default(''))
-
-    - name: 启动并自启集群
-      ansible.builtin.systemd_service:
-        name: "postgresql@{{ postgres_version }}-{{ pg_cluster_name }}"
-        enabled: true
-        state: started
-
-    # ---------- 4. 验证 locale 真的是 C ----------
-    # 这一条是本剧本的核心断言。集群一旦建错，后面所有工作都建在错误的地基上，
-    # 而症状要到 OS 大版本升级那天才显形。
-    - name: 查询集群 locale 与编码
-      ansible.builtin.command:
-        cmd: >-
-          psql -tAc "SELECT datcollate || '|' || datctype || '|' ||
-          pg_encoding_to_char(encoding) FROM pg_database WHERE datname='postgres'"
-      become_user: postgres
-      register: _dblocale
-      changed_when: false
-      check_mode: false
-      failed_when: false
-
-    - name: 断言集群 locale 为 C、编码为 UTF8
-      ansible.builtin.assert:
-        that:
-          - _dblocale.stdout | trim == 'C|C|UTF8'
-        fail_msg: >-
-          集群 locale 为「{{ _dblocale.stdout | trim }}」，应为 C|C|UTF8（DD-63）。
-          locale 在 initdb 时确定，无法在线更改——必须删除集群重建：
-            sudo pg_dropcluster {{ postgres_version }} {{ pg_cluster_name }} --stop
-            重跑本剧本
-          若集群中已有数据，先备份。
-        success_msg: "集群 locale：{{ _dblocale.stdout | trim }}（符合 DD-63）"
+    - name: 集群创建与配置
       when: not ansible_check_mode
+      block:
 
-    # ---------- 5. 参数 ----------
-    - name: 下发 PostgreSQL 参数
-      ansible.builtin.template:
-        src: ../files/postgresql-oss911.conf.j2
-        dest: "/etc/postgresql/{{ postgres_version }}/{{ pg_cluster_name }}/conf.d/10-oss911.conf"
-        owner: postgres
-        group: postgres
-        mode: "0644"
-      notify: restart postgresql
+        # ---------- WAL 目录 ----------
+        # WAL 在独立卷上（00-base 已断言）。initdb 要求 waldir 为空且属主为 postgres。
+        # postgres 系统用户由 postgresql-common 的 postinst 创建，故必须在装包之后。
+        - name: 建立 WAL 目录
+          ansible.builtin.file:
+            path: "{{ pg_waldir }}"
+            state: directory
+            owner: postgres
+            group: postgres
+            mode: "0700"
 
-    # ---------- 6. 业务库与扩展 ----------
-    - name: 创建业务库
-      ansible.builtin.command:
-        cmd: >-
-          createdb --template=template0 --locale=C --encoding=UTF8 {{ pg_database }}
-      become_user: postgres
-      register: _createdb
-      changed_when: _createdb.rc == 0
-      failed_when: _createdb.rc != 0 and 'already exists' not in _createdb.stderr
-      when: not ansible_check_mode
+        # ---------- 显式创建集群 ----------
+        - name: 查询已有集群
+          ansible.builtin.command:
+            cmd: pg_lsclusters --no-header
+          register: _clusters
+          changed_when: false
+          check_mode: false
+          failed_when: false
 
-    - name: 启用扩展
-      ansible.builtin.command:
-        cmd: psql -d {{ pg_database }} -c "CREATE EXTENSION IF NOT EXISTS {{ item }}"
-      become_user: postgres
-      register: _ext
-      changed_when: "'CREATE EXTENSION' in _ext.stdout"
-      loop: "{{ pg_extensions }}"
-      when: not ansible_check_mode
+        - name: 创建集群（locale=C，DD-63）
+          ansible.builtin.command:
+            cmd: >-
+              pg_createcluster {{ postgres_version }} {{ pg_cluster_name }}
+              --port {{ pg_port }}
+              --
+              --locale=C
+              --encoding=UTF8
+              --waldir={{ pg_waldir }}/{{ postgres_version }}-{{ pg_cluster_name }}
+          when: >-
+            (postgres_version | string + ' ' + pg_cluster_name)
+            not in (_clusters.stdout | default(''))
 
-    - name: 断言 ICU 排序规则可用（DD-63 依赖它）
-      ansible.builtin.command:
-        cmd: >-
-          psql -d {{ pg_database }} -tAc
-          "SELECT count(*) FROM pg_collation WHERE collname IN ('ar-x-icu','en-x-icu')"
-      become_user: postgres
-      register: _icu
-      changed_when: false
-      check_mode: false
-      failed_when: false
+        - name: 启动并自启集群
+          ansible.builtin.systemd_service:
+            name: "postgresql@{{ postgres_version }}-{{ pg_cluster_name }}"
+            enabled: true
+            state: started
 
-    - name: ICU 排序规则检查
-      ansible.builtin.assert:
-        that:
-          - _icu.stdout | trim == '2'
-        fail_msg: >-
-          ICU 排序规则 ar-x-icu / en-x-icu 不可用（找到 {{ _icu.stdout | trim }} 个）。
-          DD-63 的列级 collation 依赖它们，缺失则 DDL 无法执行。
-          检查 PostgreSQL 是否以 ICU 支持编译：psql -c "SHOW lc_collate" 与 pg_collation 表。
-        success_msg: "ICU 排序规则可用：ar-x-icu · en-x-icu"
-      when: not ansible_check_mode
+        # ---------- 验证 locale 真的是 C ----------
+        # 本剧本的核心断言。集群一旦建错，后面所有工作都建在错误的地基上，
+        # 而症状要到 OS 大版本升级那天才显形。
+        - name: 查询集群 locale 与编码
+          ansible.builtin.command:
+            cmd: >-
+              psql -tAc "SELECT datcollate || '|' || datctype || '|' ||
+              pg_encoding_to_char(encoding) FROM pg_database WHERE datname='postgres'"
+          become_user: postgres
+          register: _dblocale
+          changed_when: false
+          failed_when: false
+
+        - name: 断言集群 locale 为 C、编码为 UTF8
+          ansible.builtin.assert:
+            that:
+              - _dblocale.stdout | trim == 'C|C|UTF8'
+            fail_msg: >-
+              集群 locale 为「{{ _dblocale.stdout | trim }}」，应为 C|C|UTF8（DD-63）。
+              locale 在 initdb 时确定，无法在线更改——必须删除集群重建：
+                sudo pg_dropcluster {{ postgres_version }} {{ pg_cluster_name }} --stop
+                重跑本剧本
+              若集群中已有数据，先备份。
+            success_msg: "集群 locale：{{ _dblocale.stdout | trim }}（符合 DD-63）"
+
+        # ---------- 参数 ----------
+        - name: 下发 PostgreSQL 参数
+          ansible.builtin.template:
+            src: ../files/postgresql-oss911.conf.j2
+            dest: "/etc/postgresql/{{ postgres_version }}/{{ pg_cluster_name }}/conf.d/10-oss911.conf"
+            owner: postgres
+            group: postgres
+            mode: "0644"
+          notify: restart postgresql
+
+        # ---------- 业务库与扩展 ----------
+        - name: 创建业务库
+          ansible.builtin.command:
+            cmd: createdb --template=template0 --locale=C --encoding=UTF8 {{ pg_database }}
+          become_user: postgres
+          register: _createdb
+          changed_when: _createdb.rc == 0
+          failed_when: _createdb.rc != 0 and 'already exists' not in _createdb.stderr
+
+        - name: 启用扩展
+          ansible.builtin.command:
+            cmd: psql -d {{ pg_database }} -c "CREATE EXTENSION IF NOT EXISTS {{ item }}"
+          become_user: postgres
+          register: _ext
+          changed_when: "'CREATE EXTENSION' in _ext.stdout"
+          loop: "{{ pg_extensions }}"
+
+        # ---------- ICU 可用性：DD-63 的列级 collation 依赖它 ----------
+        - name: 查询 ICU 排序规则
+          ansible.builtin.command:
+            cmd: >-
+              psql -d {{ pg_database }} -tAc
+              "SELECT count(*) FROM pg_collation WHERE collname IN ('ar-x-icu','en-x-icu')"
+          become_user: postgres
+          register: _icu
+          changed_when: false
+          failed_when: false
+
+        - name: 断言 ICU 排序规则可用
+          ansible.builtin.assert:
+            that:
+              - _icu.stdout | trim == '2'
+            fail_msg: >-
+              ICU 排序规则 ar-x-icu / en-x-icu 不可用（找到 {{ _icu.stdout | trim }} 个）。
+              DD-63 的列级 collation 依赖它们，缺失则 ddl/02_core_dimensions.sql 无法执行。
+            success_msg: "ICU 排序规则可用：ar-x-icu · en-x-icu"
+
+        # ---------- ICU 是否真的在起作用 ----------
+        # 「可用」不等于「生效」。与网段那次同一性质：断言全过，功能可以是空的。
+        # 故用真实会分叉的阿语数据比一次——ICU ar 把 همزة 变体归到一起，
+        # 字节序把同一名字的两种拼法拆到列表两端。
+        - name: 实测 ICU 排序与字节序确实不同
+          ansible.builtin.command:
+            cmd: >-
+              psql -d {{ pg_database }} -tAc
+              "WITH t(v) AS (VALUES ('أحمد'),('احمد'),('إبراهيم'),('ابراهيم'))
+               SELECT CASE WHEN
+                 (SELECT array_agg(v ORDER BY v COLLATE \"ar-x-icu\") FROM t)
+                 <> (SELECT array_agg(v ORDER BY v COLLATE \"C\") FROM t)
+               THEN 'differs' ELSE 'same' END"
+          become_user: postgres
+          register: _collcheck
+          changed_when: false
+          failed_when: false
+
+        - name: 断言 ICU 排序确实改变了结果
+          ansible.builtin.assert:
+            that:
+              - _collcheck.stdout | trim == 'differs'
+            fail_msg: >-
+              ICU 阿语排序与字节序结果相同（「{{ _collcheck.stdout | trim }}」），
+              说明列级 collation 未真正生效。与网段隔离那次同一性质：断言存在很容易，
+              验证生效才是要点。往下做没有意义，先查 PostgreSQL 的 ICU 编译支持。
+            success_msg: "ICU 阿语排序已生效（与字节序结果不同）"
 
   handlers:
     - name: restart postgresql

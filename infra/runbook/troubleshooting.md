@@ -186,3 +186,27 @@ Error: creating container storage: the container name "t-int" is already in use 
 这一条是本项目「断言通过 ≠ 功能正确」的最好例子：剧本能断言网段存在、
 名字解析正常，但这些全对的情况下，安全边界仍然可以是零。
 **凡是「隔离」「拒绝」「不可达」类的设计，验证时必须让它真的失败一次。**
+
+### 现象：`--check` 跑 20-database.yml，在「建立 WAL 目录」报 `failed to look up user postgres`
+
+- **原因** —— check 模式没有真的 `apt install postgresql-16`，
+  而 `postgres` 这个系统用户是**装包时由 postgresql-common 的 postinst 建的**。
+  包没装 → 用户不存在 → 下一步 `owner: postgres` 找不到人。
+  同理不存在的还有 `/etc/postgresql/16/main/`、`postgresql@.service` 单元
+- **不要逐个打补丁** —— 这已经是本项目 check 模式第三次绊人
+  （前两次：`command` 任务被跳过导致断言读到空串；`locale -a` 查询同理）。
+  本质是 **`--check` 无法模拟「装包 → 包建用户/目录/服务 → 下一步配置它们」这条链**。
+  对一个「先装软件再配置软件」的剧本，check 模式**天生只能验到安装之前**
+- **处置** —— 装包之后的任务整段放进
+  ```yaml
+  - name: 集群创建与配置
+    when: not ansible_check_mode
+    block:
+  ```
+  装包之前的任务（createcluster.conf、包列表）不加护栏，让 check 真正发挥作用
+- **预防** —— 写剧本时先问一句：这个任务依赖的用户 / 路径 / 服务，
+  是不是同一个 play 里前面某个包装出来的？是就必须加护栏。
+  硬凑只会让人学会忽略 `--check` 的失败，那比没有 check 更糟
+- **代价说明** —— 因此 20-database.yml 的 `--check` 只能告诉你
+  「配置文件会写成什么、包列表对不对」，**不能告诉你集群能不能建起来**。
+  集群是否正确，靠真实执行后 runbook/04 的人工核验（`\l` 三列 + ICU 排序实测）
