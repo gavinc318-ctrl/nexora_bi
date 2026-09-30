@@ -52,6 +52,13 @@
           # 既浪费时间又容易留下残留。
           create_main_cluster = false
 
+          # ★ 本文件是【全量覆盖】发行版自带的同名文件。发行版默认值里带
+          #   add_include_dir = 'conf.d'，写了这个文件就等于把它一起抹掉，
+          #   于是 pg_createcluster 生成的 postgresql.conf 里没有 include_dir，
+          #   conf.d/*.conf 写了也不加载。本项目实测踩过。
+          #   凡「覆盖发行版配置文件」，必须把原默认值里仍然需要的项一并写回。
+          add_include_dir = 'conf.d'
+
     - name: 安装 PostgreSQL 与 PostGIS
       ansible.builtin.apt:
         name: "{{ database_packages }}"
@@ -131,10 +138,11 @@
             success_msg: "集群 locale：{{ _dblocale.stdout | trim }}（符合 DD-63）"
 
         # ---------- 参数 ----------
-        # pg_createcluster 不保证建出 conf.d（本项目实测 16/main 下没有），
-        # 但 Ubuntu 的 postgresql.conf 末尾带 include_dir = 'conf.d'。
-        # 所以目录要自己建；而「include_dir 是否真的在」必须断言——
-        # 少了它，参数文件会静静躺在那里不生效，和网段那次是同一类错误。
+        # conf.d 目录与 postgresql.conf 里的 include_dir，本该由 pg_createcluster
+        # 依据 createcluster.conf 的 add_include_dir 一起生成。本项目两样都没有，
+        # 根因是上面那个「禁止自动建集群」的文件整份覆盖了发行版默认值，
+        # 把 add_include_dir 一起抹掉了。默认值已补回，但对已建好的集群无效，
+        # 故这里补目录、补 include_dir，并在下发参数后实测它是否真的生效。
         - name: 建立 conf.d 目录
           ansible.builtin.file:
             path: "{{ pg_confdir }}/conf.d"
@@ -143,23 +151,17 @@
             group: postgres
             mode: "0755"
 
-        - name: 查询 postgresql.conf 是否引入 conf.d
-          ansible.builtin.command:
-            cmd: grep -Ec "^[[:space:]]*include_dir[[:space:]]*=[[:space:]]*'conf\\.d'" {{ pg_confdir }}/postgresql.conf
-          register: _incdir
-          changed_when: false
-          check_mode: false
-          failed_when: false
-
-        - name: 断言 conf.d 已被 postgresql.conf 引入
-          ansible.builtin.assert:
-            that:
-              - _incdir.stdout | trim | int > 0
-            fail_msg: >-
-              {{ pg_confdir }}/postgresql.conf 中没有 include_dir = 'conf.d'，
-              conf.d/10-oss911.conf 写了也不会生效。在 postgresql.conf 末尾补一行
-              include_dir = 'conf.d' 后重跑本剧本。
-            success_msg: "conf.d 已被 postgresql.conf 引入"
+        # 已经建好的集群，postgresql.conf 已经生成，改 createcluster.conf 救不回来，
+        # 所以这里直接把 include_dir 补进去（幂等）。
+        - name: 确保 postgresql.conf 引入 conf.d
+          ansible.builtin.lineinfile:
+            path: "{{ pg_confdir }}/postgresql.conf"
+            line: "include_dir = 'conf.d'"
+            regexp: "^[#[:space:]]*include_dir[[:space:]]*=[[:space:]]*'conf\\.d'"
+            owner: postgres
+            group: postgres
+            mode: "0644"
+          notify: restart postgresql
 
         - name: 下发 PostgreSQL 参数
           ansible.builtin.template:

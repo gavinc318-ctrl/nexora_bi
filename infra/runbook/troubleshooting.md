@@ -211,21 +211,27 @@ Error: creating container storage: the container name "t-int" is already in use 
   「配置文件会写成什么、包列表对不对」，**不能告诉你集群能不能建起来**。
   集群是否正确，靠真实执行后 runbook/04 的人工核验（`\l` 三列 + ICU 排序实测）
 
-### 现象：`下发 PostgreSQL 参数` 报 `Destination directory /etc/postgresql/16/main/conf.d does not exist`
+### 现象：`下发 PostgreSQL 参数` 报 conf.d 不存在；补了目录后又发现 postgresql.conf 里没有 include_dir
 
-- **原因** —— `pg_createcluster` 建出了集群目录，但**没有建 `conf.d`**。
-  Ubuntu 的 `postgresql.conf` 末尾带 `include_dir = 'conf.d'`，
-  引用了一个不存在的目录（PostgreSQL 对 `include_dir` 指向的空缺是容忍的，
-  不报错、不加载），所以只有往里写文件时才暴露
-- **处置** —— 剧本已补 `建立 conf.d 目录`（owner postgres，0755）
-- **更要紧的一点** —— 这个错其实是幸运的：它**响了**。
-  真正危险的是反过来——目录在、文件写进去了，但 `postgresql.conf` 里
-  没有 `include_dir`，于是参数静静地不生效，一切看起来正常。
-  与网段隔离那次同一性质。故剧本同时加了两道：
-  1. 断言 `postgresql.conf` 确实含 `include_dir = 'conf.d'`
-  2. 下发后 `flush_handlers` 重启，再 `SHOW shared_buffers` 断言实际值为 8GB
+- **根因（一个，不是两个）** —— 本剧本在装包前整份写了
+  `/etc/postgresql-common/createcluster.conf`，只放了 `create_main_cluster = false`。
+  发行版自带的同名文件里还有 `add_include_dir = 'conf.d'`，
+  **整份覆盖等于把它一起抹掉**。于是 `pg_createcluster` 既不建 conf.d 目录，
+  也不往 postgresql.conf 里写 `include_dir`
+- **为什么不是装完就报错** —— 参数文件没地方放时才会暴露。
+  更糟的分支是：目录被手工建出来、文件也写进去了，但 `include_dir` 仍然缺，
+  于是参数**静默不生效**，`\l` 正常、服务正常、一切看起来对。
+  与网段隔离那次同一性质
+- **处置** ——
+  1. createcluster.conf 补回 `add_include_dir = 'conf.d'`（对**将来**重建的集群有效）
+  2. 剧本补 `建立 conf.d 目录` 与 `确保 postgresql.conf 引入 conf.d`（lineinfile，幂等），
+     救**已经建好**的集群——集群一旦创建，改 createcluster.conf 不会回头生效
+  3. 下发参数后 `flush_handlers` 重启，再 `SHOW shared_buffers` 断言实际值为 8GB，
+     验的是「加载了」而不是「写成功了」
+- **通用教训** —— **凡整份覆盖发行版自带的配置文件，必须先看原文件里还有什么仍然需要的项。**
+  离网重建时这类坑没有网可查，只能靠这份记录
 - **排查用** ——
   ```bash
-  sudo -u postgres psql -tAc "SELECT name, setting, sourcefile FROM pg_settings WHERE name='shared_buffers'"
+  sudo -u postgres psql -tAc "SELECT setting, sourcefile FROM pg_settings WHERE name='shared_buffers'"
   ```
   `sourcefile` 指向哪个文件，哪个文件才是真正生效的
