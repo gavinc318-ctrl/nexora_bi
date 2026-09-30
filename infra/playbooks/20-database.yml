@@ -204,13 +204,21 @@
           changed_when: _createdb.rc == 0
           failed_when: _createdb.rc != 0 and 'already exists' not in _createdb.stderr
 
+        # CREATE EXTENSION IF NOT EXISTS 即使什么都没做，也照样返回命令标签
+        # 「CREATE EXTENSION」，所以不能拿 stdout 判断改没改——要先查再建。
+        - name: 查询已启用的扩展
+          ansible.builtin.command:
+            cmd: psql -d {{ pg_database }} -tAc "SELECT extname FROM pg_extension"
+          become_user: postgres
+          register: _ext_have
+          changed_when: false
+
         - name: 启用扩展
           ansible.builtin.command:
-            cmd: psql -d {{ pg_database }} -c "CREATE EXTENSION IF NOT EXISTS {{ item }}"
+            cmd: psql -d {{ pg_database }} -c "CREATE EXTENSION {{ item }}"
           become_user: postgres
-          register: _ext
-          changed_when: "'CREATE EXTENSION' in _ext.stdout"
           loop: "{{ pg_extensions }}"
+          when: item not in (_ext_have.stdout_lines | map('trim') | list)
 
         # ---------- ICU 可用性：DD-63 的列级 collation 依赖它 ----------
         - name: 查询 ICU 排序规则

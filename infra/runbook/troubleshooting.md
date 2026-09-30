@@ -235,3 +235,17 @@ Error: creating container storage: the container name "t-int" is already in use 
   sudo -u postgres psql -tAc "SELECT setting, sourcefile FROM pg_settings WHERE name='shared_buffers'"
   ```
   `sourcefile` 指向哪个文件，哪个文件才是真正生效的
+
+### 现象：`启用扩展` 每次都 changed，剧本永远不收敛到 changed=0
+
+- **原因** —— `CREATE EXTENSION IF NOT EXISTS postgis` 即使**什么都没做**，
+  也照样返回命令标签 `CREATE EXTENSION`（"没做"只体现在 stderr 的 NOTICE 里）。
+  原来的 `changed_when: "'CREATE EXTENSION' in _ext.stdout"` 于是恒为真
+- **处置** —— 改成先查后建：`SELECT extname FROM pg_extension` 取现状，
+  再用 `when: item not in (...)` 决定是否执行
+- **通用教训** —— **SQL 的命令标签只说明语句执行成功，不说明状态发生了变化。**
+  凡 `IF NOT EXISTS` / `OR REPLACE` / `CREATE ... IF NOT EXISTS` 这类幂等语句，
+  都不能靠输出判断 changed，只能先查现状。
+  后面写 DDL 部署剧本时会大量遇到这个问题
+- **为什么要在意** —— 一个永远 changed 的任务会让「第二遍 changed=0」这条
+  验收标准失效，而那是离网重建时判断"环境是否已就位"的主要手段
