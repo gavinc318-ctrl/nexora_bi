@@ -210,3 +210,22 @@ Error: creating container storage: the container name "t-int" is already in use 
 - **代价说明** —— 因此 20-database.yml 的 `--check` 只能告诉你
   「配置文件会写成什么、包列表对不对」，**不能告诉你集群能不能建起来**。
   集群是否正确，靠真实执行后 runbook/04 的人工核验（`\l` 三列 + ICU 排序实测）
+
+### 现象：`下发 PostgreSQL 参数` 报 `Destination directory /etc/postgresql/16/main/conf.d does not exist`
+
+- **原因** —— `pg_createcluster` 建出了集群目录，但**没有建 `conf.d`**。
+  Ubuntu 的 `postgresql.conf` 末尾带 `include_dir = 'conf.d'`，
+  引用了一个不存在的目录（PostgreSQL 对 `include_dir` 指向的空缺是容忍的，
+  不报错、不加载），所以只有往里写文件时才暴露
+- **处置** —— 剧本已补 `建立 conf.d 目录`（owner postgres，0755）
+- **更要紧的一点** —— 这个错其实是幸运的：它**响了**。
+  真正危险的是反过来——目录在、文件写进去了，但 `postgresql.conf` 里
+  没有 `include_dir`，于是参数静静地不生效，一切看起来正常。
+  与网段隔离那次同一性质。故剧本同时加了两道：
+  1. 断言 `postgresql.conf` 确实含 `include_dir = 'conf.d'`
+  2. 下发后 `flush_handlers` 重启，再 `SHOW shared_buffers` 断言实际值为 8GB
+- **排查用** ——
+  ```bash
+  sudo -u postgres psql -tAc "SELECT name, setting, sourcefile FROM pg_settings WHERE name='shared_buffers'"
+  ```
+  `sourcefile` 指向哪个文件，哪个文件才是真正生效的

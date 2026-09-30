@@ -21,6 +21,10 @@
   hosts: all
   become: true
 
+  vars:
+    # 集群配置目录：Debian/Ubuntu 的固定布局，由 pg_createcluster 决定，不放 inventory
+    pg_confdir: "/etc/postgresql/{{ postgres_version }}/{{ pg_cluster_name }}"
+
   tasks:
 
     # ================= 装包前：check 模式下可验 =================
@@ -127,14 +131,67 @@
             success_msg: "集群 locale：{{ _dblocale.stdout | trim }}（符合 DD-63）"
 
         # ---------- 参数 ----------
+        # pg_createcluster 不保证建出 conf.d（本项目实测 16/main 下没有），
+        # 但 Ubuntu 的 postgresql.conf 末尾带 include_dir = 'conf.d'。
+        # 所以目录要自己建；而「include_dir 是否真的在」必须断言——
+        # 少了它，参数文件会静静躺在那里不生效，和网段那次是同一类错误。
+        - name: 建立 conf.d 目录
+          ansible.builtin.file:
+            path: "{{ pg_confdir }}/conf.d"
+            state: directory
+            owner: postgres
+            group: postgres
+            mode: "0755"
+
+        - name: 查询 postgresql.conf 是否引入 conf.d
+          ansible.builtin.command:
+            cmd: grep -Ec "^[[:space:]]*include_dir[[:space:]]*=[[:space:]]*'conf\\.d'" {{ pg_confdir }}/postgresql.conf
+          register: _incdir
+          changed_when: false
+          check_mode: false
+          failed_when: false
+
+        - name: 断言 conf.d 已被 postgresql.conf 引入
+          ansible.builtin.assert:
+            that:
+              - _incdir.stdout | trim | int > 0
+            fail_msg: >-
+              {{ pg_confdir }}/postgresql.conf 中没有 include_dir = 'conf.d'，
+              conf.d/10-oss911.conf 写了也不会生效。在 postgresql.conf 末尾补一行
+              include_dir = 'conf.d' 后重跑本剧本。
+            success_msg: "conf.d 已被 postgresql.conf 引入"
+
         - name: 下发 PostgreSQL 参数
           ansible.builtin.template:
             src: ../files/postgresql-oss911.conf.j2
-            dest: "/etc/postgresql/{{ postgres_version }}/{{ pg_cluster_name }}/conf.d/10-oss911.conf"
+            dest: "{{ pg_confdir }}/conf.d/10-oss911.conf"
             owner: postgres
             group: postgres
             mode: "0644"
           notify: restart postgresql
+
+        # 参数要在建库之前真正加载，否则本次运行里的验证读到的是旧值
+        - name: 立即应用参数变更
+          ansible.builtin.meta: flush_handlers
+
+        - name: 查询关键参数实际值
+          ansible.builtin.command:
+            cmd: psql -tAc "SHOW shared_buffers"
+          become_user: postgres
+          register: _shb
+          changed_when: false
+          failed_when: false
+
+        - name: 断言参数文件确实生效
+          ansible.builtin.assert:
+            that:
+              - _shb.stdout | trim == '8GB'
+            fail_msg: >-
+              shared_buffers 实际为「{{ _shb.stdout | trim }}」，期望 8GB。
+              说明 conf.d/10-oss911.conf 没有被加载。用
+                sudo -u postgres psql -tAc "SELECT sourcefile FROM pg_settings WHERE name='shared_buffers'"
+              查实际生效的文件是哪一个。
+            success_msg: "参数文件已生效（shared_buffers = {{ _shb.stdout | trim }}）"
 
         # ---------- 业务库与扩展 ----------
         - name: 创建业务库
