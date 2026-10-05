@@ -25,15 +25,15 @@ metrics:
     aggregation: count
     measure: "1"
     entity_date: date_key
-    definition: "进入话务平台的呼叫数"
+    definition: "进入话务平台的呼入呼叫数，按 CALLID 去重；CALLTYPE 属呼入集合。含仅经 IVR 结束、未进入排队的呼叫"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
     source_tables: [core.fact_call]
-    version: 1
+    version: 2
     depends_unverified: false
     retrospective: false
     published: true
     rfp: "1.6.2.20"
-    notes: "需确认是否含未进入排队的呼叫"
+    notes: "口径已明确：话单保留 IVR 腿，故含不含未排队呼叫可分可合，本版含。来源与对账基准见 metrics/icp_source_map.yaml"
   - code: M-C02
     domain: 接警话务
     name_zh: "应答量"
@@ -41,15 +41,15 @@ metrics:
     aggregation: count
     measure: "1"
     entity_date: date_key
-    definition: "坐席应答的呼叫数"
+    definition: "存在坐席腿且该腿已接通的呼叫数，按 CALLID 去重"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
     source_tables: [core.fact_call]
-    version: 1
+    version: 2
     depends_unverified: false
     retrospective: false
     published: true
     rfp: "1.6.2.20"
-    notes: ""
+    notes: "自算规则与对账基准见 metrics/icp_source_map.yaml"
   - code: M-C03
     domain: 接警话务
     name_zh: "放弃量"
@@ -57,15 +57,15 @@ metrics:
     aggregation: count
     measure: "1"
     entity_date: date_key
-    definition: "主叫在应答前挂断的呼叫数"
+    definition: "有排队腿、无已接通坐席腿，且由主叫释放的呼叫数"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
     source_tables: [core.fact_call]
-    version: 1
+    version: 2
     depends_unverified: false
     retrospective: false
     published: true
     rfp: "1.6.2.20"
-    notes: "与未接的区别须在口径中写明"
+    notes: "与未接的区别已写明：未接是呈现到坐席而未应答（M-C12），放弃是在队列上由主叫挂断。平台把主叫挂断与呼损分开计，对账时不可混用——见 metrics/icp_source_map.yaml"
   - code: M-C04
     domain: 接警话务
     name_zh: "应答率"
@@ -81,7 +81,7 @@ metrics:
     retrospective: false
     published: true
     rfp: "1.6.2.20"
-    notes: ""
+    notes: "对账基准 IDX_01_02_003 与 IDX_03_05_001，见 metrics/icp_source_map.yaml"
   - code: M-C05
     domain: 接警话务
     name_zh: "X 秒应答率"
@@ -97,39 +97,39 @@ metrics:
     retrospective: false
     published: true
     rfp: "1.6.2.20"
-    notes: "X 的取值待 MOI 确认"
+    notes: "X 的取值待 MOI 确认。平台只有 5 秒步长、5 至 50 秒的固定档位，X 若不落在档位上则失去对账基准，定档时应优先取平台档位"
   - code: M-C06
     domain: 接警话务
     name_zh: "平均等待时长"
     grain: call   # 通话
     aggregation: avg
-    measure: "answered_at - offered_at"
+    measure: "排队腿 WAITEND − WAITBEGIN"
     entity_date: date_key
-    definition: "呼入到应答的平均时长"
+    definition: "呼叫在技能队列上的等待时长均值"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
     source_tables: [core.fact_call]
-    version: 1
+    version: 2
     depends_unverified: false
     retrospective: false
     published: true
     rfp: "1.6.2.20"
-    notes: ""
+    notes: "不取整通呼叫的首末时间差。平台把已应答呼叫的等待与全部排队呼叫的等待分列，对账前须声明算的是哪一个——见 metrics/icp_source_map.yaml"
   - code: M-C07
     domain: 接警话务
     name_zh: "平均通话时长"
     grain: call   # 通话
     aggregation: avg
-    measure: "ended_at - answered_at"
+    measure: "坐席腿 CALLEND − CALLBEGIN"
     entity_date: date_key
-    definition: "应答到挂断的平均时长"
+    definition: "呼叫在坐席上的通话时长均值；一通呼叫经多个坐席时各腿分别计入"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
     source_tables: [core.fact_call]
-    version: 1
+    version: 2
     depends_unverified: false
     retrospective: false
     published: true
     rfp: "1.6.2.20"
-    notes: ""
+    notes: "见 metrics/icp_source_map.yaml"
   - code: M-C08
     domain: 接警话务
     name_zh: "应答前振铃次数"
@@ -145,7 +145,7 @@ metrics:
     retrospective: false
     published: false
     rfp: "1.6.2.20"
-    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+    notes: "IR-11 已由 CloudICP 接口文档回答：ICP 提供原始话单，不止状态快照。但话单无振铃次数字段，平台也只有振铃呼叫数而非次数，故本指标按原口径仍不可交付。替代口径（振铃未应答呼叫数或振铃时长）须 MOI 认可后换编号重记。R-03 至 R-07 五张报表不再因此作废——其余七项均可交付"
   - code: M-C09
     domain: 接警话务
     name_zh: "呈现给坐席的呼叫数"
@@ -153,15 +153,15 @@ metrics:
     aggregation: count
     measure: "见 definition"
     entity_date: date_key
-    definition: "分配到某坐席的呼叫数"
+    definition: "进入坐席设备的呼叫数，不论是否应答"
     dimensions: [dim_date, dim_site, dim_agent]
     source_tables: [core.fact_call]
-    version: 1
-    depends_unverified: true
+    version: 2
+    depends_unverified: false
     retrospective: false
-    published: false
+    published: true
     rfp: "1.6.2.20"
-    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+    notes: "IR-11 已答，改为可交付。自算规则见 metrics/icp_source_map.yaml"
   - code: M-C10
     domain: 接警话务
     name_zh: "坐席实际处理数"
@@ -169,15 +169,15 @@ metrics:
     aggregation: count
     measure: "见 definition"
     entity_date: date_key
-    definition: "该坐席实际应答的呼叫数"
+    definition: "该坐席实际接通的呼叫数"
     dimensions: [dim_date, dim_site, dim_agent]
     source_tables: [core.fact_call]
-    version: 1
-    depends_unverified: true
+    version: 2
+    depends_unverified: false
     retrospective: false
-    published: false
+    published: true
     rfp: "1.6.2.20"
-    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+    notes: "IR-11 已答，改为可交付。自算规则见 metrics/icp_source_map.yaml"
   - code: M-C11
     domain: 接警话务
     name_zh: "挂断方"
@@ -185,15 +185,15 @@ metrics:
     aggregation: avg
     measure: "见 definition"
     entity_date: date_key
-    definition: "挂断由坐席方还是主叫方发起"
+    definition: "按话单释放原因归为坐席方挂断或主叫方挂断"
     dimensions: [dim_date, dim_site, dim_agent]
     source_tables: [core.fact_call]
-    version: 1
-    depends_unverified: true
+    version: 2
+    depends_unverified: false
     retrospective: false
-    published: false
+    published: true
     rfp: "1.6.2.20"
-    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+    notes: "IR-11 已答，改为可交付。释放原因码归类表须在联调时用真实数据核对一遍，不能只按文档归类——见 metrics/icp_source_map.yaml"
   - code: M-C12
     domain: 接警话务
     name_zh: "未接呼叫数"
@@ -201,15 +201,15 @@ metrics:
     aggregation: count
     measure: "见 definition"
     entity_date: date_key
-    definition: "呈现但未被任何坐席应答的呼叫数"
+    definition: "呈现到坐席而未被应答的呼叫数"
     dimensions: [dim_date, dim_site, dim_agent]
     source_tables: [core.fact_call]
-    version: 1
-    depends_unverified: true
+    version: 2
+    depends_unverified: false
     retrospective: false
-    published: false
+    published: true
     rfp: "1.6.2.20"
-    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+    notes: "IR-11 已答，改为可交付。自算规则见 metrics/icp_source_map.yaml"
   - code: M-C13
     domain: 接警话务
     name_zh: "转接呼叫数"
@@ -217,15 +217,15 @@ metrics:
     aggregation: count
     measure: "见 definition"
     entity_date: date_key
-    definition: "被转接的呼叫数"
+    definition: "同一呼叫经过两个及以上坐席，或话单原因码指示转接的呼叫数"
     dimensions: [dim_date, dim_site, dim_agent]
     source_tables: [core.fact_call]
-    version: 1
-    depends_unverified: true
+    version: 2
+    depends_unverified: false
     retrospective: false
-    published: false
+    published: true
     rfp: "1.6.2.20"
-    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+    notes: "IR-11 已答，改为可交付。平台区分内部转接、转出与排队超时转移三类，对账时须加总并注意超时转移未必算坐席转接——见 metrics/icp_source_map.yaml"
   - code: M-C14
     domain: 接警话务
     name_zh: "骚扰呼叫数"
@@ -241,7 +241,7 @@ metrics:
     retrospective: false
     published: false
     rfp: "1.6.2.20"
-    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+    notes: "IR-11 已答，但话单与平台指标均无骚扰或恶意标记。该标记只可能产生于话务台或 CAD 的人工操作，来源未定（IR-46），在此之前不发布"
   - code: M-C15
     domain: 接警话务
     name_zh: "同一主叫失败次数"
@@ -249,15 +249,15 @@ metrics:
     aggregation: count
     measure: "见 definition"
     entity_date: date_key
-    definition: "同一主叫在时间窗内的未接通次数"
+    definition: "同一主叫在时间窗内未接通的呼叫次数"
     dimensions: [dim_date, dim_site, dim_agent]
     source_tables: [core.fact_call]
-    version: 1
-    depends_unverified: true
+    version: 2
+    depends_unverified: false
     retrospective: false
-    published: false
+    published: true
     rfp: "1.6.2.20"
-    notes: "依赖 IR-11。ICP 若仅提供当前状态快照则本指标无法交付，R-03 至 R-07 五张报表随之作废"
+    notes: "IR-11 已答，改为可交付。平台无对应指标，无对账基准；另须确认主叫号码是否按隐私策略做过掩码，掩码则分组键失效（IR-46）"
   - code: M-I01
     domain: 警情处置
     name_zh: "警情量"
@@ -561,7 +561,7 @@ metrics:
     retrospective: false
     published: true
     rfp: ""
-    notes: ""
+    notes: "话单只记呼叫不记签入签出，日粒度取平台的签入签出统计（DD-65）；某时刻在岗的实时值取实时接口，仅供看板"
   - code: M-R02
     domain: 资源与勤务
     name_zh: "在岗时长"
@@ -572,12 +572,12 @@ metrics:
     definition: "坐席累计在岗时长"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
     source_tables: [core.fact_agent_state]
-    version: 1
+    version: 2
     depends_unverified: false
     retrospective: false
     published: true
     rfp: ""
-    notes: ""
+    notes: "来源为平台历史指标 IDX_04_02_002（DD-65）。日累计值，不可下钻到单次状态变化，报表须标注来源"
   - code: M-R03
     domain: 资源与勤务
     name_zh: "状态时长"
@@ -588,28 +588,28 @@ metrics:
     definition: "就绪、通话、事后处理、离席各状态时长"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
     source_tables: [core.fact_agent_state]
-    version: 1
-    depends_unverified: true
+    version: 2
+    depends_unverified: false
     retrospective: false
     published: true
     rfp: ""
-    notes: "精度受 IR-09 影响；measure_method 为 sampled 时须在报表上标注测量方式"
+    notes: "来源为平台历史指标 IDX_04_02_* 各状态时长（DD-65），非本方采样。日累计值，不可下钻到单次状态变化，报表须标注来源——原 measure_method 为 sampled 的说法作废"
   - code: M-R04
     domain: 资源与勤务
     name_zh: "占用率"
     grain: agent_day   # 坐席日
     aggregation: avg
-    measure: "见 definition"
+    measure: "（平台应答时长 + 事后处理时长） / 平台签入时长"
     entity_date: date_key
     definition: "通话与事后处理时长占在岗时长的比例"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
     source_tables: [core.fact_agent_state]
-    version: 1
+    version: 2
     depends_unverified: false
     retrospective: false
     published: true
     rfp: ""
-    notes: ""
+    notes: "三个输入均来自平台历史指标（DD-65），本方只做相除。分子分母的口径随平台定义走"
   - code: M-R05
     domain: 资源与勤务
     name_zh: "警员出动次数"
@@ -705,7 +705,7 @@ metrics:
     retrospective: false
     published: true
     rfp: ""
-    notes: ""
+    notes: "呼叫部分同 M-C10，按话单归属到工号（AS-31 保证工号与自然人一一对应）；警情部分取自 core.fact_intake"
   - code: M-P02
     domain: 绩效与质量
     name_zh: "质检得分"

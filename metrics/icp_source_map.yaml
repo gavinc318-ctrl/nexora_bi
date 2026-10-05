@@ -1,0 +1,160 @@
+# =====================================================================
+# OSS911 BI/DW  话务指标来源对照  icp_source_map.yaml
+#
+# 本文件回答一件事：每一个话务相关指标，数由谁出。
+#
+# 规则（DD-64）：凡进入考核、报表与封账的话务指标，一律由本方从 ICP 原始话单
+# 自算；平台的 IDX 指标只作对账基准与实时看板。
+# 例外（DD-65）：话单里根本不存在的事实——坐席状态时长就是典型——
+# 没有明细可算，此类指标以平台历史指标为唯一来源，并在报表上标注来源且不可下钻。
+#
+# source 取值：
+#   self_cdr        从话单自算，平台指标作对账基准
+#   platform_index  以平台历史指标为唯一来源（DD-65 的例外）
+#   unavailable     两边都没有，口径须重新商定
+#
+# 话单腿的写法（LD-01 4.3）：
+#   queue_leg  DEVICETYPE = 1 的话单行（技能队列）
+#   agent_leg  DEVICETYPE = 2 的话单行（坐席，DEVICENO 即工号）
+#   ivr_leg    DEVICETYPE = 3 的话单行
+#   一通呼叫由同一 CALLID 的多行组成，CALLIDNUM 1 为首行、-1 为末行。
+#
+# 平台指标编号的含义见 3rd API/icp_indexes.csv（由 tools/icp_idx.py 从接口文档生成）。
+# 接口文档换版本须重跑该脚本并逐条复核本文件引用的编号是否仍然存在。
+# =====================================================================
+version: 1
+generated_from: CloudICP V100R023C00 Interface Reference · CMS Server Interface 附录
+rule: DD-64 · DD-65
+
+metrics:
+
+  - code: M-C01            # 呼入量
+    source: self_cdr
+    self_rule: "按 CALLID 去重计数，CALLTYPE 属呼入集合（0,5,13,15,20,21,22,23,46）。含仅经 IVR 结束、从未进入排队的呼叫——话单保留 ivr_leg，故该口径可分可合。"
+    recon_index: [IDX_01_02_001]
+    recon_grain: vdn_day
+    caveat: "平台口径为 VDN 日粒度总呼入。若本方按技能队列切分，需与 IDX_03_04_001（队列呼叫请求数）另行比对——两者分母不同，不可混用。"
+
+  - code: M-C02            # 应答量
+    source: self_cdr
+    self_rule: "存在 agent_leg 且其 CALLBEGIN 非空的呼叫数，按 CALLID 去重。"
+    recon_index: [IDX_01_02_002, IDX_03_04_002]
+    recon_grain: vdn_day / skill_day
+
+  - code: M-C03            # 放弃量
+    source: self_cdr
+    self_rule: "存在 queue_leg、不存在 CALLBEGIN 非空的 agent_leg，且释放源为主叫的呼叫数。释放源取自 RELEASECAUSE（释放原因码表见接口文档附录）。"
+    recon_index: [IDX_03_04_006, IDX_03_04_003]
+    recon_grain: skill_day
+    caveat: "平台把「主叫挂断」（IDX_03_04_006）与「呼损」（IDX_03_04_003）分开计，后者含平台中断（IDX_03_04_007）与坐席挂断（IDX_03_04_005）。本方「放弃」只对应前者。这正是 M-C03 原 notes 要求写明的「放弃与未接的区别」。"
+
+  - code: M-C04            # 应答率
+    source: self_cdr
+    self_rule: "M-C02 / M-C01。"
+    recon_index: [IDX_01_02_003, IDX_03_05_001]
+    recon_grain: vdn_day / skill_day
+
+  - code: M-C05            # X 秒应答率
+    source: self_cdr
+    self_rule: "queue_leg 的 WAITEND − WAITBEGIN ≤ X 且该呼叫被应答的比例。X 由 MOI 定。"
+    recon_index: [IDX_03_09_041, IDX_03_09_042, IDX_03_09_043, IDX_03_09_044, IDX_03_09_045, IDX_03_09_046, IDX_03_09_047, IDX_03_09_048, IDX_03_09_049, IDX_03_09_050]
+    recon_grain: skill_day
+    caveat: "平台只提供 5 秒步长、5 至 50 秒的固定档位。X 若不是 5 的倍数或超过 50 秒，平台没有对应指标，这一条就失去对账基准——本方仍可交付，但差异无从比对。X 定档时应优先落在平台档位上。"
+
+  - code: M-C06            # 平均等待时长
+    source: self_cdr
+    self_rule: "queue_leg 的 WAITEND − WAITBEGIN 的均值。不取整通呼叫的首末时间差。"
+    recon_index: [IDX_03_06_003, IDX_03_06_001, IDX_01_02_013]
+    recon_grain: skill_day / vdn_day
+    caveat: "平台把「已应答呼叫的等待」（IDX_03_06_003）与「全部排队呼叫的等待」（IDX_03_06_001）分列。对账前须先声明本方算的是哪一个——这是最容易对不上的一处。"
+
+  - code: M-C07            # 平均通话时长
+    source: self_cdr
+    self_rule: "agent_leg 的 CALLEND − CALLBEGIN 的均值。一通呼叫经多个坐席时各腿分别计入。"
+    recon_index: [IDX_03_06_005, IDX_01_02_012, IDX_04_04_010]
+    recon_grain: skill_day / vdn_day / agent_day
+
+  - code: M-C08            # 应答前振铃次数
+    source: unavailable
+    self_rule: null
+    recon_index: [IDX_04_04_005, IDX_04_04_006]
+    caveat: "话单没有振铃次数字段，只有时间；平台也只有「振铃待应答呼叫数」与「振铃未应答呼叫数」，都是呼叫数不是次数。本指标按原口径不可交付。可行的替代是改口径为「振铃未应答呼叫数」或「振铃时长」，须 MOI 认可后换编号重记。"
+
+  - code: M-C09            # 呈现给坐席的呼叫数
+    source: self_cdr
+    self_rule: "agent_leg 的行数，按 DEVICENO 分组——呼叫进入坐席设备即为呈现，不论是否应答。"
+    recon_index: [IDX_04_04_001]
+    recon_grain: agent_day
+
+  - code: M-C10            # 坐席实际处理数
+    source: self_cdr
+    self_rule: "agent_leg 中 CALLBEGIN 非空的行数，按 DEVICENO 分组。"
+    recon_index: [IDX_04_04_002, IDX_04_02_003]
+    recon_grain: agent_day
+
+  - code: M-C11            # 挂断方
+    source: self_cdr
+    self_rule: "取 agent_leg 的 RELEASECAUSE，按释放源归为坐席方或主叫方。释放原因码与释放源对照表见接口文档附录 Call Release Cause Codes。"
+    recon_index: [IDX_03_04_005, IDX_03_04_006]
+    recon_grain: skill_day
+    caveat: "释放原因码数量多且跨多页，归类表须在联调时用真实数据核对一遍，不能只按文档归类。"
+
+  - code: M-C12            # 未接呼叫数
+    source: self_cdr
+    self_rule: "存在 agent_leg 但其 CALLBEGIN 为空的呼叫数——呈现到坐席而未被应答。"
+    recon_index: [IDX_04_04_006, IDX_04_04_007]
+    recon_grain: agent_day
+
+  - code: M-C13            # 转接呼叫数
+    source: self_cdr
+    self_rule: "同一 CALLID 下存在两个及以上 agent_leg，或 UCENTERREASON / UCLEAVEREASON 指示转接的呼叫数。"
+    recon_index: [IDX_04_02_024, IDX_04_02_023, IDX_03_07_004]
+    recon_grain: agent_day / skill_day
+    caveat: "平台区分内部转接（IDX_04_02_023）、转出（IDX_04_02_024）与排队超时转移（IDX_03_07_003 · IDX_03_07_004）。本方若只出一个总数，对账时要把三类加总，且超时转移未必算作「坐席转接」。"
+
+  - code: M-C14            # 骚扰呼叫数
+    source: unavailable
+    self_rule: null
+    recon_index: []
+    caveat: "话单与平台指标都没有骚扰或恶意标记。该标记若存在，只能产生于话务台或 CAD 的人工操作，须另定来源（IR-46）。在来源确定前不发布。"
+
+  - code: M-C15            # 同一主叫失败次数
+    source: self_cdr
+    self_rule: "按 CALLERNO 与时间窗分组，统计窗内无 CALLBEGIN 非空 agent_leg 的呼叫次数。"
+    recon_index: []
+    recon_grain: null
+    caveat: "平台无对应指标，无对账基准。另需确认主叫号码是否在话单中完整保留——若按隐私策略做了掩码或匿名，本指标的分组键失效（并入 IR-46 一并问）。"
+
+  - code: M-R01            # 在岗坐席数
+    source: platform_index
+    self_rule: null
+    recon_index: [IDX_04_03_001]
+    recon_grain: agent_day
+    caveat: "话单只记呼叫，不记签入签出。日粒度取平台的签入签出统计；某时刻在岗的实时值取 rindex/agent 或 real/agent（看板用，不进封账）。"
+
+  - code: M-R02            # 在岗时长
+    source: platform_index
+    self_rule: null
+    recon_index: [IDX_04_02_002]
+    recon_grain: agent_day
+
+  - code: M-R03            # 状态时长
+    source: platform_index
+    self_rule: null
+    recon_index: [IDX_04_02_021, IDX_04_02_010, IDX_04_02_013, IDX_04_02_019, IDX_04_02_016, IDX_04_02_022]
+    recon_grain: agent_day
+    caveat: "分别为：应答时长、事后处理时长、休息时长、示忙时长、保持时长、空闲时长。平台另给出各状态的次数与平均时长，可直接取用。这些是日累计值，不可下钻到某一次状态变化——报表上须标注来源与不可下钻（DD-65）。"
+
+  - code: M-R04            # 占用率
+    source: platform_index
+    self_rule: "（IDX_04_02_021 应答时长 + IDX_04_02_010 事后处理时长） / IDX_04_02_002 签入时长。"
+    recon_index: []
+    recon_grain: agent_day
+    caveat: "由平台指标相除得到，分子分母的口径随平台定义走。平台未直接提供占用率，故本方自行相除，但两个输入都来自平台，仍属 platform_index 一类。"
+
+  - code: M-P01            # 个人处理量
+    source: self_cdr
+    self_rule: "呼叫部分同 M-C10（按 DEVICENO 分组的已应答 agent_leg）；警情部分取自 core.fact_intake，与话务无关。"
+    recon_index: [IDX_04_02_003]
+    recon_grain: agent_day
+    caveat: "跨月归属按话单的 WAITBEGIN 归日，与平台的日统计一致。"
