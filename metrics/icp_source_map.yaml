@@ -9,9 +9,10 @@
 # 没有明细可算，此类指标以平台历史指标为唯一来源，并在报表上标注来源且不可下钻。
 #
 # source 取值：
-#   self_cdr        从话单自算，平台指标作对账基准
-#   platform_index  以平台历史指标为唯一来源（DD-65 的例外）
-#   unavailable     两边都没有，口径须重新商定
+#   self_cdr         从话单自算，平台指标作对账基准
+#   platform_detail  平台给的是明细而非累计（签入签出区间），本方自算，可下钻、可按班次切分
+#   platform_index   以平台历史指标为唯一来源（DD-65 的例外），日累计、不可下钻
+#   unavailable      两边都没有，口径须重新商定
 #
 # 话单腿的写法（LD-01 4.3）：
 #   queue_leg  DEVICETYPE = 1 的话单行（技能队列）
@@ -126,17 +127,18 @@ metrics:
     caveat: "平台无对应指标，无对账基准。另需确认主叫号码是否在话单中完整保留——若按隐私策略做了掩码或匿名，本指标的分组键失效（并入 IR-46 一并问）。"
 
   - code: M-R01            # 在岗坐席数
-    source: platform_index
-    self_rule: null
-    recon_index: [IDX_04_03_001]
+    source: platform_detail
+    self_rule: "由 core.fact_agent_session 的签入区间求某时刻的覆盖数。IDX_04_03_001 返回的是 {inTime, outTime, duration} 区间数组，是明细不是累计，故可自算、可下钻、可按班次窗口求交（DD-53）。"
+    recon_index: [IDX_04_02_001]
     recon_grain: agent_day
-    caveat: "话单只记呼叫，不记签入签出。日粒度取平台的签入签出统计；某时刻在岗的实时值取 rindex/agent 或 real/agent（看板用，不进封账）。"
+    caveat: "实时的在岗人数另取实时接口，仅供看板，不进封账（LD-01 4.5）。"
 
   - code: M-R02            # 在岗时长
-    source: platform_index
-    self_rule: null
+    source: platform_detail
+    self_rule: "core.fact_agent_session 的 duration_seconds 按坐席日合计。取源端给出的 duration，不由本方用签出减签入重算。"
     recon_index: [IDX_04_02_002]
     recon_grain: agent_day
+    caveat: "与 IDX_04_02_002 构成一组对账：两者来自同一平台的两个接口，差异即平台内部的口径差，不得由本方调平。本指标可按班次切分，而 M-R03 与 M-R04 不可——同一组报表里两类指标的可切分性不同，须在报表规格中写明。"
 
   - code: M-R03            # 状态时长
     source: platform_index

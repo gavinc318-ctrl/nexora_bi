@@ -41,7 +41,17 @@ COMMENT ON FUNCTION meta.ensure_daily_partitions IS '由批量编排每日提前
 --  三、外键列建索引，服务于模型构建阶段的连接与行级过滤的下推。
 -- ---------------------------------------------------------------------
 
--- 通话
+-- 通话（腿级）
+CREATE INDEX ix_leg_call       ON core.fact_call_leg (call_id, leg_seq);             -- 按 CALLID 聚回通话
+CREATE INDEX ix_leg_parent     ON core.fact_call_leg (call_sk);
+CREATE INDEX ix_leg_natural    ON core.fact_call_leg (src_natural_key);              -- 回看窗口覆盖写按此键定位
+CREATE INDEX ix_leg_agent      ON core.fact_call_leg (agent_sk, wait_begin)
+                                   WHERE device_type_code = 2;                       -- M-C09 至 M-C13 一律从腿级算
+CREATE INDEX ix_leg_queue      ON core.fact_call_leg (queue_code, wait_begin)
+                                   WHERE device_type_code = 1;                       -- M-C05 · M-C06 按技能队列
+CREATE INDEX ix_leg_wait       ON core.fact_call_leg USING brin (wait_begin);
+
+-- 通话（通话级）
 CREATE INDEX ix_call_natural   ON core.fact_call (src_natural_key);
 CREATE INDEX ix_call_hash      ON core.fact_call (caller_number_hash, offered_at);   -- R-06 同一主叫失败呼叫历史
 CREATE INDEX ix_call_agent     ON core.fact_call (agent_sk, offered_at);
@@ -79,8 +89,10 @@ CREATE INDEX ix_fb_turnout     ON core.fact_feedback (turnout_sk, seq_no);
 CREATE INDEX ix_fb_agency      ON core.fact_feedback (agency_type_sk, reported_at);
 CREATE INDEX ix_fb_officer     ON core.fact_feedback (officer_sk, reported_at);
 
--- 坐席状态
-CREATE INDEX ix_agentstate     ON core.fact_agent_state (agent_sk, state_from);
+-- 坐席签入区间与日累计
+CREATE INDEX ix_agentsess      ON core.fact_agent_session (agent_sk, signin_at);
+CREATE INDEX ix_agentsess_t    ON core.fact_agent_session USING brin (signin_at);
+CREATE UNIQUE INDEX ux_agentday ON core.fact_agent_day (agent_sk, date_key);
 
 -- AI 回流
 CREATE INDEX ix_ai_entity      ON core.fact_ai_inference (entity_kind, entity_sk);

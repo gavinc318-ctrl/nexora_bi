@@ -241,4 +241,4 @@ CREATE TABLE core.dim_shift (
     is_current       boolean     GENERATED ALWAYS AS (valid_to = 'infinity') STORED,
     UNIQUE (site_sk, src_natural_key, valid_from)
 );
-COMMENT ON TABLE core.dim_shift IS '班次为派生时间带，不维护排班计划（DD-53）。本表只登记时间窗口定义（start_time/end_time），由 M-10 人工维护、行数极少、走 SCD2 以免改窗口时改写历史。事件按自身时间戳归班；在岗时长由 fact_agent_state 的上岗区间与窗口求交得出';
+COMMENT ON TABLE core.dim_shift IS '班次为派生时间带，不维护排班计划（DD-53）。本表只登记时间窗口定义（start_time/end_time），由 M-10 人工维护、行数极少、走 SCD2 以免改窗口时改写历史。事件按自身时间戳归班；在岗时长由 fact_agent_session 的签入区间与窗口求交得出';

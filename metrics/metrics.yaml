@@ -155,7 +155,7 @@ metrics:
     entity_date: date_key
     definition: "进入坐席设备的呼叫数，不论是否应答"
     dimensions: [dim_date, dim_site, dim_agent]
-    source_tables: [core.fact_call]
+    source_tables: [core.fact_call_leg]
     version: 2
     depends_unverified: false
     retrospective: false
@@ -171,7 +171,7 @@ metrics:
     entity_date: date_key
     definition: "该坐席实际接通的呼叫数"
     dimensions: [dim_date, dim_site, dim_agent]
-    source_tables: [core.fact_call]
+    source_tables: [core.fact_call_leg]
     version: 2
     depends_unverified: false
     retrospective: false
@@ -187,7 +187,7 @@ metrics:
     entity_date: date_key
     definition: "按话单释放原因归为坐席方挂断或主叫方挂断"
     dimensions: [dim_date, dim_site, dim_agent]
-    source_tables: [core.fact_call]
+    source_tables: [core.fact_call_leg]
     version: 2
     depends_unverified: false
     retrospective: false
@@ -203,7 +203,7 @@ metrics:
     entity_date: date_key
     definition: "呈现到坐席而未被应答的呼叫数"
     dimensions: [dim_date, dim_site, dim_agent]
-    source_tables: [core.fact_call]
+    source_tables: [core.fact_call_leg]
     version: 2
     depends_unverified: false
     retrospective: false
@@ -219,7 +219,7 @@ metrics:
     entity_date: date_key
     definition: "同一呼叫经过两个及以上坐席，或话单原因码指示转接的呼叫数"
     dimensions: [dim_date, dim_site, dim_agent]
-    source_tables: [core.fact_call]
+    source_tables: [core.fact_call_leg]
     version: 2
     depends_unverified: false
     retrospective: false
@@ -251,7 +251,7 @@ metrics:
     entity_date: date_key
     definition: "同一主叫在时间窗内未接通的呼叫次数"
     dimensions: [dim_date, dim_site, dim_agent]
-    source_tables: [core.fact_call]
+    source_tables: [core.fact_call, core.fact_call_leg]
     version: 2
     depends_unverified: false
     retrospective: false
@@ -555,13 +555,13 @@ metrics:
     entity_date: date_key
     definition: "某时刻在岗的坐席数"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
-    source_tables: [core.fact_agent_state]
+    source_tables: [core.fact_agent_session]
     version: 1
     depends_unverified: false
     retrospective: false
     published: true
     rfp: ""
-    notes: "话单只记呼叫不记签入签出，日粒度取平台的签入签出统计（DD-65）；某时刻在岗的实时值取实时接口，仅供看板"
+    notes: "签入签出为区间明细（IDX_04_03_001），故可按班次窗口求交（DD-53）。实时在岗人数另取实时接口，仅供看板"
   - code: M-R02
     domain: 资源与勤务
     name_zh: "在岗时长"
@@ -571,13 +571,13 @@ metrics:
     entity_date: date_key
     definition: "坐席累计在岗时长"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
-    source_tables: [core.fact_agent_state]
+    source_tables: [core.fact_agent_session]
     version: 2
     depends_unverified: false
     retrospective: false
     published: true
     rfp: ""
-    notes: "来源为平台历史指标 IDX_04_02_002（DD-65）。日累计值，不可下钻到单次状态变化，报表须标注来源"
+    notes: "由 fact_agent_session 的区间合计得出，与 IDX_04_02_002 对账。可按班次切分，而 M-R03 M-R04 不可"
   - code: M-R03
     domain: 资源与勤务
     name_zh: "状态时长"
@@ -586,14 +586,14 @@ metrics:
     measure: "见 definition"
     entity_date: date_key
     definition: "就绪、通话、事后处理、离席各状态时长"
-    dimensions: [dim_date, dim_site, dim_agent, dim_shift]
-    source_tables: [core.fact_agent_state]
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_agent_day]
     version: 2
     depends_unverified: false
     retrospective: false
     published: true
     rfp: ""
-    notes: "来源为平台历史指标 IDX_04_02_* 各状态时长（DD-65），非本方采样。日累计值，不可下钻到单次状态变化，报表须标注来源——原 measure_method 为 sampled 的说法作废"
+    notes: "来源为平台历史指标 IDX_04_02_* 各状态时长（DD-65），非本方采样。日累计值，不可下钻到单次状态变化，也不可按班次切分——故维度中已去掉 dim_shift。报表须标注来源"
   - code: M-R04
     domain: 资源与勤务
     name_zh: "占用率"
@@ -602,14 +602,14 @@ metrics:
     measure: "（平台应答时长 + 事后处理时长） / 平台签入时长"
     entity_date: date_key
     definition: "通话与事后处理时长占在岗时长的比例"
-    dimensions: [dim_date, dim_site, dim_agent, dim_shift]
-    source_tables: [core.fact_agent_state]
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_agent_day]
     version: 2
     depends_unverified: false
     retrospective: false
     published: true
     rfp: ""
-    notes: "三个输入均来自平台历史指标（DD-65），本方只做相除。分子分母的口径随平台定义走"
+    notes: "三个输入均来自平台历史指标（DD-65），本方只做相除。与 M-R03 同样不可按班次切分，维度中已去掉 dim_shift"
   - code: M-R05
     domain: 资源与勤务
     name_zh: "警员出动次数"
@@ -699,7 +699,7 @@ metrics:
     entity_date: date_key
     definition: "坐席在期间内处理的呼叫与警情数"
     dimensions: [dim_date, dim_site, dim_agent]
-    source_tables: [core.fact_call, core.fact_intake]
+    source_tables: [core.fact_call_leg, core.fact_intake]
     version: 1
     depends_unverified: false
     retrospective: false
