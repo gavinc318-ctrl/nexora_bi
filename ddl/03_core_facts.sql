@@ -36,7 +36,8 @@ CREATE TABLE core.fact_call_leg (
     device_no          text,                             -- DEVICENO：设备为坐席时即工号
     device_in_code     text,                             -- DEVICEIN：接入设备
     agent_sk           uuid        REFERENCES core.dim_agent,   -- 仅 device_type_code = 2 时填充
-    queue_code         text,                             -- 仅 device_type_code = 1 时填充
+    queue_sk           uuid        REFERENCES core.dim_queue,   -- 仅 device_type_code = 1 时填充
+    queue_code         text,                             -- 源端队列 ID，保留原值以便回溯
     call_type_code     smallint,                         -- CALLTYPE，呼入/呼出的取值集合登记在接入契约中
     direction          text        CHECK (direction IN ('inbound','outbound','internal')),
     caller_number      text,                             -- 敏感字段，受字段可见性矩阵约束（DD-35）
@@ -78,7 +79,8 @@ CREATE TABLE core.fact_call (
     direction          text        CHECK (direction IN ('inbound','outbound','internal')),
     caller_number      text,                             -- 敏感字段（DD-35）
     caller_number_hash text,                             -- 同一主叫的重复与失败呼叫分析，不暴露号码
-    first_queue_code   text,                             -- 首个排队腿的技能队列
+    first_queue_sk     uuid        REFERENCES core.dim_queue,   -- 首个排队腿的技能队列
+    first_queue_code   text,                             -- 源端队列 ID，保留原值以便回溯
     agent_sk           uuid        REFERENCES core.dim_agent,   -- 首个应答坐席。完整归属看腿级
     call_result_sk     uuid        REFERENCES core.dim_call_result,
     offered_at         timestamptz NOT NULL,             -- 首腿 wait_begin

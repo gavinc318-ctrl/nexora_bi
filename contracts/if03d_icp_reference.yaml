@@ -1,0 +1,65 @@
+# =====================================================================
+# IF-03d  话务参照数据（配置同步接口）
+#
+# 技能队列、坐席、坐席组等的权威在 ICP，本方只读。
+# 关键在版本号：先取版本号，变了才拉全量，再逐字段比对后写变更留痕——
+# 直接全量比对会把排序与空白差异报成变更，假变更会把真变更淹掉（LD-01 4.6）。
+# =====================================================================
+source_id: icp_reference
+connector: rest_api
+target_raw: raw.icp_reference
+contract_version: 1
+enabled: true
+
+endpoint:
+  version_probe:
+    method: GET
+    path: /cmsgateway/resource/synwas/versions
+  datasets:
+    - name: vdn
+      path: /cmsgateway/resource/synwas/vdns
+      target: core.dim_site
+      note: "单一 VDN（AS-30）。本集用于核对该假设是否仍成立——多出一个 VDN 是必须立刻知道的事"
+    - name: agent
+      path: "/cmsgateway/resource/synwas/agents/{ccId}/{vdnId}"
+      target: core.dim_agent
+      note: "坐席工号与姓名。SCD2 的自然键即工号（AS-31）"
+    - name: agent_group
+      path: "/cmsgateway/resource/synwas/groups/{ccId}/{vdnId}"
+      target: core.dim_agent
+      note: "坐席组是管理分组，与技能队列是两套东西，不可混用"
+    - name: skill
+      path: "/cmsgateway/resource/synwas/skills/{ccId}/{vdnId}"
+      target: core.dim_queue
+      note: "技能队列。与 CAD 的警种不是一回事，禁止一对一映射"
+    - name: skill_group
+      path: "/cmsgateway/resource/synwas/skillgroups/{ccId}/{vdnId}"
+      target: core.dim_queue
+    - name: called_config
+      path: "/cmsgateway/resource/synwas/calledconfigs/{ccId}/{vdnId}"
+      target: core.dim_channel
+      note: "被叫配置，即接入码"
+    - name: rest_reason
+      path: "/cmsgateway/resource/synwas/restreasons/{ccId}/{vdnId}"
+      target: meta.reference_value
+      note: "休息原因码。M-R03 的休息时长按此分类"
+    - name: service_type
+      path: "/cmsgateway/resource/synwas/servertypes/{ccId}/{vdnId}"
+      target: meta.reference_value
+      note: "业务类型，IVR 指标按此分组"
+
+auth: {inherits: icp_cdr_voice}
+
+window:
+  schedule: "*/30 * * * *"
+  strategy: version_gated
+  note: "每半小时取一次版本号；版本号未变即本次运行无操作，run_log 记 success 且 row_count = 0"
+
+watermark: {type: sequence, column: config_version}
+idempotent_key: [dataset, src_natural_key]
+
+quality:
+  batch_checks:
+    - "版本号变化但全量比对无差异的，记入运行日志并告警——说明版本号的含义与预期不符"
+    - "坐席或技能队列消失时不删行，置为非当前（SCD2）。源端删除不等于历史不存在"
+  change_log: "逐字段差异写 audit.reference_data_change_log，并在 M-10 可查（LD-01 9.3）"

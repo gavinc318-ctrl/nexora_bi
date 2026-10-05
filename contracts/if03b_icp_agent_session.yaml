@@ -1,0 +1,53 @@
+# =====================================================================
+# IF-03b  坐席签入签出区间（平台明细接口）
+#
+# 这一条给的是区间数组而非累计值，因此是明细：在岗时长可自算，
+# 也可按 DD-53 与班次时间窗口求交。与 if03c 的日累计性质不同，故分开。
+# =====================================================================
+source_id: icp_agent_session
+connector: rest_api
+target_raw: raw.icp_agent_session
+contract_version: 1
+enabled: true
+
+endpoint:
+  method: POST
+  path: /cmsgateway/resource/hindex/agent
+  host_ref: icp_cms_gateway
+  request_body:
+    ccId: 1
+    vdnId: 1
+    objectIds: "{{ agent_ids }}"        # 坐席工号数组，单次上限 2000
+    indexIds: [IDX_04_03_001]
+  prerequisite: >-
+    平台的报表脚本已执行、话单已导入其数据库。历史指标接口都有这个前置条件，
+    故本条的新鲜度由 ICP 侧的报表批决定，不由本方控制（LD-01 4.1）。
+    报表批的时间表须问清，否则「昨天的数据几点能取」无法承诺。
+
+auth: {inherits: icp_cdr_voice}
+
+window:
+  grain: day
+  schedule: "0 * * * *"                 # 每小时重取当日，直至次日报表批完成后定稿
+  restate_days: 3                       # 回补前 3 天：报表批延迟或重跑会改写历史值
+
+watermark:
+  type: timestamptz
+  column: date_key
+  note: "按业务日推进，不按行。平台重算会改写既有日的值，故必须允许回补重写"
+
+idempotent_key: [agentId, inTime]
+idempotent_note: "一名坐席一天可有多段区间。以工号加签入时刻定位一段。"
+
+columns:
+  - {src: id,       type: text,        target: fact_agent_session.agent_sk,          state: verified,          note: "坐席工号，经 dim_agent 解析为代理键（AS-31）"}
+  - {src: inTime,   type: timestamptz, target: fact_agent_session.signin_at,         state: verified,          note: "签入时刻，格式 YYYY-MM-DD HH:MM:SS"}
+  - {src: outTime,  type: timestamptz, target: fact_agent_session.signout_at,        state: verified,          note: "签出时刻。为空即仍在线或当日未签出"}
+  - {src: duration, type: integer,     target: fact_agent_session.duration_seconds,  state: verified,          note: "源端给出的时长。不由本方用签出减签入重算——两者不一致时以源端为准并记入对账差异"}
+
+quality:
+  batch_checks:
+    - "outTime 非空时必须不早于 inTime；倒置进隔离区"
+    - "duration 与 outTime − inTime 的差超过阈值的，入对账差异但不拒绝——这是平台内部口径差，不由本方抹平"
+    - "跨日区间按 inTime 归日，与班次求交时跨分区取数"
+  recon: "区间时长合计 vs IDX_04_02_002 签入时长（见 if03c）。两者同源不同接口，差异即平台内部口径差"

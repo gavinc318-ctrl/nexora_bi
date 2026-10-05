@@ -1,0 +1,430 @@
+cause_code,release_source,type,description
+501,caller,VOICE_CALL_RELEASE_CAUSE_GENERAL,"Default call release cause. The routing result from the CCS is not received after a call accesses the platform. As a result, the call is disconnected."
+502,caller,CALL_RELEASE_CAUSE_ACD_NO_ACK,"The called party does not answer the call for a long time, and the call is released."
+518,caller,CALL_RELEASE_CAUSE_UIS_DISCONNECT,The client releases the call.
+537,caller,CALL_RELEASE_CAUSE_CALLED_BUSY,The ACD disconnects the call because the called party is busy.
+538,caller,CALL_RELEASE_CAUSE_NO_SUCH_NUMBER,The ACD disconnects the call because the called number does not exist.
+548,caller,CALL_RELEASE_CAUSE_GSM_CLD_USER_NOT_ACTIVE,The ACD disconnects the call because the called party is powered off.
+549,caller,CALL_RELEASE_CAUSE_GSM_CLD_USER_NOT_REACHABLE,The ACD disconnects the call because the called party is out of the service area.
+551,caller,CALL_RELEASE_CAUSE_ACD_FAULT_DISCONNECT,The ACD disconnects the call for another reason.
+601,caller,CALL_RELEASE_ACD_BEFORE_ANSWER,The ACD disconnects the call because the calling party hooks on before the call is answered.
+603,caller,CALL_RELEASE_ACD_NO_REPSOND,The ACD disconnects the call because the called party does not answer the call.
+604,caller,CALL_RELEASE_ACD_CALLED_REJECTED,The ACD disconnects the call because the called party rejects the call.
+800,caller,DISC_CAUSE_USERHOOK_QUEUE,The user hangs up in the queue.
+1138,caller,ICD_ERR_CTISVR_OC_CALLED_RELEASE,The called party hangs up.
+1163,caller,ICD_ERR_CTISVR_OC_DISCONNECT_ACDRELEASE_CAUSE_NO_S The callUCH_NUMBER,ed number does not exist.
+1164,caller,ICD_ERR_CTISVR_OC_DISCONNECT_ACDRELEASE_CAUSE_CALL The callED_BUSY,ed party is busy.
+1165,caller,ICD_ERR_CTISVR_OC_DISCONNECT_ACDRELEASE_CAUSE_GSM_CLD_USER_NOT_ACTIVE,The mobile phone is powered off.
+1166,caller,ICD_ERR_CTISVR_OC_DISCONNECT_ACDRELEASE_CAUSE_GSM_CLD_USER_NOT_REACHABLE,The mobile phone is out of the service area.
+1168,caller,ICD_ERR_CTISVR_OC_DISCONNECT_ACDRELEASE_CAUSE_NO_R The callESPOND,is disconnected on no reply.
+1169,caller,ICD_ERR_CTISVR_OC_DISCONNECT_ACDRELEASE_CAUSE_CALL The callED_REJECTED,ed party rejects the call.
+1170,caller,ICD_ERR_CTISVR_OC_DISCONNECT_ACDRELEASE_CAUSE_LINE_ The linBUSY,e is busy.
+1261,caller,ICD_ERR_CTISVR_OC_DISCONNECT011,The user hangs up during a three-party conversation.
+1262,caller,ICD_ERR_CTISVR_OC_DISCONNECT012,The user hangs up during a three-party conversation.
+1263,caller,ICD_ERR_CTISVR_OC_DISCONNECT013,The user hangs up when the phone rings.
+1346,caller,ICD_ERR_CTISVR_OC_DISCONNECT096,"1. The resource connection fails during three-party help, and the current call is disconnected. 2. When the agent answers the call, the call does not exist."
+1353,caller,ICD_ERR_CTISVR_OC_DISCONNECT112,"When the called party picks up the phone and finds that the current call does not exist, the system releases the outgoing call."
+521,agent,CALL_RELEASE_CAUSE_REDIRECT,The agent initiates call redirection.
+531,agent,CALL_RELEASE_CAUSE_ACD_DISCONNECT,The ACD disconnects the call and therefore the call is normally released.
+532,agent,CALL_RELEASE_CAUSE_CCC_DISCONNECT,OC release
+534,agent,CALL_RELEASE_CAUSE_ACD_MODULE_DISCONNECT,"After disconnecting from an ACD module, the CTI Server releases all the calls on the module."
+536,agent,CALL_RELEASE_CAUSE_CANCELQUEUE_FAILURE,Waiting for the ACD to release the call times out when queuing is canceled. The platform releases the call.
+602,agent,CALL_RELEASE_ACD_NO_RESOUCE,The ACD disconnects the call because no resource is available.
+605,agent,CALL_RELEASE_ACD_LINE_BUSY,The ACD disconnects the call because the system is busy.
+606,agent,CALL_RELEASE_ACD_TIMEOUT,The ACD disconnects the call because the call times out.
+1118,agent,ICD_ERR_CTISVR_OC_AGENT_SELF_CALL_RELEASEType,"When the user picks up the phone, the phone agent hangs up. Description"
+1122,agent,ICD_ERR_CTISVR_OC_AGENT_RELEASE,The agent hangs up when waiting for the resource connection result or waiting for the response.
+1153,agent,ICD_ERR_CTISVR_OC_AGENT_HUNGUP_PHONE,The phone agent hangs up.
+1167,agent,ICD_ERR_CTISVR_OC_DISCONNECT_ACDRELEASE_CAUSE_NO_R The ACDESOURCE                                            availabl,disconnects the call because no resource is e.
+1171,agent,ICD_ERR_CTISVR_OC_DISCONNECT_ACDRELEASE_CAUSE_TIMEOU,The ACD disconnects the call because the call times out.
+1254,agent,ICD_ERR_CTISVR_OC_DISCONNECT004,1. The called party is in invalid state after off-hook. 2. The agent who creates the conference deletes itself from the conference.
+1255,agent,ICD_ERR_CTISVR_OC_DISCONNECT005,The called party is in invalid state after picking up the phone.
+1332,agent,ICD_ERR_CTISVR_OC_DISCONNECT082,"The agent is logged out, or the agent disconnects the call when detecting that the agent is abnormal."
+1333,agent,ICD_ERR_CTISVR_OC_DISCONNECT083,"When the phone agent receives a response from the client, the phone of the agent hangs up. The current call is disconnected."
+1334,agent,ICD_ERR_CTISVR_OC_DISCONNECT084,"During the internal help of a phone agent, if the agent hangs up but the transfer fails, the current call is disconnected."
+1335,agent,ICD_ERR_CTISVR_OC_DISCONNECT085,"During the internal help of a phone agent, if the agent hangs up but the transfer fails, the call is disconnected."
+1336,agent,ICD_ERR_CTISVR_OC_DISCONNECT086,"When a phone agent makes a three-party call, the call of the agent does not exist. The call is disconnected."
+1347,agent,ICD_ERR_CTISVR_OC_DISCONNECT097,"When a three-party call is transferred, the resource connection fails and the current call is disconnected."
+1351,agent,ICD_ERR_CTISVR_OC_DISCONNECT110,"A resource disconnection notification is received, and the current call is disconnected."
+1354,agent,ICD_ERR_CTISVR_OC_DISCONNECT113,"Wait for the agent to make a call, or the call of the agent is ringing, or the call of the agent is picked up or times out. The call of the agent is disconnected."
+1355,agent,ICD_ERR_CTISVR_OC_DISCONNECT114,"When the call is transferred out, the resource connection fails, and the outgoing call is disconnected."
+1360,agent,ICD_ERR_CTISVR_OC_DISCONNECT119,The original agent releases the help call in the two-party help process.
+1363,agent,ICD_ERR_CTISVR_OC_DISCONNECT122,"When an agent logs out or an agent is abnormal, the system releases the VP call resources."
+1450,agent,ICD_ERR_CTISVR_RES_DIS_CAUSE30,"1. When an agent receives a call transfer response, the agent initiates a resource disconnection. 2. When an agent initiates a call, the agent initiates a resource disconnection. 3. When an agent is waiting for restoration after hang-up transfer, the call is disconnected. 4. The agent disconnects the call."
+1451,agent,ICD_ERR_CTISVR_RES_DIS_CAUSE31,"During a three-party conversation, the agent releases the call and the resources are disconnected."
+1452,agent,ICD_ERR_CTISVR_RES_DIS_CAUSE32,"During a three-party conversation, the agent releases the call."
+1453,agent,ICD_ERR_CTISVR_RES_DIS_CAUSE33,"When waiting for the resource connection result, the agent releases the current call."
+1481,agent,ICD_ERR_CTISVR_RES_DIS_CAUSE61,"When a call is transferred out, the outgoing call of the agent is disconnected and resources are disconnected."
+35020,agent,ICD_ERR_CTISVR_OC_ASP_IDLE,The agent hangs up.
+35021,agent,ICD_ERR_CTISVR_OC_ASP_ACTIVE,The agent picks up the phone.
+35022,agent,ICD_ERR_CTISVR_OC_ASP_ALERTING,The phone of the agent rings.
+35023,agent,ICD_ERR_CTISVR_OC_ASP_OTHER,Other status of the agent's phone
+35028,agent,ICD_ERR_CTISVR_AGENT_PHONE_RELEASE,"If the agent releases the call, other operations are not allowed."
+35032,agent,ICD_ERR_CTISVR_OC_SELF_CALL_IS_NOT_VALID,The agent fails to initiate a call to their own phone.
+522,system,CALL_RELEASE_CAUSE_REDIRECT2,An IVR flow initiates call redirection.
+533,system,CALL_RELEASE_CAUSE_CCC_DISCONNECT2,"When a flow transfers a call to another flow, the flow releases the call before ringing."
+540,system,CALL_RELEASE_CAUSE_RELEASE_REPORT,The call is released after voice playing.
+1119,system,ICD_ERR_CTISVR_OC_AGENT_NOT_IDLE,The agent is not in the idle state.
+1120,system,ICD_ERR_CTISVR_OC_AGENT_NOT_ACTIVE,The agent is not in conversation state.
+1121,system,ICD_ERR_CTISVR_OC_ALREADY_HOLD_CALL,"During call hold, the index of the held call already exists."
+1157,system,ICD_ERR_CTISVR_OC_AGENT_DISCONNECT_SELF_PHONE1Type,Removing an agent's phone number Description
+1356,system,ICD_ERR_CTISVR_OC_DISCONNECT115,"Success transfer, call transfer, three-party call transfer, failed to receive the transfer result."
+1359,system,ICD_ERR_CTISVR_OC_DISCONNECT118,Disconnecting an outgoing call from an agent when the call is transferred out
+1414,system,ICD_ERR_CTISVR_IVR_DISCONNECT24,The IVR logs out of the CTI Server.
+1415,system,ICD_ERR_CTISVR_IVR_DISCONNECT25,The CTI Server is switched from the active node to the standby node.
+1421,system,ICD_ERR_CTISVR_RES_DIS_CAUSE1,1. Save the call to the private call queue of the agent. 2. Add the device to the conference.
+1428,system,ICD_ERR_CTISVR_RES_DIS_CAUSE8,Cancel QC VP Call During QC Recording
+1429,system,ICD_ERR_CTISVR_RES_DIS_CAUSE9,Cancel QC VP call during QC voice playing
+1430,system,ICD_ERR_CTISVR_RES_DIS_CAUSE10,"During agent recording, the agent VP call is canceled."
+1431,system,ICD_ERR_CTISVR_RES_DIS_CAUSE11,"During agent announcement playing, the agent VP call is canceled."
+1432,system,ICD_ERR_CTISVR_RES_DIS_CAUSE12,The listening on the called party is canceled.
+1480,system,ICD_ERR_CTISVR_RES_DIS_CAUSE60,"1. The network call is disconnected and the resource is disconnected. 2. When the call is released, the resource is disconnected."
+35002,system,ICD_ERR_CTISVR_OC_NOT_VIDEO_ABILITY,The current call does not have the video capability.
+35007,system,ICD_ERR_CTISVR_OC_NOTEXIST_PLAY_VIDEO,No video is played.
+35008,system,ICD_ERR_CTISVR_OC_SELFPLAY_EXIST,This operation is not allowed because self-play exists.
+35009,system,ICD_ERR_RP_TASK_NOTEXIST,The current (playback or recording) task does not exist.
+35011,system,ICD_ERR_CTISVR_OC_MODE_MUTE_NOTSUPPORT,The operation is not allowed because the device is in the mute or image-frozen state.
+35012,system,ICD_ERR_CTISVR_OC_NOT_MUTEVIDEO,The operation is not allowed because it is not in the image- frozen state.
+35013,system,ICD_ERR_CTISVR_OC_NOT_MUTEVOICE,The operation is not allowed because it is not in the mute state.
+35015,system,ICD_ERR_CTISVR_OC_PLAY_MMFILE_TO_AGENT_NOTSUPPORT,The b310 version does not support the function of playing multimedia files to agents.
+35016,system,ICD_ERR_CTISVR_NOT_SUPPORT_MEDIAINFO,The media type is not supported.
+35017,system,ICD_ERR_CTISVR_IVR_INVALID_SCPCB,Invalid control block.
+35018,system,ICD_ERR_RP_TASK_PLAY_DTMF_EXIST,The announcement playing and digit collection task already exists and cannot be delivered repeatedly.
+503,system,CALL_RELEASE_CAUSE_ACD_SHAKEHAND_TIMEOUT,"After the call is set up between the ACD and platform, the control blocks on the platform and the ACD time out in handshake. As a result, the platform disconnects the call."
+505,system,CALL_RELEASE_CAUSE_IVR_RESUMEACK_TIMEOUT,"When a call is transferred back to the IVR after the IVR transfers the call to the agent console in blocked transfer mode, the IVR times out in responding to the blocked transfer message. As a result, the platform disconnects the call."
+506,system,CALL_RELEASE_CAUSE_CCS_REROUTEACK_TIMEOUT,"When waiting for the CCS routing result times out, the platform disconnects the call."
+507,system,CALL_RELEASE_CAUSE_CCS_REROUTEACK_TIMEOUT2,"After the call is connected to the platform, waiting for the CCS routing result times out."
+508,system,CALL_RELEASE_CAUSE_CCS_DOFORWARD_TIMEOUT,"During call transfer, waiting for the CCS transfer notification times out, or waiting for the CCS notification to resume the suspended call times out."
+509,system,CALL_RELEASE_CAUSE_CCS_TRANSACTION_TIMEOUT,"When an internal call is successfully transferred, the CCS times out in sending the call transfer message."
+510,system,CALL_RELEASE_CAUSE_ACD_SETUPACK_TIMEOUT,"When the platform initiates an outgoing call, the ACD times out in sending the SETUP_ACK message."
+511,system,CALL_RELEASE_CAUSE_CCS_OCCUPYACK_TIMEOUT,"When the platform initiates an outgoing call, the CCS times out in returning the OCCUPY_ACK message."
+512,system,CALL_RELEASE_CAUSE_CCS_QUEUE_TIMEOUT,Call queuing overflows or times out.
+513,system,CALL_RELEASE_CAUSE_CCS_QUEUE_TIMEOUT2,Call queuing overflows or times out.
+514,system,CALL_RELEASE_CAUSE_CCC_ROUTINGACK_TIMEOUT,"When a call is transferred from an agent to an automatic flow, the automatic flow times out in responding."
+515,system,CALL_RELEASE_CAUSE_CCC_ROUTINGACK_TIMEOUT2,"When a call is transferred, the transferred-to device times out in responding."
+516,system,CALL_RELEASE_CAUSE_CCS_ROUTE_TIMEOUT,Waiting for the routing response from the CCS times out.
+517,system,CALL_RELEASE_CAUSE_PROCEEDING_TIMEOUTType,Waiting for the ringing or response of the destination device times out. Description
+519,system,CALL_RELEASE_CAUSE_CCS_IND_ADDRESS_ERROR,"During call transfer, the address sent by the CCS is incorrect."
+520,system,CALL_RELEASE_CAUSE_CCS_IND_ADDRESS_ERROR2,"During call transfer, the address sent by the CCS is incorrect."
+523,system,CALL_RELEASE_CAUSE_OCCUPYACK_ERROR,"When the platform initiates an outgoing call, the CCS fails to return the occupied device."
+525,system,CALL_RELEASE_CAUSE_ROUTE_ADDRESS_ERROR2,The destination address in the routing result returned by the CCS is incorrect.
+526,system,CALL_RELEASE_CAUSE_ROUTE_FAILURE,The CCS fails to return the routing result.
+528,system,CALL_RELEASE_CAUSE_CCS_PREVIEWCOMMITACK_FAILURE,The CCS fails to return the result of preview dialing.
+529,system,CALL_RELEASE_CAUSE_IVR_RESUMEACK_FAILURE,"After a flow transfers a call to an agent in blocked mode, if the agent hooks on and transfers the call back to the IVR, the IVR fails to return the result."
+530,system,CALL_RELEASE_CAUSE_IVR_COMBINE,The control blocks to be combined are abnormal when the IVR sends a request to merge calls.
+535,system,CALL_RELEASE_CAUSE_CCS_ROUTEACK_FAILURE,The CCS fails to return the routing result.
+539,system,CALL_RELEASE_CAUSE_CCS_SWITCH,The call is released when the failover occurs between the active CCS and standby CCS.
+541,system,CALL_RELEASE_CAUSE_CCS_DEVICE_RESUME_ERROR,"During call hang-up transfer, when the call is resumed in the suspended device after the transfer-to device is processed, the CCS sends an error."
+542,system,CALL_RELEASE_CAUSE_CCS_HUNG_RELEASE_ERROR,"When the device to which a call is transferred in blocked mode processes the call and then releases the call, the CCS returns an error."
+543,system,CALL_RELEASE_CAUSE_CCS_DEVICERESUMEACK_TIMEOUT,"After the device to which a call is transferred in blocked mode processes the call, the CCS times out in sending a message to notify the source device of call resuming."
+544,system,CALL_RELEASE_CAUSE_CCS_HUNGRELEASEACK_TIMEOUT,"When the device to which a call is transferred in blocked mode processes the call and then releases the call, the CCS times out in returning the call release result."
+545,system,CALL_RELEASE_CAUSE_NRM_DISCONNECT,"When a network call is released, the ACD returns a message indicating that the resource connection fails or an internal error occurs."
+547,system,CALL_RELEASE_CAUSE_NRM_NOT_NET_CALL,"When a call is transferred, the re-routing result returned by the CCS is not a virtual device, but the transfer device indicator sent by the CCS is a virtual device."
+550,system,CALL_RELEASE_CAUSE_CCS_NET_HUNG_RELEASE_ERROR,"When the device to which a network call is transferred in blocked mode processes the call and then releases the call, the CCS returns an error."
+706,system,DISC_CAUSE_SCP_OCCUPY_CB_FAIL,The SCP fails to occupy the control block.
+707,system,DISC_CAUSE_SCP_OCCUPY_CB_FAIL2,The SCP fails to occupy the control block.
+711,system,DISC_CAUSE_SCP_OCCUPY_CALL_FAIL,The SCP fails to occupy the call object.
+712,system,DISC_CAUSE_SCP_OCCUPY_CALL_FAIL2,The SCP fails to occupy the call object.
+714,system,DISC_CAUSE_SCP_ROUTE_FAIL,Routing failed.
+715,system,DISC_CAUSE_SCP_TIMEOUT,The call times out.
+725,system,DISC_CAUSE_VCP_RESOURCE_CONNECT_FAIL,Failed to connect to the resource.
+726,system,DISC_CAUSE_VCP_CB_ALLOCATION_ERROR1,Failed to allocate the control block.
+727,system,DISC_CAUSE_VCP_CB_ALLOCATION_ERROR2,Failed to allocate the control block.
+728,system,DISC_CAUSE_VCP_WRONG_ISDN_CALLNUM,Incorrect incoming video call number.
+729,system,DISC_CAUSE_VCP_EXCEED_ISDN_PATH_NUM_CONFIGED,The number of channels occupied by video calls reaches the maximum.
+781,system,DISC_CAUSE_SCP_ROUTETO_AGENT_WHEN_QUEUEIVR,"The call is queued in the process, and the agent needs to notify the process to release the call when answering the call."
+1001,system,ICD_ERR_CTISVR_ISDN_AGENT_TYPE_INVALID=ICD_ERR_CTISVR Inval_BEGIN,id video agent type.
+1002,system,ICD_ERR_CTISVR_ISDN_TEL_INVALID,The phone number of the video agent is invalid.
+1003,system,ICD_ERR_CTISVR_ISDN_EXIST_AGENT,The video agent information already exists.
+1004,system,ICD_ERR_CTISVR_ISDN_EXIST_TEL,The same phone number exists in the agent information that has been signed in.
+1011,system,ICD_ERR_CTISVR_TRUNK_INVALID_VDN,"When an outgoing call is initiated in the automatic startup process, the value of VDN is invalid."
+1012,system,ICD_ERR_CTISVR_TRUNK_NOT_ENOUGH_CB,The control block is insufficient during trunk interception.
+1013,system,ICD_ERR_CTISVR_TRUNK_CALLID_INVALID1,The CALLID is invalid when the trunk listening is started.
+1014,system,ICD_ERR_CTISVR_TRUNK_CALLID_INVALID2Type,The CALLID is invalid when the trunk monitoring is stopped. Description
+1015,system,ICD_ERR_CTISVR_TRUNK_NO_SPY1,The trunk listening control block cannot be found when the trunk listening is started.
+1016,system,ICD_ERR_CTISVR_TRUNK_NO_SPY2,The trunk listening control block cannot be found when the trunk monitoring is stopped.
+1017,system,ICD_ERR_CTISVR_TRUNK_NO_SPY3,The trunk is not listened on.
+1018,system,ICD_ERR_CTISVR_TRUNK_INVALID_CB1,The control block ID is invalid. The number of control blocks is greater than the maximum number of trunks that can be listened on.
+1019,system,ICD_ERR_CTISVR_TRUNK_INVALID_CB2,Invalid control block. The control block number of the received message is inconsistent with that of the control block.
+1020,system,ICD_ERR_CTISVR_TRUNK_INVALID_STATE,"The trunk listening status is invalid. When the trunk listening resource connection result is received, the trunk is not in the waiting for resource connection result state."
+1026,system,ICD_ERR_CTISVR_COMM_WRONG_MONITOR_ITEM_ID=ICD_ERR_CTISVR_BEGIN+25,The monitoring item ID is incorrect when the system monitoring information is obtained.
+1027,system,ICD_ERR_CTISVR_COMM_TOO_MANY_MONITOR_ITEM_NUM,"When the system monitoring information is obtained, the maximum number of monitoring items allowed by the CTI is 6."
+1031,system,ICD_ERR_CTISVR_CFGMAN_INVALID_CONFIG=ICD_ERR_CTISVR_BEGIN+30,The configuration is invalid.
+1032,system,ICD_ERR_CTISVR_CFGMAN_TEMP_CFGTREE_NOT_EXIST,The temporary configuration tree does not exist.
+1033,system,ICD_ERR_CTISVR_CFGMAN_WORK_CFGTREE_ERROR,An error occurred when reading data from the work configuration tree.
+1034,system,ICD_ERR_CTISVR_CFGMAN_BACKUP_CFGDATA_BUSY,The standby node is busy during configuration backup.
+1036,system,ICD_ERR_CTISVR_OUTBOUND_NOT_ENOUGH_CB1,Failed to allocate control blocks when requesting the extended system to make outgoing calls.
+1037,system,ICD_ERR_CTISVR_OUTBOUND_NOT_ENOUGH_CB2,"When a voice call is initiated, the control block fails to be allocated."
+1038,system,ICD_ERR_CTISVR_OUTBOUND_OUTTIME_WAITSETUPACK,Waiting for the SetupACK message times out during the automatic outgoing call.
+1039,system,ICD_ERR_CTISVR_OUTBOUND_OUTTIME_WAITALERTING,Waiting for the Alerting message times out during the automatic outgoing call.
+1040,system,ICD_ERR_CTISVR_OUTBOUND_OUTTIME_WAITCALLEDOFFHOO,Waiting for the off-hook message CALLEDOFFHOOK times out during automatic outgoing call.
+1041,system,ICD_ERR_CTISVR_OUTBOUND_OUTTIME_WAITOCCUPYDEVICEAC WaitinK                                                  OCCUPYcall.,g for the device response message DEVICEACK times out during automatic outgoing
+1042,system,ICD_ERR_CTISVR_OUTBOUND_OUTTIME_WAITPREVIEWACK,Waiting for the response to the preview outgoing call timed out during preview dialing.
+1043,system,ICD_ERR_CTISVR_OUTBOUND_OUTTIME_WAITRESULT,"When the system notifies the device that the call arrives, waiting for the response message from the device times out."
+1044,system,ICD_ERR_CTISVR_OUTBOUND_INCORRECT_CALLBACK_ADDRESS_TYPE,"When a voice callback is initiated, the destination party is not a phone number."
+1045,system,ICD_ERR_CTISVR_OUTBOUND_CAN_NOT_FIND_CALL,The call object cannot be found.
+1046,system,ICD_ERR_CTISVR_OUTBOUND_FAILED_OCCUPY_DEVICE,The agent fails to be occupied when a user previews an outgoing call or preoccupied an outgoing call.
+1047,system,ICD_ERR_CTISVR_OUTBOUND_FAILED1,The call object cannot be found when the call enters the queue.
+1048,system,ICD_ERR_CTISVR_OUTBOUND_LIMIT_CALL,The number of OBS calls is greater than the maximum number of OBS calls allowed by the VDN.
+1051,system,OUTBOUNDFAIL_CAUSE_SCP_NORMAL,The call object cannot be found based on the call ID when the call is in the waiting for release state.
+1056,system,ICD_ERR_SCP_OUTBOUND_RESOURCE_CONNECT_ERROR,The resource connection is incorrect when the preempted outgoing call is initiated.
+1101,system,ICD_ERR_CTISVR_OC_SPY_NO_ERROR,Inspection succeeded.
+1102,system,ICD_ERR_CTISVR_OC_AGENT_FAULTType,"The agent is invalid. 1. The inspector finds that the agent is not in the inspection operation state when the network inspection operation is stopped or the agent is switched. 2. During network QC inspection, the inspector finds that the inspector is waiting for the inspection result or the resource connection result. 3. During network interception, the inspector finds that the inspector is not in the listening or intruding state. 4. The agent is in the two-party help state, when a three-party help request is initiated, the target agent is not the target agent of the original two-party help. 5. When an agent releases a call, the agent finds that the agent is in an abnormal state. Description"
+1103,system,ICD_ERR_CTISVR_OC_CALL_FAULT,"Invalid call 1. Transfer the outgoing call initiated by the platform. 2. When the agent releases a call, it is found that the incoming call ID is null (callID == CALLID_NO_USE). 3. When the agent mutes or stops the call, it is found that the call that requests to mute or unmute is not the current call. 4. When a user requests to preview an outgoing call, the system finds that the preview outgoing call does not exist or is not waiting for preview dialing. 5. During network QC, the QC call does not exist."
+1104,system,ICD_ERR_CTISVR_OC_STATE_FAULT,"The status is incorrect. 1. Internal call. The called agent initiates a call. 2. The agent releases a call when the system is requesting announcement playing, waiting for the agent to answer the call, waiting for the response after call answer by the agent, waiting for answer voices, or waiting for the hookflash prompt tone. 3. The agent releases a call that does not exist."
+1105,system,ICD_ERR_CTISVR_OC_CONNECT_FAIL,"Failed to connect to the resource. 1. During agent self-recording or QC recording, waiting for the resource connection result times out or the resource connection result fails to be received. 2. After the agent answers the call, waiting for the agent and call resource connection result times out. 3. The three-party resource connection fails. 4. When the two-party help or call is transferred out, failed to connect to the resource. 5. The resource connection fails when the mute mode is canceled. 6. During a network call, waiting for a call response, ringing, or off-hook message times out. 7. During network QC, waiting for the resource connection result times out or the resource connection fails."
+1109,system,ICD_ERR_CTISVR_OC_OCCUPY_FAIL,An error occurred when occupying the attendant.
+1111,system,ICD_ERR_CTISVR_OC_NO_CONF,Failed to apply for a conference.
+1112,system,ICD_ERR_CTISVR_OC_NO_RIGHT,No permission.
+1113,system,ICD_ERR_CTISVR_OC_AGENT_LOGINED,The agent has signed in repeatedly. 1. An agent repeatedly signs in and the agent types are different during the two sign-ins. 2. The agent control block fails to be allocated when the agent signs in.
+1114,system,ICD_ERR_CTISVR_OC_AGENT_NOT_LOGINED,The agent has not signed in.
+1115,system,ICD_ERR_CTISVR_OC_AGENTTYPE_NOTSUPPORT,"When a network video agent signs in, the agent type is not video or network agent."
+1116,system,ICD_ERR_CTISVR_OC_AGENT_LOGINED_TOO_MUCH,The agent control block cannot be allocated because an excessive number of agents log in to the system.
+1124,system,ICD_ERR_CTISVR_OC_NO_TALKING_CALL,The agent has no call.
+1125,system,ICD_ERR_CTISVR_OC_NO_HOLDED_CALL,The agent does not hold the call.
+1126,system,ICD_ERR_CTISVR_OC_NO_SELF_CALL,"During a three-party conversation, the phone agent finds that the call is released."
+1127,system,ICD_ERR_CTISVR_OC_CALL_NOT_EXIST,The call object does not exist.
+1128,system,ICD_ERR_CTISVR_OC_SPECIAL_CALL,"Internal calls or special calls cannot be transferred, transferred out, internal help, mute, two-stage dialing, holding, or three- party conversation."
+1129,system,ICD_ERR_CTISVR_OC_HOLD_CALL_MAX,The number of held calls exceeds the maximum.
+1130,system,ICD_ERR_CTISVR_OC_KEEPCALL_TOO_MUCH,Too many calls are held.
+1132,system,ICD_ERR_CTISVR_OC_REPORT_NUM_TOO_LONG,The voice to be reported is too long.
+1133,system,ICD_ERR_CTISVR_OC_DOING_TALK_TRAN,The call that is being transferred cannot be internally asked.
+1134,system,ICD_ERR_CTISVR_OC_SKILL_QUEUE_PARAM_INCORRECT,"When an announcement is played to a call, the voice is incorrect after the voice and phone number of the phone number are reported in the voice parameters of the queue."
+1135,system,ICD_ERR_CTISVR_OC_ADDRESS_TYPE_INCORRECT,"1. The destination address is not a phone number during outgoing call and transfer-out. 2. When the call is transferred to the IVR, the called number is not the access code of the IVR."
+1136,system,ICD_ERR_CTISVR_OC_MODE_NOTSUPPORT,Unsupported mode
+1139,system,ICD_ERR_CTISVR_OC_ADD_ISDNAGENTINFO_ERROR,An error occurred when adding the ISDN agent information.
+1140,system,ICD_ERR_CTISVR_OC_PARAM_SIZE_INCORRECT1,ISND The parameter length is incorrect when the agent logs in.
+1141,system,ICD_ERR_CTISVR_OC_PARAM_SIZE_INCORRECT2Type,PCPhone The parameter length is incorrect when the agent logs in. Description
+1142,system,ICD_ERR_CTISVR_OC_PARAM_SIZE_INCORRECT4,"During preview dialing, the length of the phone number is greater than the maximum length of the restricted phone number."
+1143,system,ICD_ERR_CTISVR_OC_PARAM_SIZE_INCORRECT5,The parameter length is incorrect when the network or video agent logs in.
+1144,system,ICD_ERR_CTISVR_OC_PARAM_INCORRECT1,The site where the agent is located is unavailable.
+1145,system,ICD_ERR_CTISVR_OC_PARAM_INCORRECT2,"When an agent device is added to a site, the agent cannot be found based on the agent ID."
+1146,system,ICD_ERR_CTISVR_OC_PARAM_INCORRECT3,The agent already exists when the agent device is added to the conference.
+1147,system,ICD_ERR_CTISVR_OC_PARAM_INCORRECT4,"1. The destination type of the outgoing call is incorrect. 2. The PCPhone agent logs in repeatedly, and the channel is different from the original one. 3. When a user adds a phone user device to a conference, the user already exists."
+1149,system,ICD_ERR_CTISVR_OC_INNER_ERROR1,1. An agent who has joined another conference site cannot apply for a conference. 2. The agent fails to report voices. 3. The listening state and the barge state are switched to each other when there is no listening or barge.
+1154,system,ICD_ERR_CTISVR_OC_CANCEL_PREVIEW_CALL_OUT,"Canceling preview dialing 1. When an agent initiates preview dialing, the called number is not a phone number or the length of the call number is 0. 2. When the OutBound initiates a preview outgoing call, the agent to be occupied does not exist."
+1155,system,ICD_ERR_CTISVR_OC_TIMEOUT_REQUEST_PREVIEW_CALL_OUT,Waiting for the agent to preview the outgoing call times out.
+1159,system,ICD_ERR_CTISVR_OC_AGENT_INVALID_LOGIN_PARAM,The parameter of the agent sign-in message is invalid. The phone number of the agent who signs in must be at least one digit and cannot be the system access code.
+1160,system,ICD_ERR_CTISVR_OC_NO_HOLDED_CALL1,"In the three-party calls established during unhold, the current call is not empty but the held call is empty."
+1161,system,ICD_ERR_CTISVR_OC_NO_HOLDED_CALL_AND_TALKING_CALL,"In the three-way calls established during unhold, the current call and held call are both empty or not."
+1162,system,ICD_ERR_CTISVR_OC_EXCEED_RESOURCE_CAPABILITY,"Exceeded the resource capability. When an agent applies for a conference, the number of channels applied for is greater than 20."
+1201,system,ICD_ERR_CTISVR_OC_TIMEOUT01,Waiting for resource connection timed out during two-stage dialing.
+1202,system,ICD_ERR_CTISVR_OC_TIMEOUT02,Waiting for the CCS agent sign-in response times out.
+1203,system,ICD_ERR_CTISVR_OC_TIMEOUT03,Waiting for the CCS agent logout response times out.
+1204,system,ICD_ERR_CTISVR_OC_TIMEOUT04,Waiting for announcement result timed out.
+1205,system,ICD_ERR_CTISVR_OC_TIMEOUT05,"When a call is transferred out or transferred out, waiting for the outgoing call result times out."
+1207,system,ICD_ERR_CTISVR_OC_TIMEOUT07,"During a common outgoing call, waiting for the outgoing call result times out."
+1208,system,ICD_ERR_CTISVR_OC_TIMEOUT08,Waiting for off-hook timed out during internal help seeking.
+1209,system,ICD_ERR_CTISVR_OC_TIMEOUT09,"During an internal call, waiting for off-hook times out."
+1210,system,ICD_ERR_CTISVR_OC_TIMEOUT10,"During a common outgoing call, waiting for off-hook times out."
+1211,system,ICD_ERR_CTISVR_OC_TIMEOUT11,Waiting for off-hook times out during transfer-out.
+1212,system,ICD_ERR_CTISVR_OC_TIMEOUT12,Waiting for help or transfer-out times out.
+1213,system,ICD_ERR_CTISVR_OC_TIMEOUT13,The resource connection times out when the mute mode is canceled.
+1214,system,ICD_ERR_CTISVR_OC_TIMEOUT14,The resource connection times out when the call is muted.
+1215,system,ICD_ERR_CTISVR_OC_TIMEOUT15,"During call unhold, resource connection times out."
+1216,system,ICD_ERR_CTISVR_OC_TIMEOUT16,"When the connection is held, the resource connection times out."
+1217,system,ICD_ERR_CTISVR_OC_TIMEOUT17,"During transfer-out, waiting for the resource connection result of the call between the subscriber and the transfer-out times out."
+1218,system,ICD_ERR_CTISVR_OC_TIMEOUT18,"After the called party picks up the phone, the resource connection times out."
+1219,system,ICD_ERR_CTISVR_OC_TIMEOUT19,"After the called party picks up the phone, the resource connection times out."
+1220,system,ICD_ERR_CTISVR_OC_TIMEOUT20Type,"During two-stage dialing, the 1220 resource connection times out. Description"
+1221,system,ICD_ERR_CTISVR_OC_TIMEOUT21,Third-party resource connection timed out during transfer-out.
+1222,system,ICD_ERR_CTISVR_OC_TIMEOUT22,Third-party resource connection timed out during help seeking.
+1223,system,ICD_ERR_CTISVR_OC_TIMEOUT23,Third-party resource connection times out during a common three-party call.
+1257,system,ICD_ERR_CTISVR_OC_DISCONNECT007,The agent status is incorrect after the resource connection result is received during transfer-out.
+1258,system,ICD_ERR_CTISVR_OC_DISCONNECT008,The call is still held after the agent is checked out.
+1259,system,ICD_ERR_CTISVR_OC_DISCONNECT009,The status of the called party is invalid when the called party is ringing.
+1260,system,ICD_ERR_CTISVR_OC_DISCONNECT010,"When the call is transferred out, the called party rings but the current call does not exist."
+1264,system,ICD_ERR_CTISVR_OC_DISCONNECT014,"During internal help seeking or transfer-out, the agent actively releases the call."
+1265,system,ICD_ERR_CTISVR_OC_DISCONNECT015,"When the agent is suspended and transferred to the automatic state, the call does not exist when the call is resumed to the man-hour."
+1266,system,ICD_ERR_CTISVR_OC_DISCONNECT016,The resource connection fails after two-stage dialing.
+1267,system,ICD_ERR_CTISVR_OC_DISCONNECT017,"When the connection result of the mute resource is received, the current call does not exist."
+1268,system,ICD_ERR_CTISVR_OC_DISCONNECT018,"When receiving the result of canceling the mute resource connection, the system finds that the current call does not exist."
+1269,system,ICD_ERR_CTISVR_OC_DISCONNECT019,"During call unhold, resource connection fails."
+1270,system,ICD_ERR_CTISVR_OC_DISCONNECT020,"The resource connection fails when the connection is held, and the current call is disconnected."
+1271,system,ICD_ERR_CTISVR_OC_DISCONNECT021,"The resource connection fails when the connection is held, and the held call is disconnected."
+1272,system,ICD_ERR_CTISVR_OC_DISCONNECT022,The resource connection fails when an agent answers an incoming call.
+1273,system,ICD_ERR_CTISVR_OC_DISCONNECT023,"When a resource connection is received during transfer-out, the current call is abnormal and the current call is disconnected."
+1274,system,ICD_ERR_CTISVR_OC_DISCONNECT024,"When a resource connection is received during transfer-out, the held call is abnormal, and the held call is disconnected."
+1277,system,ICD_ERR_CTISVR_OC_DISCONNECT027,The resource connection fails after the user picks up the phone.
+1278,system,ICD_ERR_CTISVR_OC_DISCONNECT028,Failed to connect to the resource.
+1279,system,ICD_ERR_CTISVR_OC_DISCONNECT029,The resource connection fails after the three-party connection fails.
+1280,system,ICD_ERR_CTISVR_OC_DISCONNECT030,"The agent is suspended and resumed, and the resource connection fails."
+1281,system,ICD_ERR_CTISVR_OC_DISCONNECT031,The agent is released during a call.
+1282,system,ICD_ERR_CTISVR_OC_DISCONNECT032,The three-party call releases the current call.
+1283,system,ICD_ERR_CTISVR_OC_DISCONNECT033,Releasing a Hold Call When a Three-Party Call Is Released
+1284,system,ICD_ERR_CTISVR_OC_DISCONNECT034,Disconnecting a Call from a Three-Party Call
+1285,system,ICD_ERR_CTISVR_OC_DISCONNECT035,Disconnecting a held call from a three-party conversation
+1286,system,ICD_ERR_CTISVR_OC_DISCONNECT036,The agent releases the call after the agent picks up the phone.
+1287,system,ICD_ERR_CTISVR_OC_DISCONNECT037,The agent releases the call when waiting for call answer during call-out or transfer-out.
+1288,system,ICD_ERR_CTISVR_OC_DISCONNECT038,The call is released when the resource connection result is waiting.
+1289,system,ICD_ERR_CTISVR_OC_DISCONNECT039,"When waiting for the three-party resource connection result, the current or held call is null and the current call is disconnected."
+1290,system,ICD_ERR_CTISVR_OC_DISCONNECT040,"When waiting for the three-party resource connection result, the current or held call is null and the held call is disconnected."
+1291,system,ICD_ERR_CTISVR_OC_DISCONNECT041,"When waiting for the three-party resource connection result, the current call is disconnected."
+1292,system,ICD_ERR_CTISVR_OC_DISCONNECT042,"When an agent releases a call, the call ID is invalid. The call is released."
+1293,system,ICD_ERR_CTISVR_OC_DISCONNECT043Type,"The resource connection initiated by the two-stage dialing times out, and the call is released. Description"
+1294,system,ICD_ERR_CTISVR_OC_DISCONNECT044,1. Waiting for the response message times out. The call is released. 2. The call duration exceeds the maximum allowed duration.
+1295,system,ICD_ERR_CTISVR_OC_DISCONNECT045,The duration of the two-party help or call transfer exceeds the maximum duration allowed for the call.
+1296,system,ICD_ERR_CTISVR_OC_DISCONNECT046,"The three-party call times out, and the current call is disconnected."
+1297,system,ICD_ERR_CTISVR_OC_DISCONNECT047,"The three-party call times out, and the held call is disconnected."
+1298,system,ICD_ERR_CTISVR_OC_DISCONNECT048,"Waiting for voice playing times out, and the corresponding call does not exist."
+1299,system,ICD_ERR_CTISVR_OC_DISCONNECT049,The call is released when waiting for the alerting message times out.
+1300,system,ICD_ERR_CTISVR_OC_DISCONNECT050,The call is an internal call or an outgoing call. Waiting for the alerting message times out. The call is released.
+1301,system,ICD_ERR_CTISVR_OC_DISCONNECT051,"The intermediate status of successful transfer, three-party transfer, call transfer, resource connection, or off-hook notification times out. The current call is disconnected."
+1302,system,ICD_ERR_CTISVR_OC_DISCONNECT052,"Success transfer, three-party transfer, or call transfer. The intermediate status of resource connection and off-hook notification times out. Failed to retrieve the held call. Release the held call."
+1305,system,ICD_ERR_CTISVR_OC_DISCONNECT055,"The intermediate status of the common outgoing call, resource connection, and off-hook notification times out. The current call is disconnected."
+1306,system,ICD_ERR_CTISVR_OC_DISCONNECT056,Common outgoing call. The intermediate status of the resource connection and off-hook notification times out. The current call does not exist. The current call is released.
+1307,system,ICD_ERR_CTISVR_OC_DISCONNECT057,Waiting for the answer_ack message times out. The current call is disconnected.
+1308,system,ICD_ERR_CTISVR_OC_DISCONNECT058,The system releases the current call when waiting for the call to pick up the phone times out and the current call does not exist.
+1309,system,ICD_ERR_CTISVR_OC_DISCONNECT059,The system releases the current call when waiting for the off- hook of the internal call times out.
+1310,system,ICD_ERR_CTISVR_OC_DISCONNECT060,"Outgoing call waiting times out, and the current call is disconnected."
+1311,system,ICD_ERR_CTISVR_OC_DISCONNECT061,The call is successfully transferred or the call is transferred to the waiting call. The call times out. The call is released.
+1312,system,ICD_ERR_CTISVR_OC_DISCONNECT062,"When the three-party call transfer to the waiting call times out, the call is released."
+1313,system,ICD_ERR_CTISVR_OC_DISCONNECT063,"In other transfer states, waiting for the call to pick up the phone times out, and the outgoing call is released."
+1314,system,ICD_ERR_CTISVR_OC_DISCONNECT064,Waiting for the transfer response timed out. The current call is null. The current call is disconnected.
+1315,system,ICD_ERR_CTISVR_OC_DISCONNECT065,"In normal cases, waiting for resource connection times out and the current call is disconnected."
+1316,system,ICD_ERR_CTISVR_OC_DISCONNECT066,"After the agent answers the call, the resource connection times out and the current call is disconnected."
+1317,system,ICD_ERR_CTISVR_OC_DISCONNECT067,Unmuting waiting for the resource connection timed out. The current call is disconnected.
+1318,system,ICD_ERR_CTISVR_OC_DISCONNECT068,"During call muting, waiting for resource connection times out and the current call is disconnected."
+1319,system,ICD_ERR_CTISVR_OC_DISCONNECT069,"During call unholding, waiting for resource connection times out and the current call is disconnected."
+1320,system,ICD_ERR_CTISVR_OC_DISCONNECT070,The connection is waiting for resource connection timeout. The current call is disconnected.
+1321,system,ICD_ERR_CTISVR_OC_DISCONNECT071,"During call hold, waiting for resource connection times out and the call is disconnected."
+1322,system,ICD_ERR_CTISVR_OC_DISCONNECT072,"During transfer-out, waiting for resource connection times out and the call is disconnected."
+1323,system,ICD_ERR_CTISVR_OC_DISCONNECT073,"During transfer-out, waiting for resource connection times out, the held call does not exist, and the held call is released."
+1324,system,ICD_ERR_CTISVR_OC_DISCONNECT074,"When the user picks up the phone, waiting for the resource connection times out, and the held call does not exist, the call is disconnected."
+1325,system,ICD_ERR_CTISVR_OC_DISCONNECT075Type,"After the three-party connection fails, the two parties are connected or the agent is suspended and resumed. Waiting for Description the resource connection times out. The current call is disconnected."
+1326,system,ICD_ERR_CTISVR_OC_DISCONNECT076,The resource connection for two-stage dialing is implemented. Waiting for the resource connection times out. The current call is disconnected.
+1327,system,ICD_ERR_CTISVR_OC_DISCONNECT077,Waiting for the three-party resource connection times out and the current call does not exist. The current call is released.
+1328,system,ICD_ERR_CTISVR_OC_DISCONNECT078,Waiting for the three-party resource connection times out and the held call does not exist. The held call is disconnected.
+1348,system,ICD_ERR_CTISVR_OC_DISCONNECT098,The CCS forcibly signs out the agent and disconnects the current call of the agent.
+1350,system,ICD_ERR_CTISVR_OC_DISCONNECT100,The agent channel breaks down and the call is disconnected.
+1357,system,ICD_ERR_CTISVR_OC_DISCONNECT116,Failover occurs and the current call is disconnected.
+1358,system,ICD_ERR_CTISVR_OC_DISCONNECT117,Failover occurs and the current call is disconnected.
+1364,system,ICD_ERR_CTISVR_OC_CONFMANAGE_NOT_EXIST,"When the CP records and plays voices, it finds that the CP conference management party of the CP does not exist."
+1365,system,ICD_ERR_CTISVR_OC_CONF_NOT_EXIST,"When the CP records and plays voices, the CP conference ID of the CP is incorrect."
+1366,system,ICD_ERR_CTISVR_OC_CONF_ERROR,"When the CP records voices, it is found that the agent is in the recording or playing state."
+1367,system,ICD_ERR_CTISVR_OC_STATE_ERROR,"During recording, the agent status is invalid."
+1371,system,ICD_ERR_CTISVR_IVR_NOT_ENOUGH_CCCNODE,"When the IVR logs in to the CTI Server, it is found that there is insufficient client control block allocation."
+1372,system,ICD_ERR_CTISVR_IVR_NODE_NOT_LOGIN,The client node is not registered.
+1373,system,ICD_ERR_CTISVR_IVR_NO_CALLED_INNO,"When the IVR process is started or the OBS requests to start the IVR process, it is found that the process access code is not loaded by any IVR."
+1374,system,ICD_ERR_CTISVR_IVR_INTER_ERROR,"Internal error 1. The requested call does not exist when the flow tracing information is obtained. 2. The requested call does not exist or is set abnormally when the flow track is set. 3. The flow request is transferred to the specified device or the rerouting is initiated, the specified call does not exist. 4. When the IVR registers the access code, the Vdn parameter in the message is abnormal."
+1375,system,ICD_ERR_CTISVR_IVR_DATASIZE_TOO_LONG,"When the IVR starts the automatic startup process, the length of the corresponding access code is too long, or the length of the data contained in the IVR process started by the OBS is too long."
+1376,system,ICD_ERR_CTISVR_IVR_TOO_MUCH_INNO,Too many access codes are registered.
+1377,system,ICD_ERR_CTISVR_IVR_TOO_LONG_INNO,The registered access code is too long.
+1378,system,ICD_ERR_CTISVR_IVR_NOT_SUPPORT_MODE,The transfer mode is not supported.
+1380,system,ICD_ERR_CTISVR_IVR_QUERY_DEVICE_DESCRIPION_FAILED,Failed to query the IVR device description.
+1381,system,ICD_ERR_CTISVR_IVR_SCP_HUNGUPACK_ERROR,IVR call transfer in blocked mode failed.
+1382,system,ICD_ERR_CTISVR_IVR_NOT_GET_INNO,Failed to obtain the access code configuration.
+1391,system,ICD_ERR_CTISVR_IVR_DISCONNECT1,Invalid call ID.
+1392,system,ICD_ERR_CTISVR_IVR_DISCONNECT2,The call is released because the response to the incoming call notification from the client times out.
+1393,system,ICD_ERR_CTISVR_IVR_DISCONNECT3,Waiting for the client ringing times out.
+1394,system,ICD_ERR_CTISVR_IVR_DISCONNECT4,Waiting for the Setup_ACK message from the client times out when the call is not an internal or special call.
+1395,system,ICD_ERR_CTISVR_IVR_DISCONNECT5,Waiting for the Setup_ACK message from the client times out during internal and special calls.
+1396,system,ICD_ERR_CTISVR_IVR_DISCONNECT6,Waiting for the client to return the outgoing call result times out.
+1397,system,ICD_ERR_CTISVR_IVR_DISCONNECT7,"When a call is allocated to the IVR, the value of VdnID is invalid."
+1398,system,ICD_ERR_CTISVR_IVR_DISCONNECT8,The IVR that loads the access code is not found.
+1399,system,ICD_ERR_CTISVR_IVR_DISCONNECT9,Invalid IVR access code.
+1400,system,ICD_ERR_CTISVR_IVR_DISCONNECT10,The call ID is invalid when the call is transferred from IVR to an agent in blocked mode.
+1401,system,ICD_ERR_CTISVR_IVR_DISCONNECT11Type,The call ID in the SetUpACK message sent by the SCP to the CIVR is invalid. Description
+1402,system,ICD_ERR_CTISVR_IVR_DISCONNECT12,The call ID in the AnswerACK message sent by the SCP to the CIVR is invalid.
+1403,system,ICD_ERR_CTISVR_IVR_DISCONNECT13,The call ID in the Disconect message sent by the SCP to the CIVR is invalid.
+1404,system,ICD_ERR_CTISVR_IVR_DISCONNECT14,The call ID in the Release message sent by the SCP to the CIVR is invalid.
+1405,system,ICD_ERR_CTISVR_IVR_DISCONNECT15,The call ID in the ResourceConnectRes message sent by the SCP to the CIVR is invalid.
+1406,system,ICD_ERR_CTISVR_IVR_DISCONNECT16,The call ID in the control block is invalid when the Alerting message sent by the client is received.
+1407,system,ICD_ERR_CTISVR_IVR_DISCONNECT17,The VdnID in the Setup message sent by the client is invalid.
+1409,system,ICD_ERR_CTISVR_IVR_DISCONNECT19,"When the CollectDigit message sent by the client is received, the corresponding call does not exist."
+1410,system,ICD_ERR_CTISVR_IVR_DISCONNECT20,Waiting for call release timed out.
+1411,system,ICD_ERR_CTISVR_IVR_DISCONNECT21,The control fast status of the Disconect message sent by the SCP to the CIVR is invalid.
+1412,system,ICD_ERR_CTISVR_IVR_DISCONNECT22,"When the SCP sends a Disconect message to the CIVR, the IVR access code for controlling the fast state is invalid."
+1413,system,ICD_ERR_CTISVR_IVR_DISCONNECT23,The handshake between the CTI Server and the IVR times out.
+1418,system,ICD_ERR_CTISVR_IVR_DISCONNECT28,The call duration times out.
+1422,system,ICD_ERR_CTISVR_RES_DIS_CAUSE2,"In the conference recording mode of the network board, the resources are disconnected before the voice of the conference object is played."
+1423,system,ICD_ERR_CTISVR_RES_DIS_CAUSE3,"In the listening mode of the network board, the resources are disconnected before the voice of the conference object is played."
+1425,system,ICD_ERR_CTISVR_RES_DIS_CAUSE5,The call resources are disconnected.
+1426,system,ICD_ERR_CTISVR_RES_DIS_CAUSE6,"When the agent is listening, the agent cancels the listening and the resources are disconnected."
+1427,system,ICD_ERR_CTISVR_RES_DIS_CAUSE7,"When the agent is being listened on, the listening of the agent is canceled, and resources are disconnected."
+1433,system,ICD_ERR_CTISVR_RES_DIS_CAUSE13,The two-stage dialing resource is disconnected.
+1434,system,ICD_ERR_CTISVR_RES_DIS_CAUSE14,The agent stops responding or the handshake times out. The agent object is reclaimed and the resources are disconnected.
+1435,system,ICD_ERR_CTISVR_RES_DIS_CAUSE15,The QC agent requests to stop playing voices and the resources are disconnected.
+1436,system,ICD_ERR_CTISVR_RES_DIS_CAUSE16,The QC agent requests to stop recording and the resources are disconnected.
+1437,system,ICD_ERR_CTISVR_RES_DIS_CAUSE17,The agent stops playing voices and the resources are disconnected.
+1438,system,ICD_ERR_CTISVR_RES_DIS_CAUSE18,"The agent stops recording, and the resources are disconnected."
+1439,system,ICD_ERR_CTISVR_RES_DIS_CAUSE19,"Stop listening or monitoring, and resources are disconnected."
+1440,system,ICD_ERR_CTISVR_RES_DIS_CAUSE20,Stop the insertion and disconnect the resource.
+1441,system,ICD_ERR_CTISVR_RES_DIS_CAUSE21,Resources are disconnected when an incoming call is intercepted.
+1442,system,ICD_ERR_CTISVR_RES_DIS_CAUSE22,Resources are disconnected during forcible logout.
+1444,system,ICD_ERR_CTISVR_RES_DIS_CAUSE24,"The call is released, and resources are disconnected."
+1445,system,ICD_ERR_CTISVR_RES_DIS_CAUSE25,The resource is disconnected when the agent answers the call.
+1446,system,ICD_ERR_CTISVR_RES_DIS_CAUSE26,The current call resource is disconnected when the outgoing call is waiting for ringing.
+1447,system,ICD_ERR_CTISVR_RES_DIS_CAUSE27,The resource is disconnected when the resources of the two parties are connected.
+1448,system,ICD_ERR_CTISVR_RES_DIS_CAUSE28,"1. When a two-party help request is initiated, a three-party help request is initiated. The original connection is disconnected. 2. When a two-party help request is transferred, the current help call is released. 3. When the three-party resource connection result is waiting, the call is released and resources are disconnected."
+1454,system,ICD_ERR_CTISVR_RES_DIS_CAUSE34,Resources are disconnected during announcement playing.
+1455,system,ICD_ERR_CTISVR_RES_DIS_CAUSE35,The resource is disconnected when the hang-up transfer is successful.
+1456,system,ICD_ERR_CTISVR_RES_DIS_CAUSE36Type,Resources are disconnected during a three-party call. Description
+1457,system,ICD_ERR_CTISVR_RES_DIS_CAUSE37,"The call duration exceeds the maximum, and the resource is disconnected."
+1458,system,ICD_ERR_CTISVR_RES_DIS_CAUSE38,"During successful transfer, call transfer, or three-party transfer, the intermediate status of resource connection and off-hook notification times out, and resources are disconnected."
+1459,system,ICD_ERR_CTISVR_RES_DIS_CAUSE39,"The intermediate status of the common outgoing call resource connection and off-hook notification times out, and resources are disconnected."
+1460,system,ICD_ERR_CTISVR_RES_DIS_CAUSE40,Waiting for the response to the response times out. The resource is disconnected.
+1461,system,ICD_ERR_CTISVR_RES_DIS_CAUSE41,"During an outgoing call, waiting for the call to pick up the phone times out and resources are disconnected"
+1462,system,ICD_ERR_CTISVR_RES_DIS_CAUSE42,"When the call is transferred out, waiting for the call to pick up the phone times out and the resource is disconnected."
+1463,system,ICD_ERR_CTISVR_RES_DIS_CAUSE43,"When the connection is held, the resources are disconnected."
+1464,system,ICD_ERR_CTISVR_RES_DIS_CAUSE44,"When the connection is held, the resources are disconnected."
+1465,system,ICD_ERR_CTISVR_RES_DIS_CAUSE45,The resource is disconnected when a three-party call is requested.
+1468,system,ICD_ERR_CTISVR_RES_DIS_CAUSE48,"The call is forwarded successfully. When the called party picks up the phone, the agent is disconnected from the outgoing call."
+1469,system,ICD_ERR_CTISVR_RES_DIS_CAUSE49,The resource is disconnected when the transfer-out fails.
+1472,system,ICD_ERR_CTISVR_RES_DIS_CAUSE52,"When a call is transferred, the resource is disconnected when the agent releases the call."
+1473,system,ICD_ERR_CTISVR_RES_DIS_CAUSE53,"During success transfer, call transfer, and three-party transfer, the call transfer response fails and resources are disconnected."
+1474,system,ICD_ERR_CTISVR_RES_DIS_CAUSE54,The current agent is disconnected when a held call is connected.
+1475,system,ICD_ERR_CTISVR_RES_DIS_CAUSE55,The call is converted into a response. The agent is disconnected from the current call.
+1476,system,ICD_ERR_CTISVR_RES_DIS_CAUSE56,"During the QC recording, the agent is connected to the listening or supervising call, and the recording resources are disconnected."
+1477,system,ICD_ERR_CTISVR_RES_DIS_CAUSE57,"During the recording of an agent, the agent is connected to the listening or supervising call, and the recording resources are disconnected."
+1478,system,ICD_ERR_CTISVR_RES_DIS_CAUSE58,"The call interception is switched to the insertion mode, and resources are disconnected."
+1479,system,ICD_ERR_CTISVR_RES_DIS_CAUSE59,"The call is switched to the listening state, and resources are disconnected."
+1482,system,ICD_ERR_CTISVR_RES_DIS_CAUSE62,"Network listening fails, and resources are disconnected."
+1483,system,ICD_ERR_CTISVR_RES_DIS_CAUSE63,Waiting for the ACD response times out or waiting for the UIS response times out.
+1486,system,ICD_ERR_CTISVR_NRM_DISCONNECT01,The network call fails to receive the resource connection result from the SCP.
+1487,system,ICD_ERR_CTISVR_NRM_DISCONNECT02,"During a network call, the NRM receives an incoming call disconnection message from the SCP when the system is waiting for call answer by the agent, call-out ringing, call answer by the called party, call-out response, resource connection result, call start, and resource connection status after call answer."
+1488,system,ICD_ERR_CTISVR_NRM_DISCONNECT03,The network call is received and the outgoing message is disconnected due to a busy line.
+1490,system,ICD_ERR_CTISVR_NRM_DISCONNECT05,The network call waiting for the SETUP_ACK/ALERTING/ANSWER_ACK/CONNECT_RESUL T message times out.
+1491,system,ICD_ERR_CTISVR_NRM_DISCONNECT06,The network call is transferred and the call is released.
+1492,system,ICD_ERR_CTISVR_NRM_DISCONNECT07,The network call duration exceeds the maximum.
+1493,system,ICD_ERR_CTISVR_NRM_DISCONNECT08,The network call waiting for the NOTIFY message from the SCP times out.
+1494,system,ICD_ERR_CTISVR_NRM_DISCONNECT09,The network call waiting for the off-hook message of the called party times out.
+1501,system,ICD_ERR_CTISVR_NRM_DISCONNECT16,"CVNR The inspected agent cannot be found, or the resource connection result fails to be received or the CVNR status is incorrect."
+1506,system,ICD_ERR_CTISVR_NRM_PREPARE_CHANNEL_FAULTType,CVNR Waiting for the available message of the agent channel times out or the agent channel is unavailable. Description
+1507,system,"ICD_ERR_CTISVR_TOMUCH_OMDTRACE_TASK,",The number of OMD tracing tasks exceeds the maximum (5).
+1509,system,"ICD_ERR_CTISVR_CALL_STATE_ERROR,",The call status is incorrect.
+1508,system,ICD_ERR_CTISVR_DEVICE_OCCUPYED,The device to be operated has been occupied.
+1510,system,"ICD_ERR_CTISVR_TRI_DISCONNECT1, //1510",The three-party call is disconnected from one of the two parties.
+1511,system,"ICD_ERR_CTISVR_TRI_DISCONNECT2, //1511",The three-party call is disconnected from the other party.
+1512,system,"ICD_ERR_CTISVR_NOT_SUPORT_CP_CONF,",The platform does not support CP conferences.
+1514,system,"ICD_ERR_NOT_NET_CALL_IN,",The call is not an incoming call.
+1515,system,"ICD_ERR_CTISVR_OC_RECORD_USERCALL_NOTIN_CP,",1515 The call is not in the CP conference.
+1516,system,"ICD_ERR_CTISVR_OC_RECORD_USERCALL_TIME_OUT,",Waiting for ACD response timed out when recording calls to users.
+1517,system,ICD_ERR_CTISVR_OC_USERCALL_ALREADY_RECORD,The channel has been recorded. The channel recording cannot be initiated again.
+1519,system,"ICD_ERR_NOT_SUPPORT_NET_CALL_QUEUE,",The call center does not support the queuing of network calls in the original call center.
+1551,system,ICD_ERR_NOT_SUPPORT_CALLOUT_NO_PREFIX,Invalid outgoing call prefix.
+1552,system,ICD_ERR_NAME_CONF_MID_INVALID,Invalid module number.
+1553,system,ICD_ERR_ACD_NO_RESOURCE,The ACD does not have conference resources.
+22000,system,ROUTE_FAILURE_CAUSE_IS_QUEUE_OVER_FLOW,The call is released when the queue overflows.
+22001,system,ROUTE_FAILURE_CAUSE_IS_WHEN_CANCEL_QUEUE,Failed to route the call when the queuing is canceled.
+22002,system,ROUTE_FAILURE_CAUSE_IS_WHEN_QUEUE_TIME_OUT,Routing fails when queuing times out.
+35003,system,ICD_ERR_OCCUPY_RP_TASK_FAIL,Failed to occupy the recording or playing task.
+35004,system,ICD_ERR_OCCUPY_RESOURCE_FAIL,Failed to occupy the resource.
+35005,system,ICD_ERROR_WAIT_ACD_RES_TIMEOUT,Waiting for the response from the ACD times out.
+35006,system,ICD_ERR_CTISVR_OC_OCCUPY_PLAY_TASK_FAIL,Failed to occupy the video playing task.
+35010,system,ICD_ERR_CTISVR_RP_RELEASE_CALL_DISCONNECT,This operation fails because the task is released due to call release.
+35014,system,ICD_ERR_CTISVR_TASK_ABNORMAL_END,The task is terminated abnormally.
+35019,system,ICD_ERR_CTISVR_NOT_SUPPORT_API,"Unsupported API interfaces, for example, cti5.0, cti3.0, and cti1.0 are not supported."
+35024,system,"ICD_ERR_UAP_RETURN_ERROR,",The UAP returns a message indicating that the operation fails. The cause is unknown.
+35025,system,"ICD_ERR_CTISVR_MRFCALL_RELEASE,","The virtual call of the site on the MRF side is released. Therefore, the real site is released."
+35026,system,"ICD_ERR_CTISVR_MRFOWNER_RELEASE,","The conference control party on the MRF side releases the conference. Therefore, the actual site is released."
+35027,system,"ICD_ERR_CTISVR_PREVIEW_CALLED_ERR,",The called number entered during preview dialing is invalid. The client does not transfer the original number.
+35029,system,"ICD_ERR_RP_TASK_IP_SNAP_RECORD_EXIST,",Recording already exists.
+35030,system,"ICD_ERR_RP_TASK_IP_SNAP_RECORD_NOEXIST,",No IP recording task exists.
+35031,system,"ICD_ERR_CTISVR_OC_OCCUPY_RECORD_TASK_FAIL,",Failed to occupy the task control block.
+35033,system,"ICD_ERR_CTISVR_OC_WAIT_UAP_TIMEOUT,",Waiting for the IP recording response from the UAP times out.
+35034,system,"ICD_ERR_INVALID_CALL_ID,",Invalid callid.
+35035,system,"ICD_ERR_NO_RESOURCE_FOR_TREATMENT,",No resource control block.
+35036,system,"ICD_ERR_UAP_OPERATION_ERROR,",The UAP returns a failure response.
+35037,system,"ICD_ERR_CALL_NOT_IN_ROUTEOUT_ERROR,","The call request is forwarded to the external IVR, but the call is not in the outgoing call module."
+35038,system,"ICD_ERR_ROUTEOUT_TIMEOUT,",The call request is forwarded to the external IVR. The call times out.

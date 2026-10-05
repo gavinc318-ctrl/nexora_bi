@@ -1,0 +1,105 @@
+# =====================================================================
+# IF-03a  ICP 话单（CSV 下载）
+#
+# 话务的唯一明细来源。粒度是「呼叫每经过一个设备一行」，不是一通一行（LD-01 4.3 · DD-66）。
+# 全部进入考核与封账的话务指标都从这里算（DD-64）。
+# =====================================================================
+source_id: icp_cdr_voice
+connector: rest_api
+target_raw: raw.icp_cdr_voice
+contract_version: 1
+enabled: true
+
+endpoint:
+  method: POST
+  path: /cmsgateway/resource/reports/vdnvoicecalldetail
+  host_ref: icp_cms_gateway            # 地址与端口由部署注入，不写进契约
+  request_body:
+    ccId: 1
+    vdnId: 1                           # 单一 VDN（AS-30）；若日后多 VDN，须逐个轮询并增列
+    startTime: "{{ window_from }}"      # yyyy-MM-dd HH:mm:ss
+    endTime: "{{ window_to }}"
+  response: csv_attachment             # 返回 CSV 附件而非 JSON，按文件接入处理（LD-01 5.1）
+
+auth:
+  scheme: token_header
+  header: cmsgateway-token
+  obtain:
+    method: POST
+    path: /cmsgateway/resource/userauth/auth
+    credential_ref: icp_cms_service_account     # 专用服务工号，需系统管理员或质检权限
+  token_ttl_unknown: true
+  on_auth_failure: reacquire_once_then_alert
+  note: >-
+    文档未写 token 有效期，也未说明同一工号的并发会话是否互斥（IR-45）。
+    在答复到位前按「token 随时可能失效」实现：遇鉴权失败即重取并重试一次，仍失败才告警。
+
+window:
+  filter_column: WAITBEGIN             # 呼叫进入该设备的时刻
+  max_span_hours: 24                   # 接口硬上限，回补历史须按天切片
+  min_span_seconds: 5                  # 接口硬下限
+  concurrency: 1                       # 文档明确不支持并发下载。这是接口约束，不是调优参数
+  lookback_minutes: 15                 # 窗口收口：每批回看一段，按幂等键覆盖写（LD-01 4.4）
+  schedule: "*/5 * * * *"              # 5 分钟增量，另有每日回扫
+
+watermark:
+  type: timestamptz
+  column: WAITBEGIN
+  note: >-
+    水位只由 WAITBEGIN 推进。返回结果按 CALLEND 降序，排序是呈现属性，
+    不可用于增量判断。
+
+idempotent_key: [CALLID, CALLIDNUM]
+idempotent_note: >-
+  两列合起来定位一张话单。回看区间内按此键覆盖写。
+  任一列为 NULL 时 core.nk() 直接报错而不是拼出一个看似正常的键（LD-01 2.2）。
+
+columns:
+  - {src: CALLID,        type: text,        target: fact_call_leg.call_id,            state: verified,           note: "同一通呼叫的各腿共用"}
+  - {src: CALLIDNUM,     type: integer,     target: fact_call_leg.leg_seq,            state: verified,           note: "腿内序号：1 为首腿，-1 为末腿"}
+  - {src: CALLERNO,      type: text,        target: fact_call_leg.caller_number,      state: mapped_unverified,  note: "敏感字段（DD-35）。是否按隐私策略掩码未确认（IR-46）——掩码则 M-C15 的分组键失效"}
+  - {src: CALLEENO,      type: text,        target: fact_call_leg.callee_number,      state: verified,           note: "被叫号码。911 场景下通常即接入码"}
+  - {src: WAITBEGIN,     type: timestamptz, target: fact_call_leg.wait_begin,         state: verified,           note: "进入本设备。水位字段，date_key 亦按此归日"}
+  - {src: WAITEND,       type: timestamptz, target: fact_call_leg.wait_end,           state: verified,           note: "本设备上等待结束"}
+  - {src: ACKBEGIN,      type: timestamptz, target: fact_call_leg.ack_begin,          state: verified,           note: "源端恒等于 WAITEND，原样保留以备校验"}
+  - {src: ACKEND,        type: timestamptz, target: fact_call_leg.ack_end,            state: verified,           note: "源端恒等于 CALLBEGIN"}
+  - {src: CALLBEGIN,     type: timestamptz, target: fact_call_leg.call_begin,         state: verified,           note: "为空即本腿未接通。M-C12 正是坐席腿且本列为空"}
+  - {src: CALLEND,       type: timestamptz, target: fact_call_leg.call_end,           state: verified,           note: "窗口末尾进入的呼叫此列可能为空，由回看补齐"}
+  - {src: DEVICETYPE,    type: smallint,    target: fact_call_leg.device_type_code,   state: verified,           note: "取值见 enums.device_type"}
+  - {src: DEVICENO,      type: text,        target: fact_call_leg.device_no,          state: verified,           note: "设备为坐席时即工号；工号与自然人一一对应（AS-31）"}
+  - {src: DEVICEIN,      type: text,        target: fact_call_leg.device_in_code,     state: mapped_unverified,  note: "接入设备。文档未给取值表，联调时按真实数据登记"}
+  - {src: WAITCAUSE,     type: text,        target: fact_call_leg.wait_cause_code,    state: mapped_unverified,  note: "在本设备等待的原因"}
+  - {src: RELEASECAUSE,  type: text,        target: fact_call_leg.release_cause_code, state: mapped_unverified,  note: "归类为 release_source，见 enums.release_cause 的告诫"}
+  - {src: CALLTYPE,      type: smallint,    target: fact_call_leg.call_type_code,     state: verified,           note: "呼入/呼出判定见 enums.call_type"}
+  - {src: UCENTERREASON, type: text,        target: fact_call_leg.enter_reason_code,  state: mapped_unverified,  note: "呼叫进入设备的原因。M-C13 转接判定的旁证"}
+  - {src: UCLEAVEREASON, type: text,        target: fact_call_leg.leave_reason_code,  state: mapped_unverified,  note: "呼叫离开设备的原因"}
+
+enums:
+  device_type:
+    table: "3rd API/icp_device_type.csv"
+    used: {queue: 1, agent: 2, ivr: 3}
+  call_type:
+    table: "3rd API/icp_call_type.csv"
+    inbound:  [0, 5, 13, 15, 20, 21, 22, 23, 46]
+    outbound: [7, 8, 9, 10, 12, 14, 16, 17, 41, 43, 44]
+    note: >-
+      两个集合取自文档的二次开发指南，不自行推断。但值表共 34 个取值，
+      两集合只覆盖 20 个：其余（内部呼叫、回呼等）既不算呼入也不算呼出，
+      一律落 direction = internal 并单独统计，不得默认并入呼入——
+      M-C01 的分母被悄悄撑大是最难发现的一类错误。
+  release_cause:
+    table: "3rd API/icp_release_cause.csv"
+    sources: {agent: 坐席方, caller: 主叫方, system: 平台}
+    note: >-
+      429 个取值，归类自文档中跨页合并的分组单元格。
+      该归类必须在联调时用真实话单核对一遍，不能只按文档归类——
+      M-C03 放弃量与 M-C11 挂断方都压在这张表上。
+
+quality:
+  batch_checks:
+    - "同一 CALLID 必须恰有一行 CALLIDNUM = -1；缺失即该通呼叫尚未结束，留给回看窗口，不报错"
+    - "同一 CALLID 内 CALLIDNUM 不得重复"
+    - "WAITBEGIN 不得为空；为空即整批拒绝（LD-01 7.1）"
+    - "WAITEND < WAITBEGIN、CALLEND < CALLBEGIN 等时序倒置进隔离区，不进 raw"
+    - "CALLTYPE 不在 enums.call_type 值表内的，进待澄清队列并计入 unknown 列数"
+  recon: "按 LD-01 8.3 的滚动窗口校验；对账基准见 metrics/icp_source_map.yaml"

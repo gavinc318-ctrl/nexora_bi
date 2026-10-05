@@ -1,0 +1,58 @@
+# =====================================================================
+# IF-03c  坐席状态时长日累计（平台历史指标）
+#
+# 状态变化流水在任何接口里都不存在：平台只给到各状态的日累计（DD-65）。
+# 因此这是本系统中极少数「指标即来源」的接入——相应报表须标注来源、不可下钻、
+# 也不可按班次切分。
+# =====================================================================
+source_id: icp_agent_day
+connector: rest_api
+target_raw: raw.icp_agent_day
+contract_version: 1
+enabled: true
+
+endpoint:
+  method: POST
+  path: /cmsgateway/resource/hindex/agent
+  host_ref: icp_cms_gateway
+  request_body:
+    ccId: 1
+    vdnId: 1
+    objectIds: "{{ agent_ids }}"
+    indexIds: [IDX_04_02_001, IDX_04_02_002, IDX_04_02_003, IDX_04_02_004,
+               IDX_04_02_006, IDX_04_02_007, IDX_04_02_010, IDX_04_02_013,
+               IDX_04_02_016, IDX_04_02_019, IDX_04_02_021, IDX_04_02_022,
+               IDX_04_02_023, IDX_04_02_024]
+  prerequisite: {inherits: icp_agent_session}
+
+auth: {inherits: icp_cdr_voice}
+
+window:
+  grain: day
+  schedule: "0 * * * *"
+  restate_days: 3
+
+watermark: {type: timestamptz, column: date_key}
+idempotent_key: [agentId, date_key]
+
+columns:
+  - {src: IDX_04_02_001, type: integer, target: fact_agent_day.signin_count,       state: verified, note: "签入次数。与 if03b 的区间段数对账"}
+  - {src: IDX_04_02_002, type: integer, target: fact_agent_day.signin_seconds,     state: verified, note: "签入时长。M-R02 以 if03b 的区间合计为准，本列作对账"}
+  - {src: IDX_04_02_003, type: integer, target: fact_agent_day.inbound_calls,      state: verified, note: "呼入数。与话单按坐席腿计数对账"}
+  - {src: IDX_04_02_004, type: integer, target: fact_agent_day.inbound_seconds,    state: verified}
+  - {src: IDX_04_02_006, type: integer, target: fact_agent_day.outbound_calls,     state: verified}
+  - {src: IDX_04_02_007, type: integer, target: fact_agent_day.outbound_seconds,   state: verified}
+  - {src: IDX_04_02_010, type: integer, target: fact_agent_day.acw_seconds,        state: verified, note: "事后处理时长。M-R04 占用率的分子之一"}
+  - {src: IDX_04_02_013, type: integer, target: fact_agent_day.rest_seconds,       state: verified}
+  - {src: IDX_04_02_016, type: integer, target: fact_agent_day.hold_seconds,       state: verified}
+  - {src: IDX_04_02_019, type: integer, target: fact_agent_day.busy_seconds,       state: verified, note: "示忙时长"}
+  - {src: IDX_04_02_021, type: integer, target: fact_agent_day.talk_seconds,       state: verified, note: "应答时长。M-R04 占用率的分子之一"}
+  - {src: IDX_04_02_022, type: integer, target: fact_agent_day.idle_seconds,       state: verified}
+  - {src: IDX_04_02_023, type: integer, target: fact_agent_day.internal_xfer_count, state: verified}
+  - {src: IDX_04_02_024, type: integer, target: fact_agent_day.transfer_out_count, state: verified}
+
+quality:
+  batch_checks:
+    - "各状态时长之和不得超过签入时长；超出即入对账差异并告警，不自动调平"
+    - "平台对不存在的对象返回 null，不得写成 0——null 是「没有这一天」，0 是「这一天为零」"
+  recon: "呼入数与呼入时长同时与话单的坐席腿比对。两者都对得上，才说明话单与平台指标的归日口径一致"

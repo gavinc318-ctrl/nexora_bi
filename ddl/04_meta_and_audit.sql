@@ -38,6 +38,20 @@ CREATE TABLE meta.run_log (
 COMMENT ON TABLE meta.run_log IS '重放的依据。配合 raw 中的 run_id 与 contract_version，可回答某条数据是哪一次运行、按第几版契约、从哪个水位进来的';
 
 -- ---- 语义映射与值剖析 ----------------------------------------------
+CREATE TABLE meta.reference_value (        -- 小码表的统一落点：休息原因、业务类型、等待与离开原因等
+    domain           text        NOT NULL,     -- rest_reason · service_type · wait_cause · leave_reason ...
+    src_system       text        NOT NULL,
+    code             text        NOT NULL,
+    name_ar          text COLLATE "ar-x-icu",
+    name_en          text COLLATE "en-x-icu",
+    is_current       boolean     NOT NULL DEFAULT true,
+    first_seen_at    timestamptz NOT NULL DEFAULT now(),
+    last_seen_at     timestamptz NOT NULL DEFAULT now(),
+    contract_version integer     NOT NULL,
+    PRIMARY KEY (domain, src_system, code)
+);
+COMMENT ON TABLE meta.reference_value IS '行数少、无需 SCD2、不值得各建一张维度表的码表集中于此。源端删除时置 is_current 为假而不删行——历史事实仍引用它。新出现的码默认入表并计入 unknown 列数，由 M-10 补译名（LD-01 9.2）';
+
 CREATE TABLE meta.mapping_registry (
     source_id        text        NOT NULL,
     src_column       text        NOT NULL,

@@ -7,6 +7,11 @@
 ## 用法
 
 ```bash
+# ICP 枚举与指标目录（换版本接口文档后重跑并逐行比对）
+pdftotext -layout "3rd API/CloudICP V100R023C00 Interface Reference.pdf" /tmp/icp.txt
+python3 tools/icp_idx.py  /tmp/icp.txt "3rd API/icp_indexes.csv"
+python3 tools/icp_enum.py /tmp/icp.txt "3rd API"
+
 cd tools
 python3 run.py        # 11 册 docx → LLD/LD-*.md
 python3 xlsx2md.py    # LD-05A 规格册、HD-04 决策册、HD-02 追溯矩阵 → LLD/*.md
@@ -23,6 +28,8 @@ python3 hd1.py        # HD-01 需求 → LLD/REF-HD-01-requirements.md（逐条�
 | `run.py` | 批量转换 11 册 LD 文档，写入各册的 frontmatter |
 | `xlsx2md.py` | xlsx → Markdown，逐页签转表格 |
 | `hd1.py` | HD-01 专用：拆成逐条需求，验收标准单列 |
+| `icp_idx.py` | 从 CloudICP 接口文档抽 396 个平台指标目录 → `3rd API/icp_indexes.csv` |
+| `icp_enum.py` | 从同一文档抽枚举值表 → `3rd API/icp_{device_type,call_type,release_cause}.csv` |
 
 ## 一条纪律
 

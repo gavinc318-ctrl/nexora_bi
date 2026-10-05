@@ -193,6 +193,27 @@ CREATE TABLE core.dim_channel (                          -- 警情来源渠道
 );
 COMMENT ON COLUMN core.dim_channel.has_call IS '非电话渠道的接警单没有首呼，须从全过程时长的分母中显式排除（M-I08）';
 
+CREATE TABLE core.dim_queue (                            -- 技能队列（来源 ICP）
+    queue_sk         uuid        PRIMARY KEY,
+    site_sk          uuid        NOT NULL REFERENCES core.dim_site,
+    src_natural_key  text        NOT NULL,               -- ICP 的技能队列 ID
+    code             text        NOT NULL,
+    name_ar          text COLLATE "ar-x-icu"        NOT NULL,
+    name_en          text COLLATE "en-x-icu"        NOT NULL,
+    skill_group_code text,
+    media_type_code  smallint,                           -- 语音 · 文字等，见 ICP 媒体类型
+    valid_from       timestamptz NOT NULL,
+    valid_to         timestamptz NOT NULL DEFAULT 'infinity',
+    is_current       boolean     GENERATED ALWAYS AS (valid_to = 'infinity') STORED,
+    src_system       text        NOT NULL,
+    run_id           uuid        NOT NULL,
+    contract_version integer     NOT NULL,
+    built_at         timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (site_sk, src_natural_key, valid_from)
+);
+COMMENT ON TABLE core.dim_queue IS '技能队列是路由能力标签（阿语、英语、医疗…），不是组织结构，也不是 CAD 的警种——技能队列决定这通电话由谁接，警种决定接完之后派谁去，禁止一对一映射。走 SCD2：队列改名或合并后，历史报表仍按当时的名字呈现';
+COMMENT ON COLUMN core.dim_queue.media_type_code IS '本期只用语音。ICP 的技能队列可承载文字等其它媒体，取值保留以免日后启用时改结构';
+
 CREATE TABLE core.dim_priority (
     priority_sk      uuid        PRIMARY KEY,
     site_sk          uuid        NOT NULL REFERENCES core.dim_site,

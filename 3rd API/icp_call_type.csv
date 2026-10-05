@@ -1,0 +1,35 @@
+id,name,description
+0,SP_CALL_NORMAL,Common incoming call
+5,SP_CALL_LONG,Incoming toll call
+6,INTER_CALL,"Internal call It refers to a call made by an agent to another agent. An internal call cannot be forwarded, or muted."
+7,SP_CALL_OUT,Common outgoing call It refers to an outgoing call made by agents.
+8,OP_CALL_OUT,Agent outgoing call type
+9,OP_PRI_OUT,Outgoing call in the PRI mode
+10,IVR_CALL_OUT,Outgoing call through IVR
+11,SELF_CALLOUT,Outgoing call made by a Phone agent
+12,IVR_PRI_CALL,Outgoing call in the PRI mode through IVR
+13,NIRC_CALL_IN,Incoming call to a networked call center
+14,NIRC_CALL_OUT,Outgoing call of a networked call center
+15,NIRC_SPY_CALL_IN,QC incoming call to a networked call center
+16,NIRC_SPY_CALL_OUT,QC outgoing call of a networked call center
+17,NIRC_INTER_CALL_IN,Internal incoming network call to a virtual agent
+18,NIRC_INTER_CALL_OUT,Internal outgoing network call of a virtual agent
+20,ICD_SP_OPS_AIDERCALL,Aid call
+21,ICD_SP_OPS_INCALL,Incoming call (international agent)
+22,ICD_SP_OPS_PASSCALL,Relay call
+23,ICD_SP_OPS_GIVECALL,Outgoing call (international agent)
+40,OUTBOUND_CALL_OUT,"Reserving an outgoing call The system queries the reserved outgoing call database regularly. After obtaining the reserved calls whose time is earlier than the current computer time, the system forcibly makes the calls."
+41,ICD_SP_OUTBOUND_PRE_OCCUPY,"Pre-occupied an outgoing call The system occupies an idle agent and then makes an outgoing call. If making the outgoing call succeeds, the idle agent handles the call."
+42,ICD_SP_OUTBOUND_PRE_CONNECT,"Pre-connecting an outgoing call The system makes an outgoing call to a user. If making the call succeeds, the system connects the call to an agent when the phone of the user rings."
+43,ICD_SP_OUTBOUND_VIRTUAL_CALLIN,"Predicting an outgoing call The system makes an outgoing call to a user. If making the call succeeds, the system connects the call to an agent after the user hooks off."
+44,ICD_SP_OUTBOUND_PREVIEW,Previewing an outgoing call It refers to a call that is made by an agent after the agent previews the outgoing call information.
+45,ICD_SP_OUTBOUND_CALLBACK,"Callback request If a Web user needs to contact a call center when browsing Web pages on Internet, the Web user can use the callback request service. An agent in the call center then dials the phone number specified by the Web user. After the call is connected, the web user follows the voice instruction of the agent and at the same time enjoy other services such as escorted browsing."
+46,ICD_SP_IDD,International incoming toll call
+50,ICD_SP_CBRT_CALL,RBT call
+51,ICD_SP_INTERNAL_TWO_HELP,"Two-party help call When answering an incoming call, an agent can ask for internal help. In the case of a two-party help, the call of the customer is held, and the agent talks with the asked-for-help agent."
+52,ICD_SP_INTERNAL_THREE_HELP,"Three-party help call When answering an incoming call, an agent can ask for internal help. In the case of a three-party help, the customer, agent, and asked-for-help agent can talk with each other. In the case of a two- party help, a three-party help can be initiated to form a three-party conversation."
+60,ICD_SP_OUTBOUND_PRE_OCCUPY_PRI Pre-occ _CALL,upied an outgoing call in the PRI mode
+61,ICD_SP_OUTBOUND_PRE_CONNECT_P RI_CALL,Pre-connecting an outgoing call in the PRI mode
+62,ICD_SP_OUTBOUND_VIRTUAL_CALLIN_ PRI_CALL,Virtual incoming and outgoing calls in the PRI mode
+63,ICD_SP_OUTBOUND_PREVIEW_PRI_CAL Previe L,wing an outgoing call in the PRI mode
+64,ICD_SP_OUTBOUND_CALLBACK_PRI_C ALL,Callback request in the PRI mode

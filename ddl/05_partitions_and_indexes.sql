@@ -47,7 +47,7 @@ CREATE INDEX ix_leg_parent     ON core.fact_call_leg (call_sk);
 CREATE INDEX ix_leg_natural    ON core.fact_call_leg (src_natural_key);              -- 回看窗口覆盖写按此键定位
 CREATE INDEX ix_leg_agent      ON core.fact_call_leg (agent_sk, wait_begin)
                                    WHERE device_type_code = 2;                       -- M-C09 至 M-C13 一律从腿级算
-CREATE INDEX ix_leg_queue      ON core.fact_call_leg (queue_code, wait_begin)
+CREATE INDEX ix_leg_queue      ON core.fact_call_leg (queue_sk, wait_begin)
                                    WHERE device_type_code = 1;                       -- M-C05 · M-C06 按技能队列
 CREATE INDEX ix_leg_wait       ON core.fact_call_leg USING brin (wait_begin);
 
@@ -104,6 +104,7 @@ CREATE INDEX ix_audit_object   ON audit.access_log (object_ref, occurred_at);
 
 -- 维度
 CREATE INDEX ix_dim_agency_cur ON core.dim_agency_type (site_sk, src_natural_key) WHERE is_current;
+CREATE INDEX ix_dim_queue_cur  ON core.dim_queue       (site_sk, src_natural_key) WHERE is_current;
 CREATE INDEX ix_dim_unit_cur   ON core.dim_unit        (site_sk, src_natural_key) WHERE is_current;
 CREATE INDEX ix_dim_officer_cur ON core.dim_officer    (site_sk, src_natural_key) WHERE is_current;
 CREATE INDEX ix_dim_agent_cur  ON core.dim_agent       (site_sk, src_natural_key) WHERE is_current;
