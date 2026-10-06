@@ -1,0 +1,192 @@
+# 21-connection —— 连接层：pgBouncer + HAProxy
+#
+# 顺序是 应用 → pgBouncer → HAProxy → 当前主库，不能颠倒（DD-67）。
+# pgBouncer 自己没有选主能力，它的 [databases] 里只能写一个固定地址；
+# 把 HAProxy 放在它后面，选主的事交给读 Patroni 健康检查的 HAProxy。
+# 若反过来（HAProxy 在前），每个 pgBouncer 只能绑死一台库，池就跟着库走了。
+#
+# ★ 开发机与生产的差异，就两处，都在 inventory 里：
+#     haproxy_backends      开发机一个后端，生产三个
+#     haproxy_health_check  开发机 pgsql-check，生产 Patroni REST /primary
+#   剧本与模板两边完全一样。选主与切换演练在开发机上验不了（LD-08 的范畴），
+#   能验的是拓扑、两个池的行为与连接数上限。
+#
+# ★ 关于 --check：同 20-database，装包之后的任务依赖包自身创建的用户与目录，
+#   故整块跳过 check 模式。
+
+- name: 连接层 pgBouncer 与 HAProxy
+  hosts: all
+  become: true
+
+  vars:
+    pgb_conf_dir: /etc/pgbouncer
+
+  tasks:
+
+    # ================= 装包前：check 模式下可验 =================
+
+    - name: 断言连接数预算不超过 PostgreSQL 的上限
+      ansible.builtin.assert:
+        that:
+          - (pgb_pool_size_txn + pgb_pool_size_session + pgb_reserve_pool) <= pgb_max_db_connections
+          - (pgb_max_db_connections + 10) <= 100
+        fail_msg: >-
+          连接数预算超限。事务池 {{ pgb_pool_size_txn }} + 会话池 {{ pgb_pool_size_session }}
+          + 预留池 {{ pgb_reserve_pool }} 必须不超过全局闸 {{ pgb_max_db_connections }}；
+          再加 10 个保留名额（superuser 3 · 监控 2 · 人工维护 5）不得超过本机 max_connections。
+          生产两台 LB 均按 active/passive 部署，常态仍是一份池，但切换瞬间会短时叠加——
+          生产的 max_connections 因此定为 200（LD-08 第 8 章）。
+        success_msg: >-
+          连接预算：事务 {{ pgb_pool_size_txn }} + 会话 {{ pgb_pool_size_session }}
+          + 预留 {{ pgb_reserve_pool }} ≤ 闸 {{ pgb_max_db_connections }}，另留 10 个名额
+
+    - name: 安装 pgBouncer 与 HAProxy
+      ansible.builtin.apt:
+        name: "{{ connection_packages }}"
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # ================= 装包后 =================
+
+    - name: 连接层配置
+      when: not ansible_check_mode
+      block:
+
+        # ---------- 数据库侧的池用户 ----------
+        - name: 查询池用户是否已存在
+          ansible.builtin.command:
+            cmd: psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'pgbouncer'"
+          become_user: postgres
+          register: _pgbrole
+          changed_when: false
+          check_mode: false
+
+        - name: 生成池用户口令
+          ansible.builtin.set_fact:
+            _pgb_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters','digits']) }}"
+          when: _pgbrole.stdout | trim != '1'
+
+        - name: 建立池用户
+          ansible.builtin.command:
+            cmd: >-
+              psql -tAc "CREATE ROLE pgbouncer LOGIN PASSWORD '{{ _pgb_password }}'"
+          become_user: postgres
+          when: _pgbrole.stdout | trim != '1'
+          no_log: true
+
+        # pgBouncer 要能查 pg_shadow 才能做 SCRAM 透传；给一个只读函数而不是超级用户权限
+        - name: 建立 auth_query 函数
+          ansible.builtin.command:
+            cmd: >-
+              psql -d {{ pg_database }} -v ON_ERROR_STOP=1 -c
+              "CREATE OR REPLACE FUNCTION public.pgbouncer_get_auth(p_usename text)
+                 RETURNS TABLE(usename name, passwd text)
+                 LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog AS
+               $$ SELECT usename, passwd FROM pg_shadow WHERE usename = p_usename $$;
+               REVOKE ALL ON FUNCTION public.pgbouncer_get_auth(text) FROM PUBLIC;
+               GRANT EXECUTE ON FUNCTION public.pgbouncer_get_auth(text) TO pgbouncer;"
+          become_user: postgres
+          register: _authfn
+          changed_when: "'CREATE FUNCTION' in _authfn.stdout or _authfn.rc == 0"
+
+        # ---------- HAProxy ----------
+        - name: 下发 HAProxy 配置
+          ansible.builtin.template:
+            src: ../files/haproxy.cfg.j2
+            dest: /etc/haproxy/haproxy.cfg
+            owner: root
+            group: root
+            mode: "0644"
+            validate: haproxy -c -f %s        # 配置写错时拒绝落盘，而不是等重启才发现
+          notify: restart haproxy
+
+        - name: 启用并启动 HAProxy
+          ansible.builtin.systemd_service:
+            name: haproxy
+            enabled: true
+            state: started
+
+        # ---------- pgBouncer ----------
+        - name: 下发 pgBouncer 配置
+          ansible.builtin.template:
+            src: ../files/pgbouncer.ini.j2
+            dest: "{{ pgb_conf_dir }}/pgbouncer.ini"
+            owner: postgres
+            group: postgres
+            mode: "0640"
+          notify: restart pgbouncer
+
+        - name: 建立 userlist
+          ansible.builtin.copy:
+            dest: "{{ pgb_conf_dir }}/userlist.txt"
+            owner: postgres
+            group: postgres
+            mode: "0600"
+            content: |
+              "pgbouncer" "{{ _pgb_password | default('') }}"
+          when: _pgb_password is defined
+          no_log: true
+
+        - name: 启用并启动 pgBouncer
+          ansible.builtin.systemd_service:
+            name: pgbouncer
+            enabled: true
+            state: started
+
+        - name: 立即应用配置变更
+          ansible.builtin.meta: flush_handlers
+
+        # ---------- 验证：链路真的通，而且走的是这条链路 ----------
+        - name: 经 HAProxy 直连
+          ansible.builtin.command:
+            cmd: psql -h 127.0.0.1 -p {{ haproxy_listen_port }} -d {{ pg_database }} -tAc "SELECT 'via-haproxy'"
+          become_user: postgres
+          register: _viahap
+          changed_when: false
+          failed_when: false
+
+        - name: 断言 HAProxy 这一跳可用
+          ansible.builtin.assert:
+            that: ["_viahap.stdout | trim == 'via-haproxy'"]
+            fail_msg: >-
+              经 HAProxy（127.0.0.1:{{ haproxy_listen_port }}）连不到库。
+              先看 systemctl status haproxy 与 /var/log/haproxy.log；
+              再用 curl -s 127.0.0.1:{{ haproxy_stats_port }} 看后端是否被判为 down。
+            success_msg: "HAProxy → PostgreSQL 链路可用"
+
+        - name: 查询事务池的池模式
+          ansible.builtin.command:
+            cmd: >-
+              psql -h 127.0.0.1 -p {{ pgb_listen_port_txn }} -U pgbouncer -d pgbouncer
+              -tAc "SHOW DATABASES"
+          environment:
+            PGPASSWORD: "{{ _pgb_password | default('') }}"
+          become_user: postgres
+          register: _pools
+          changed_when: false
+          failed_when: false
+          no_log: true
+
+        # 「两个池都在」容易断言，「池模式真的不同」才是要点——
+        # 与网段隔离那次同一性质：配置存在不等于配置生效。
+        - name: 断言两个池的池模式确实不同
+          ansible.builtin.assert:
+            that:
+              - "'transaction' in _pools.stdout"
+              - "'session' in _pools.stdout"
+            fail_msg: >-
+              pgBouncer 的 SHOW DATABASES 里没有同时出现 transaction 与 session 两种池模式。
+              两个池若都落成事务级，dbt 与 Airflow 的 SET、临时表与 advisory lock 会在
+              运行期随机失败，而且失败现象与池无关——这正是必须在此刻验出来的原因。
+            success_msg: "两个池的池模式不同：事务级与会话级并存"
+
+  handlers:
+    - name: restart haproxy
+      ansible.builtin.systemd_service:
+        name: haproxy
+        state: restarted
+    - name: restart pgbouncer
+      ansible.builtin.systemd_service:
+        name: pgbouncer
+        state: restarted

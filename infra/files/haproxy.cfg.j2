@@ -1,0 +1,41 @@
+# 由 infra/playbooks/21-connection.yml 管理，勿手改
+#
+# 本机 pgBouncer 的后端。职责只有一个：把连接送到【当前的主库】。
+#
+# ★ 生产上健康检查必须走 Patroni 的 REST /primary，不能用 TCP 端口探活。
+#   备库的 5432 一样是通的，TCP 探活会把写流量送到只读备库，症状是应用随机报
+#   cannot execute INSERT in a read-only transaction——看着像应用的 bug，
+#   实际是健康检查选错了方式。
+#   开发机没有 Patroni，故退化为 {{ haproxy_health_check }}；这一段不等于生产。
+
+global
+    log /dev/log local0
+    maxconn 2000
+    user haproxy
+    group haproxy
+    daemon
+
+defaults
+    log     global
+    mode    tcp
+    option  tcplog
+    timeout connect 5s
+    timeout client  30m          # 会话级池的连接可以长时间空闲，不能按 HTTP 的尺度掐
+    timeout server  30m
+    retries 2
+
+listen stats
+    mode http
+    bind 127.0.0.1:{{ haproxy_stats_port }}
+    stats enable
+    stats uri /
+    stats refresh 5s
+
+listen pg_primary
+    bind 127.0.0.1:{{ haproxy_listen_port }}
+    option {{ haproxy_health_check }} user {{ haproxy_check_user | default('postgres') }}
+    # on-marked-down shutdown-sessions：节点被判定为 down 时立刻断开指向它的连接，
+    # 而不是让它们挂在那里等 TCP 超时。切换时这一项决定恢复是秒级还是分钟级。
+{% for h in haproxy_backends %}
+    server {{ h.name }} {{ h.addr }} check inter 2s fall 2 rise 2 on-marked-down shutdown-sessions
+{% endfor %}

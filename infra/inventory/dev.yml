@@ -64,6 +64,32 @@ all:
       - postgis
       - pgcrypto        # core.sk 的 UUID v5 需要 digest()
 
+    # ---- 连接层 ----
+    # 两个池，因为两类客户端对连接的要求不同（DD-67）：
+    #   事务级省连接，但 SET、临时表、advisory lock、预处理语句不保证落在同一后端；
+    #   会话级保行为，但连接在客户端断开前不归还。
+    # 会话池大小即 dbt 的并发上限——这两个数绑在一起，调一个必须同时调另一个。
+    connection_packages:
+      - pgbouncer
+      - haproxy
+    pgb_listen_port_txn: 6432          # 业务查询，事务级
+    pgb_listen_port_session: 6433      # Airflow / dbt / 人工运维，会话级
+    pgb_pool_size_txn: 30
+    pgb_pool_size_session: 10          # = dbt threads 的上限
+    pgb_reserve_pool: 5
+    pgb_max_client_conn: 400           # 客户端侧可以多，后端才是稀缺的
+    pgb_max_db_connections: 45         # 全局硬闸：30 + 10 + 5，防止池数一多悄悄超限
+    haproxy_listen_port: 5000          # pgBouncer 的后端指向它，而不是直接指向库
+    haproxy_stats_port: 7000
+    # 开发机没有 Patroni，健康检查只能退化为 pgsql-check；生产用 Patroni 的
+    # REST /primary，这一段在开发机上不等于生产（runbook/05）。
+    haproxy_health_check: pgsql-check
+    haproxy_check_user: postgres
+    # 开发机只有一台库，后端就一个。生产是三台库 + Patroni REST 健康检查，
+    # 届时改的是本列表与 haproxy_health_check，剧本与模板不动。
+    haproxy_backends:
+      - {name: pg_local, addr: "127.0.0.1:{{ pg_port }}"}
+
     # ---- 容器运行时包 ----
     # netavark 与 aardvark-dns 必须显式列出：它们在 Ubuntu 是 Recommends 而非
     # Depends，缺了之后容器之间无法按名字互相解析，而报错是「连接被拒绝」，
