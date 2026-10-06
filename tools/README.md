@@ -30,6 +30,23 @@ python3 hd1.py        # HD-01 需求 → LLD/REF-HD-01-requirements.md（逐条�
 | `hd1.py` | HD-01 专用：拆成逐条需求，验收标准单列 |
 | `icp_idx.py` | 从 CloudICP 接口文档抽 396 个平台指标目录 → `3rd API/icp_indexes.csv` |
 | `icp_enum.py` | 从同一文档抽枚举值表 → `3rd API/icp_{device_type,call_type,release_cause}.csv` |
+| `check_refs.py` | 全局编号与引用一致性校验。退出码非零即不通过 |
+
+## 一条校验
+
+```bash
+python3 tools/check_refs.py
+```
+
+每一轮改完登记册、指标或契约都跑一遍。它查四件事：
+
+1. **悬空引用** —— 正文引用了登记册里没有的编号（上一轮就是这样抓到 M-I09 与 DD-62 的）
+2. **编号断号** —— 缺号必须在文档里记明，否则不通过
+3. **从未被引用的条目** —— 不算错误，但一条长期没人提的 IR 多半是忘了跟进
+4. **跨文件交叉校验** —— metrics 的 source_tables 是否真有这张表、
+   对照表引用的平台指标编号是否存在、契约指向的列是否存在、枚举值表是否还在
+
+`ALLOW` 名单里的例外都写了理由。这个名单一旦变成「加进去就不报了」，校验器就失去意义。
 
 ## 一条纪律
 

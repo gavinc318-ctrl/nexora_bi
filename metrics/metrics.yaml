@@ -731,13 +731,13 @@ metrics:
     entity_date: date_key
     definition: "客户反馈的满意度评分"
     dimensions: [dim_date, dim_site, dim_agent]
-    source_tables: [core.fact_citizen_feedback]
+    source_tables: []
     version: 1
     depends_unverified: true
     retrospective: false
     published: false
     rfp: "1.6.2.17"
-    notes: "依赖 IR-28"
+    notes: "依赖 IR-28 / T-22：客户反馈的采集方与形态未定，承载它的事实表因此尚未设计——不建占位表，占位表会被当成真表。答复到位后一并补表与本列（LD-02 待确认项）"
   - code: M-P04
     domain: 绩效与质量
     name_zh: "反馈量"
@@ -747,13 +747,13 @@ metrics:
     entity_date: date_key
     definition: "收到的客户反馈数"
     dimensions: [dim_date, dim_site, dim_agent]
-    source_tables: [core.fact_citizen_feedback]
+    source_tables: []
     version: 1
     depends_unverified: true
     retrospective: false
     published: false
     rfp: "1.6.2.17"
-    notes: "依赖 IR-28"
+    notes: "依赖 IR-28 / T-22：客户反馈的采集方与形态未定，承载它的事实表因此尚未设计——不建占位表，占位表会被当成真表。答复到位后一并补表与本列（LD-02 待确认项）"
   - code: M-P05
     domain: 绩效与质量
     name_zh: "投诉量"
@@ -763,13 +763,13 @@ metrics:
     entity_date: date_key
     definition: "投诉性反馈数"
     dimensions: [dim_date, dim_site, dim_agent]
-    source_tables: [core.fact_citizen_feedback]
+    source_tables: []
     version: 1
     depends_unverified: true
     retrospective: false
     published: false
     rfp: "1.6.2.17"
-    notes: "依赖 IR-28"
+    notes: "依赖 IR-28 / T-22：客户反馈的采集方与形态未定，承载它的事实表因此尚未设计——不建占位表，占位表会被当成真表。答复到位后一并补表与本列（LD-02 待确认项）"
   - code: M-S01
     domain: 系统运行
     name_zh: "可用性"
