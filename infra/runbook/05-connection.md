@@ -69,28 +69,52 @@ ansible-playbook playbooks/21-connection.yml -e ansible_connection=local -K   # 
 
 ## 人工核验
 
-剧本已断言「HAProxy 这一跳可用」与「两个池的池模式确实不同」。下面三条是人工补验，
-验的是**行为**而不是配置：
+剧本已断言「HAProxy 这一跳可用」与「两个池的池模式确实不同」。下面是人工补验，
+验的是**行为**而不是配置。需要一个带口令的验证用户——pgBouncer 的 `auth_query`
+会从 `pg_shadow` 取它的口令，不必加进 `userlist.txt`。
 
 ```bash
-# 1 经事务池能查，且会话状态不保证保留
-psql -h 127.0.0.1 -p 6432 -U <业务用户> -d oss911 -c "SELECT 1"
+# 建一个只读的验证用户，验完即删
+sudo -u postgres psql -c \
+  "CREATE ROLE verify_pool LOGIN PASSWORD 'TempVerify#2026' IN ROLE pg_read_all_data"
 
-# 2 经会话池能用临时表——这一条在事务级池上会随机失败，正是两个池存在的理由
-psql -h 127.0.0.1 -p 6433 -U <业务用户> -d oss911 <<'SQL'
+# 1 会话池上，临时表必须可用。这是两个池存在的全部理由
+PGPASSWORD='TempVerify#2026' psql -h 127.0.0.1 -p 6433 -U verify_pool -d oss911 <<'SQL'
 CREATE TEMP TABLE t(x int);
 INSERT INTO t VALUES (1);
-SELECT count(*) FROM t;
+SELECT count(*) AS should_be_1 FROM t;
 SQL
 
-# 3 后端连接数真的被闸住了
+# 2 事务池上能正常查询（短事务，这是它该干的事）
+PGPASSWORD='TempVerify#2026' psql -h 127.0.0.1 -p 6432 -U verify_pool -d oss911 \
+  -c "SELECT 1"
+
+# 3 后端连接数确实被闸住
 sudo -u postgres psql -tAc \
-  "SELECT count(*) FROM pg_stat_activity WHERE backend_type='client backend'"
+  "SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend'"
+
+# 删掉验证用户
+sudo -u postgres psql -c "DROP ROLE verify_pool"
 ```
 
-第 2 条值得多跑两次。临时表在事务级池上**不是必然失败**——客户端恰好拿到同一个后端
-连接时会成功。这类「有时候好使」的缺陷最难排查，所以要在此刻、在空闲的机器上、
-用能重复的方式确认它走的是会话池。
+**第 1 条必须成功**，它是确定性的：会话级池把同一个客户端连接固定在同一个后端上。
+
+**不要指望用第 1 条的反例去「证明」事务池会失败。** 单个客户端在空闲的机器上跑，
+pgBouncer 多半会把同一个后端连接反复给它，临时表因此**也能成功**——
+这正是事务级池化危险的地方：它不是必然失败，是**偶尔失败**。
+要让它确定性地暴露，得有并发客户端把后端连接打散：
+
+```bash
+# 可选：两个客户端并发时，事务池上的临时表才会露出问题
+for i in 1 2; do
+  PGPASSWORD='TempVerify#2026' psql -h 127.0.0.1 -p 6432 -U verify_pool -d oss911 \
+    -c "CREATE TEMP TABLE t$i(x int)" -c "SELECT count(*) FROM t$i" &
+done; wait
+```
+
+看到 `relation "t1" does not exist` 之类的报错就对了——那不是故障，是事务级池化的
+固有行为，也是 dbt 与 Airflow 必须走会话池的原因。**生产上这类失败会在负载高时
+才出现，排查成本极高**，所以这一条要在现在、在空闲的机器上看一眼，建立直觉。
 
 ## 开发机不等于生产的两处
 
