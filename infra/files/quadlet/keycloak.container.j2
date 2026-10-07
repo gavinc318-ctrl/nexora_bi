@@ -23,9 +23,9 @@ Environment=KC_HOSTNAME_STRICT=false
 # start-dev 是开发机的形态：免 TLS、免 hostname 严格校验。
 # 生产用 start --optimized 并配证书与 hostname，属 LD-08 的范畴。
 Exec=start-dev
-HealthCmd=/bin/sh -c "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.0\\r\\n\\r' >&3 && grep -q UP <&3"
-HealthInterval=15s
-HealthRetries=10
+# 不设容器内健康检查：该镜像基于 UBI micro，没有 curl，而 /dev/tcp 是 bash 特性
+# 不是 sh 特性——写一个本身就跑不起来的健康检查，只会让状态更难读。
+# 真正的验证在剧本侧（22-containers 的三条断言）。
 
 [Service]
 Restart=on-failure

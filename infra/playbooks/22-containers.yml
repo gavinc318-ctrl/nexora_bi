@@ -169,12 +169,31 @@
           until: _kchealth.status | default(0) == 200
           failed_when: false
 
+        # 断言失败时把真实现场带出来，而不是让人再去查一遍——
+        # 与 HAProxy 那次同一条教训。
+        - name: 就绪失败时收集容器状态与日志
+          ansible.builtin.shell:
+            cmd: |
+              echo "--- podman ps -a ---"
+              podman ps -a --format '{% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}{% endraw %}' | grep -i keycloak || true
+              echo "--- listen_addresses ---"
+              sudo -u postgres psql -tAc "SHOW listen_addresses" 2>&1 || true
+              echo "--- journalctl -u keycloak (末 40 行) ---"
+              journalctl -u keycloak -n 40 --no-pager 2>&1 | tail -40 || true
+          register: _kcdiag
+          changed_when: false
+          when: _kchealth.status | default(0) != 200
+
         - name: 断言 Keycloak 就绪
           ansible.builtin.assert:
             that: ["_kchealth.status | default(0) == 200"]
             fail_msg: >-
-              Keycloak 的 /health/ready 未返回 200（实际 {{ _kchealth.status | default('无响应') }}）。
-              查 journalctl -u keycloak -n 80。最常见的原因是连不上数据库：
+              {{ _kcdiag.stdout | default('') }}
+              ----------------------------------------
+              Keycloak 的 /health/ready 未返回 200（实际 {{ _kchealth.status | default('无响应') }}；
+              -1 表示连接根本没建立，即端口上没有监听，容器多半没起来或在崩溃重启）。
+              最常见的原因是连不上数据库——KC_DB=postgres 一旦设定，连不上库即启动失败，
+              不会回落内置 H2：
               容器里的 127.0.0.1 是容器自己，库必须监听 {{ podman_internal_gateway }}
               且 pg_hba 放行 internal 网段（20-database 已处理，可用
               sudo -u postgres psql -tAc "SHOW listen_addresses" 核对）。
