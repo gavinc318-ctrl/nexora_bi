@@ -29,6 +29,13 @@ Exec=start-dev
 
 [Service]
 Restart=on-failure
+# 退避：Keycloak 连不上库时会反复崩溃，每轮启动要烧掉一分多钟 CPU。
+# 不加退避就是无限重启，既掩盖问题又占满一个核。
+# 五分钟内失败三次即放弃，让 systemctl status 直接显示 failed——
+# 一个明确的 failed 比一个「正在重启」的假活状态有用得多。
+RestartSec=20
+StartLimitIntervalSec=300
+StartLimitBurst=3
 TimeoutStartSec=300
 
 [Install]
