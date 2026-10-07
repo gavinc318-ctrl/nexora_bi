@@ -172,20 +172,6 @@
             mode: "0644"
           notify: restart postgresql
 
-        # 容器要连宿主机的库，pg_hba 必须放行 internal 网段。
-        # 放在这里而不是第 6 步，是因为 pg_hba 属于数据库本体的配置——
-        # 配置的归属要跟着被配置的东西走，不跟着「谁需要它」走。
-        - name: 放行 internal 网段的数据库连接
-          ansible.builtin.lineinfile:
-            path: "{{ pg_confdir }}/pg_hba.conf"
-            line: "host    all             all             {{ podman_networks | selectattr('name','eq','internal') | map(attribute='subnet') | first }}        scram-sha-256"
-            regexp: "^host\\s+all\\s+all\\s+10\\.89\\.10\\.0/24"
-            insertafter: EOF
-            owner: postgres
-            group: postgres
-            mode: "0640"
-          notify: restart postgresql
-
         # 参数要在建库之前真正加载，否则本次运行里的验证读到的是旧值
         - name: 立即应用参数变更
           ansible.builtin.meta: flush_handlers

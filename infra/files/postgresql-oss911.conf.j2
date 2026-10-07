@@ -59,7 +59,10 @@ effective_io_concurrency = 200
 autovacuum_max_workers = 4
 autovacuum_naptime = 30s
 
-# 监听地址：除本机外还要让 internal 网段的容器连得上（Keycloak 等）。
-# 容器里的 127.0.0.1 是容器自己，故必须显式监听网关地址。
+# 监听地址：只听本机。容器不直连本库，一律经宿主机的 pgBouncer（DD-67）。
+#
+# ★ 曾经在此列出 podman 网桥的网关地址，结果是：网桥只在有容器挂着时存在，
+#   而 systemd 启动 postgresql 早于容器，PG 对绑不上的地址跳过并继续，
+#   于是「启动成功」却少绑一个地址，每次开机重现。少一个监听地址也少一分暴露面。
 # 生产上库虚机与应用虚机分离，监听地址按 LD-08 的网络分段另定。
-listen_addresses = 'localhost,{{ podman_internal_gateway }}'
+listen_addresses = 'localhost'

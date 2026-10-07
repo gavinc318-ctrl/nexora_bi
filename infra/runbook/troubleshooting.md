@@ -277,3 +277,34 @@ Error: creating container storage: the container name "t-int" is already in use 
 - **规律** —— 「只在创建时生成一次」的东西（口令、密钥、token），
   凡后续步骤还要用它，就必须有一条「已存在时取回」的路径，否则剧本只有首次可用。
   这和幂等性是两件事：剧本可以幂等，但校验步骤拿不到凭据照样会红
+
+### 现象：容器连宿主机 PostgreSQL 报 `Connection refused`，而 `SHOW listen_addresses` 看着是对的
+
+```
+Datasource '<default>': Connection to 10.89.10.1:5432 refused.
+```
+```
+$ sudo ss -lntp | grep 5432
+LISTEN 127.0.0.1:5432                      ← 只有这一个
+$ psql -tAc "select setting, pending_restart from pg_settings where name='listen_addresses'"
+localhost,10.89.10.1|f                      ← 设置是对的，且不待重启
+```
+
+- **先读错误类型** —— `Connection refused` 表示包**到达了**对端并被 RST：
+  那个地址上没有程序在监听。网段隔离或防火墙 DROP 会表现为**超时**，不是 refused；
+  `pg_hba` 拒绝会报 `no pg_hba.conf entry for host`。
+  三者的现象不同，先分清再查，能省掉大半时间
+- **原因** —— PostgreSQL 对**绑不上的监听地址是跳过并继续**的，只有一个地址都绑不上
+  才拒绝启动。日志里会有一行 `could not create listen socket for "10.89.10.1"`，
+  但服务照常 running，`pg_settings` 也照常显示配置值——
+  **配置「已加载」与地址「已绑上」是两回事**
+- **为什么绑不上** —— podman 的网桥只在**有容器挂着时**才存在，
+  而 systemd 启动 postgresql 一定早于容器。重启 PG 的那一刻网桥不在，地址就不在。
+  这个问题每次开机都会重现，调启动顺序救不了——容器要等 PG，PG 又要等网桥
+- **处置** —— 不让容器直连 PostgreSQL，改走宿主机的 pgBouncer（DD-67 的拓扑本来
+  就是「应用 → pgBouncer → HAProxy → 库」，Keycloak 也是应用，不该有例外）。
+  pgBouncer 监听 `0.0.0.0`，没有这个顺序依赖。PG 随之退回只监听 localhost，
+  暴露面也小一分
+- **通用教训** —— **一个「监听地址」只有在那个地址存在的时候才绑得上，
+  而地址的生命周期可能比服务短。** 凡是把服务绑在动态创建的接口上，
+  都要问一句：这个接口在服务启动时在不在？

@@ -76,9 +76,10 @@ all:
     pgb_listen_port_session: 6433      # Airflow / dbt / 人工运维，会话级
     pgb_pool_size_txn: 30
     pgb_pool_size_session: 10          # = dbt threads 的上限
+    pgb_pool_size_keycloak: 10         # Keycloak 的 JDBC 池，同样走会话级
     pgb_reserve_pool: 5
     pgb_max_client_conn: 400           # 客户端侧可以多，后端才是稀缺的
-    pgb_max_db_connections: 45         # 全局硬闸：30 + 10 + 5，防止池数一多悄悄超限
+    pgb_max_db_connections: 60         # 全局硬闸：30 + 10 + 10 + 5，防止池数一多悄悄超限
     haproxy_listen_port: 5000          # pgBouncer 的后端指向它，而不是直接指向库
     haproxy_stats_port: 7000
     # 开发机没有 Patroni，健康检查只能退化为 pgsql-check；生产用 Patroni 的
@@ -135,8 +136,14 @@ all:
         ref: "docker.io/prom/prometheus:v2.55.1"
         digest: ""
 
-    # 容器访问宿主机数据库走 internal 网段的网关地址，不走 127.0.0.1——
+    # 容器连库不直连 PostgreSQL，走宿主机 pgBouncer 的会话池（DD-67 的拓扑，
+    # Keycloak 也是应用，不该有例外）。地址用 internal 网段的网关——
     # 容器里的 127.0.0.1 是容器自己。
+    #
+    # ★ 为什么不让 PostgreSQL 直接监听这个网关地址：podman 的网桥只在有容器
+    #   挂着时才存在，而 systemd 启动 postgresql 一定早于容器。PG 对绑不上的
+    #   地址是跳过并继续，于是它「正常启动」却少绑了一个地址——每次开机重现。
+    #   pgBouncer 监听 0.0.0.0，没有这个顺序依赖。
     podman_internal_gateway: "10.89.10.1"
 
     keycloak_db: keycloak

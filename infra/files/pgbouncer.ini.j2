@@ -3,6 +3,7 @@
 ;; 两个池的分工见 DD-67：
 ;;   oss911       事务级，门户查询 / Superset / 服务层接口
 ;;   oss911_etl   会话级，Airflow / dbt / 人工运维
+;;   keycloak     会话级，Keycloak 的 JDBC 池（预处理语句要求同一后端连接）
 ;;
 ;; 后端一律指向本机 HAProxy，不直接指向 PostgreSQL。
 ;; pgBouncer 自己没有选主能力，知道谁是主库的是 Patroni，HAProxy 读它的健康检查。
@@ -10,6 +11,7 @@
 [databases]
 {{ pg_database }}     = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ pg_database }} pool_mode=transaction pool_size={{ pgb_pool_size_txn }} reserve_pool={{ pgb_reserve_pool }}
 {{ pg_database }}_etl = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ pg_database }} pool_mode=session     pool_size={{ pgb_pool_size_session }}
+{{ keycloak_db }}     = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ keycloak_db }} pool_mode=session     pool_size={{ pgb_pool_size_keycloak }}
 
 [pgbouncer]
 listen_addr = 0.0.0.0

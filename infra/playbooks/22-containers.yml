@@ -93,6 +93,8 @@
           when: _kcrole.stdout | trim != '1'
           no_log: true
 
+        # 库必须先建出来，21-connection 的池配置才指得上。pgBouncer 不校验库是否
+        # 存在，连接时才报错——所以这里建库、那里配池，两者的顺序只在验证时才显形。
         - name: 建立 Keycloak 的库用户与数据库
           ansible.builtin.shell:
             cmd: |
@@ -176,8 +178,10 @@
             cmd: |
               echo "--- podman ps -a ---"
               podman ps -a --format '{% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}{% endraw %}' | grep -i keycloak || true
-              echo "--- listen_addresses ---"
-              sudo -u postgres psql -tAc "SHOW listen_addresses" 2>&1 || true
+              echo "--- pgBouncer 是否在网关地址上监听 ---"
+              ss -lntp 2>/dev/null | grep -E ':{{ pgb_listen_port_session }}' || echo "没有监听 {{ pgb_listen_port_session }}"
+              echo "--- pgBouncer 里有没有 keycloak 这个池 ---"
+              grep -c '^{{ keycloak_db }}' /etc/pgbouncer/pgbouncer.ini 2>/dev/null || true
               echo "--- journalctl -u keycloak (末 40 行) ---"
               journalctl -u keycloak -n 40 --no-pager 2>&1 | tail -40 || true
           register: _kcdiag
@@ -193,10 +197,10 @@
               Keycloak 的 /health/ready 未返回 200（实际 {{ _kchealth.status | default('无响应') }}；
               -1 表示连接根本没建立，即端口上没有监听，容器多半没起来或在崩溃重启）。
               最常见的原因是连不上数据库——KC_DB=postgres 一旦设定，连不上库即启动失败，
-              不会回落内置 H2：
-              容器里的 127.0.0.1 是容器自己，库必须监听 {{ podman_internal_gateway }}
-              且 pg_hba 放行 internal 网段（20-database 已处理，可用
-              sudo -u postgres psql -tAc "SHOW listen_addresses" 核对）。
+              不会回落内置 H2。它连的是宿主机 pgBouncer 的会话池
+              {{ podman_internal_gateway }}:{{ pgb_listen_port_session }}，不是 PostgreSQL 本身。
+              若 pgbouncer.ini 里没有 {{ keycloak_db }} 这个池，先重跑 21-connection。
+              日志里 Connection refused 表示包到了但没人监听；超时才是网段隔离。
             success_msg: "Keycloak 就绪"
 
         # 「起来了」不等于「用的是 PostgreSQL」——内置 H2 同样能起来，

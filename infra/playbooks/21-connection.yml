@@ -28,7 +28,7 @@
     - name: 断言连接数预算不超过 PostgreSQL 的上限
       ansible.builtin.assert:
         that:
-          - (pgb_pool_size_txn + pgb_pool_size_session + pgb_reserve_pool) <= pgb_max_db_connections
+          - (pgb_pool_size_txn + pgb_pool_size_session + pgb_pool_size_keycloak + pgb_reserve_pool) <= pgb_max_db_connections
           - (pgb_max_db_connections + 10) <= 100
         fail_msg: >-
           连接数预算超限。事务池 {{ pgb_pool_size_txn }} + 会话池 {{ pgb_pool_size_session }}
@@ -38,7 +38,8 @@
           生产的 max_connections 因此定为 200（LD-08 第 8 章）。
         success_msg: >-
           连接预算：事务 {{ pgb_pool_size_txn }} + 会话 {{ pgb_pool_size_session }}
-          + 预留 {{ pgb_reserve_pool }} ≤ 闸 {{ pgb_max_db_connections }}，另留 10 个名额
+          + Keycloak {{ pgb_pool_size_keycloak }} + 预留 {{ pgb_reserve_pool }}
+          ≤ 闸 {{ pgb_max_db_connections }}，另留 10 个名额
 
     - name: 安装 pgBouncer 与 HAProxy
       ansible.builtin.apt:

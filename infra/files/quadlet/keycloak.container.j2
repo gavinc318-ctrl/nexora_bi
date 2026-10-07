@@ -5,7 +5,7 @@
 # 开机自启、依赖顺序、重启策略都交给 systemd，离网重建时少一套自制脚本。
 [Unit]
 Description=Keycloak (OSS911 dev)
-After=network-online.target postgresql@{{ postgres_version }}-{{ pg_cluster_name }}.service
+After=network-online.target postgresql@{{ postgres_version }}-{{ pg_cluster_name }}.service pgbouncer.service haproxy.service
 Wants=network-online.target
 
 [Container]
@@ -17,7 +17,10 @@ PublishPort=127.0.0.1:{{ keycloak_http_port }}:8080
 PublishPort=127.0.0.1:{{ keycloak_mgmt_port }}:9000
 EnvironmentFile=/etc/oss911/keycloak.env
 Environment=KC_DB=postgres
-Environment=KC_DB_URL=jdbc:postgresql://{{ podman_internal_gateway }}:{{ pg_port }}/{{ keycloak_db }}
+# 连的是宿主机的 pgBouncer 会话池，不是 PostgreSQL 本身（DD-67）。
+# 会话级而非事务级：Keycloak 用 JDBC 连接池与预处理语句，
+# 事务级池化下这些不保证落在同一后端连接上。
+Environment=KC_DB_URL=jdbc:postgresql://{{ podman_internal_gateway }}:{{ pgb_listen_port_session }}/{{ keycloak_db }}
 Environment=KC_HEALTH_ENABLED=true
 Environment=KC_HOSTNAME_STRICT=false
 # start-dev 是开发机的形态：免 TLS、免 hostname 严格校验。
