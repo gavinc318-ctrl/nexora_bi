@@ -18,7 +18,14 @@
 listen_addr = 0.0.0.0
 listen_port = {{ pgb_listen_port }}
 auth_type = scram-sha-256
+;; userlist 里只有 pgbouncer 自己。其余所有用户都靠 auth_query 现查——
+;; 否则每加一个库用户都要往 userlist 里抄一份口令散列，那是另一处会失同步的副本。
 auth_file = /etc/pgbouncer/userlist.txt
+auth_user = pgbouncer
+auth_query = SELECT * FROM public.pgbouncer_get_auth($1)
+;; auth_query 默认在客户端要连的那个库里执行，那样函数得在每个库里各建一份。
+;; 指定 auth_dbname 后只在这一个库里执行，函数也只需建一处。
+auth_dbname = {{ pg_database }}
 admin_users = pgbouncer
 stats_users = pgbouncer, monitoring
 

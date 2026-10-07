@@ -221,6 +221,52 @@
               而且失败现象与池无关——这正是必须在此刻验出来的原因。
             success_msg: "两个池的池模式不同：事务级与会话级并存"
 
+        # ---------- auth_query 是否真的起作用 ----------
+        # 上面那条 SHOW DATABASES 用的是 pgbouncer 自己，而它是 userlist 里唯一的用户，
+        # 走的是绕过 auth_query 的路径——它验不了「别的用户能不能连」。
+        # 这里专门建一个只在库里存在、不在 userlist 里的用户去连一次。
+        - name: 建立 auth_query 的验证用户
+          ansible.builtin.command:
+            cmd: >-
+              psql -tAc "DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='pgb_probe') THEN
+                  CREATE ROLE pgb_probe LOGIN PASSWORD 'probe_{{ _pgb_password | default('x') | truncate(12, true, '') }}';
+                END IF; END $$"
+          become_user: postgres
+          changed_when: false
+          no_log: true
+
+        - name: 用该用户经 pgBouncer 连一次
+          ansible.builtin.command:
+            cmd: >-
+              psql -h 127.0.0.1 -p {{ pgb_listen_port }} -U pgb_probe -d {{ pg_database }}
+              -tAc "SELECT 'auth-query-ok'"
+          environment:
+            PGPASSWORD: "probe_{{ _pgb_password | default('x') | truncate(12, true, '') }}"
+          become_user: postgres
+          register: _probe
+          changed_when: false
+          failed_when: false
+          no_log: true
+
+        - name: 清理验证用户
+          ansible.builtin.command:
+            cmd: psql -tAc "DROP ROLE IF EXISTS pgb_probe"
+          become_user: postgres
+          changed_when: false
+
+        - name: 断言 auth_query 可用
+          ansible.builtin.assert:
+            that: ["(_probe.stdout | default('')) is search('auth-query-ok')"]
+            fail_msg: >-
+              不在 userlist 中的用户无法经 pgBouncer 认证，说明 auth_query 没生效。
+              userlist 里只有 pgbouncer 自己，其余用户全靠 auth_query 现查；
+              缺了它，除 pgbouncer 之外的任何用户都连不上，而用 pgbouncer 自己去验
+              恰好绕过这条路径——验不出问题。
+              依次检查：pgbouncer.ini 中的 auth_user / auth_query / auth_dbname 三项；
+              {{ pg_database }} 库中是否存在 public.pgbouncer_get_auth 函数且已授权给 pgbouncer。
+            success_msg: "auth_query 可用：userlist 之外的用户也能经池认证"
+
   handlers:
     - name: restart haproxy
       ansible.builtin.systemd_service:

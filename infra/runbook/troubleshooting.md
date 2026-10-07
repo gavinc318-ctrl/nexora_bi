@@ -327,3 +327,23 @@ localhost,10.89.10.1|f                      ← 设置是对的，且不待重�
 - **怎么早点发现** —— `ss -lntp` 列出的端口与设计文档对不上时，先怀疑设计。
   本项目里 SeaweedFS 与 Prometheus 的端口都在，唯独少了一个「应该有」的端口，
   这种「少一个」比「全都没有」更能说明是配置理解错了，而不是服务没起来
+
+### 现象：经 pgBouncer 连库报 `FATAL: SASL authentication failed`
+
+- **原因** —— `pgbouncer.ini` 里缺 `auth_query`。pgBouncer 只认 `userlist.txt` 中的用户，
+  而那里只有 `pgbouncer` 自己；其余用户（keycloak、业务用户、dbt 用户）都要靠
+  `auth_query` 现查 `pg_shadow` 才能认证。函数建了、授权了，但配置文件里没引用它，
+  等于没建
+- **处置** —— `pgbouncer.ini` 的 `[pgbouncer]` 段补三项：
+  ```
+  auth_user   = pgbouncer
+  auth_query  = SELECT * FROM public.pgbouncer_get_auth($1)
+  auth_dbname = oss911
+  ```
+  `auth_dbname` 不配的话，auth_query 会在**客户端要连的那个库**里执行，
+  于是函数要在每个库里各建一份；指定之后只在一个库里执行，函数也只需建一处
+- **为什么拖了一轮才发现** —— 原来的验证用 `pgbouncer` 用户执行 `SHOW DATABASES`，
+  而它是 userlist 里唯一的用户，**走的恰好是绕过 auth_query 的那条路径**。
+  验证用了一条不经过待验机制的路径，所以机制整个缺失也照样通过
+- **通用教训** —— **用于验证的身份不能是被验机制的例外。** 现在改成临时建一个
+  只在库里存在、不在 userlist 中的用户去连一次，验完即删
