@@ -119,6 +119,36 @@ all:
     vg_name: ubuntu-vg
     vg_free_min_gb: 200                  # 预留给在线扩容，低于此值告警
 
+    # ---- 容器化组件（第 6 步）----
+    # 镜像一律按 digest 钉死，不按 tag。tag 会被重新发布，digest 不会——
+    # 离网重建时 digest 是「这是同一个镜像」的唯一依据。
+    # 首次拉取时 digest 留空，剧本会把解析出的 digest 打出来，当场填回本文件与
+    # artifacts/MANIFEST.md；此后每次运行都按 digest 拉并校验。
+    container_images:
+      keycloak:
+        ref: "quay.io/keycloak/keycloak:26.0"
+        digest: ""
+      seaweedfs:
+        ref: "docker.io/chrislusf/seaweedfs:3.80"
+        digest: ""
+      prometheus:
+        ref: "docker.io/prom/prometheus:v2.55.1"
+        digest: ""
+
+    # 容器访问宿主机数据库走 internal 网段的网关地址，不走 127.0.0.1——
+    # 容器里的 127.0.0.1 是容器自己。
+    podman_internal_gateway: "10.89.10.1"
+
+    keycloak_db: keycloak
+    keycloak_http_port: 8080            # 仅绑 127.0.0.1，开发机不对外
+    keycloak_mgmt_port: 9000            # KC 25 起健康检查与指标走独立管理端口
+    seaweedfs_dir: /var/lib/seaweedfs
+    seaweedfs_s3_port: 8333
+    seaweedfs_filer_port: 8888
+    seaweedfs_master_port: 9333
+    prometheus_port: 9090
+    prometheus_retention: 15d           # 开发机留 15 天即可；生产按 LD-08 的留存要求另定
+
     # ---- 容器网络：单机上模拟生产的两个网段 ----
     podman_networks:
       - { name: internal, subnet: "10.89.10.0/24" }   # 库、服务层、编排、身份

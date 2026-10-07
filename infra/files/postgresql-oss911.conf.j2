@@ -58,3 +58,8 @@ effective_io_concurrency = 200
 # ---- 自动清理：分区表多，调紧一点 ----
 autovacuum_max_workers = 4
 autovacuum_naptime = 30s
+
+# 监听地址：除本机外还要让 internal 网段的容器连得上（Keycloak 等）。
+# 容器里的 127.0.0.1 是容器自己，故必须显式监听网关地址。
+# 生产上库虚机与应用虚机分离，监听地址按 LD-08 的网络分段另定。
+listen_addresses = 'localhost,{{ podman_internal_gateway }}'

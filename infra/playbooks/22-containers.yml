@@ -1,0 +1,250 @@
+# 22-containers —— 容器化组件：Keycloak · SeaweedFS · Prometheus
+#
+# 三件支撑组件，都以 Quadlet（systemd 单元）管理，不用 podman run，
+# 也不用已废弃的 podman generate systemd。开机自启、依赖顺序与重启策略交给
+# systemd，离网重建时少一套自制脚本要维护。
+#
+# ★ 镜像按 digest 钉死，不按 tag。tag 会被重新发布，digest 不会。
+#   首次运行时 inventory 里的 digest 为空，剧本按 tag 拉取并把解析出的 digest
+#   打印出来——当场填回 inventory 与 artifacts/MANIFEST.md。此后每次运行按
+#   digest 拉取，镜像被换掉会立刻暴露。
+#
+# ★ 验证一律验行为：Keycloak 查它的库里有没有建出表（证明不是内置 H2）、
+#   SeaweedFS 做一次写入再读回的往返、Prometheus 查自己的 up 指标。
+#   「容器在运行」太容易满足，证明不了任何事。
+
+- name: 容器化组件
+  hosts: all
+  become: true
+
+  vars:
+    quadlet_dir: /etc/containers/systemd
+    oss911_etc: /etc/oss911
+
+  tasks:
+
+    - name: 建立配置目录
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - "{{ quadlet_dir }}"
+        - "{{ oss911_etc }}"
+
+    - name: 容器组件配置
+      when: not ansible_check_mode
+      block:
+
+        # ---------- 镜像：按 digest 钉死 ----------
+        - name: 拉取镜像
+          ansible.builtin.command:
+            cmd: >-
+              podman pull
+              {{ container_images[item].ref.split(':')[0] ~ '@' ~ container_images[item].digest
+                 if container_images[item].digest | length > 0
+                 else container_images[item].ref }}
+          register: _pull
+          changed_when: "'Writing manifest' in _pull.stdout or 'Copying blob' in _pull.stdout"
+          loop: "{{ container_images.keys() | list }}"
+
+        - name: 解析各镜像的 digest
+          ansible.builtin.command:
+            cmd: >-
+              podman image inspect
+              {{ container_images[item].ref.split(':')[0] ~ '@' ~ container_images[item].digest
+                 if container_images[item].digest | length > 0
+                 else container_images[item].ref }}
+              --format '{{ '{{' }} .Digest {{ '}}' }}'
+          register: _digests
+          changed_when: false
+          loop: "{{ container_images.keys() | list }}"
+
+        - name: 报告未钉死的镜像
+          ansible.builtin.debug:
+            msg: >-
+              以下镜像尚未钉 digest，请把解析值填回 inventory/dev.yml 的
+              container_images 与 artifacts/MANIFEST.md：
+              {% for r in _digests.results %}
+              {{ r.item }} = {{ r.stdout | trim }}{% endfor %}
+          when: container_images.values() | map(attribute='digest') | select('equalto','') | list | length > 0
+
+        - name: 记下本次使用的镜像引用
+          ansible.builtin.set_fact:
+            _kc_image: "{{ 'quay.io/keycloak/keycloak@' ~ container_images.keycloak.digest if container_images.keycloak.digest | length > 0 else container_images.keycloak.ref }}"
+            _sw_image: "{{ 'docker.io/chrislusf/seaweedfs@' ~ container_images.seaweedfs.digest if container_images.seaweedfs.digest | length > 0 else container_images.seaweedfs.ref }}"
+            _pr_image: "{{ 'docker.io/prom/prometheus@' ~ container_images.prometheus.digest if container_images.prometheus.digest | length > 0 else container_images.prometheus.ref }}"
+
+        # ---------- Keycloak 的库与账号 ----------
+        - name: 查询 Keycloak 的库用户是否存在
+          ansible.builtin.command:
+            cmd: psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'keycloak'"
+          become_user: postgres
+          register: _kcrole
+          changed_when: false
+          check_mode: false
+
+        - name: 生成 Keycloak 的库口令与管理员口令
+          ansible.builtin.set_fact:
+            _kc_db_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters','digits']) }}"
+            _kc_admin_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=24, chars=['ascii_letters','digits']) }}"
+          when: _kcrole.stdout | trim != '1'
+          no_log: true
+
+        - name: 建立 Keycloak 的库用户与数据库
+          ansible.builtin.shell:
+            cmd: |
+              set -e
+              psql -tAc "CREATE ROLE keycloak LOGIN PASSWORD '{{ _kc_db_password }}'"
+              createdb --owner=keycloak --template=template0 --locale=C --encoding=UTF8 {{ keycloak_db }}
+          become_user: postgres
+          when: _kcrole.stdout | trim != '1'
+          no_log: true
+
+        - name: 读回已有的 Keycloak 环境文件
+          ansible.builtin.slurp:
+            src: "{{ oss911_etc }}/keycloak.env"
+          register: _kcenv
+          failed_when: false
+          no_log: true
+
+        - name: 下发 Keycloak 环境文件
+          ansible.builtin.copy:
+            dest: "{{ oss911_etc }}/keycloak.env"
+            owner: root
+            group: root
+            mode: "0600"
+            content: |
+              KC_DB_PASSWORD={{ _kc_db_password }}
+              KC_DB_USERNAME=keycloak
+              KC_BOOTSTRAP_ADMIN_USERNAME=admin
+              KC_BOOTSTRAP_ADMIN_PASSWORD={{ _kc_admin_password }}
+              KEYCLOAK_ADMIN=admin
+              KEYCLOAK_ADMIN_PASSWORD={{ _kc_admin_password }}
+          when: _kc_db_password is defined
+          no_log: true
+
+        # ---------- Prometheus 配置 ----------
+        - name: 下发 Prometheus 配置
+          ansible.builtin.template:
+            src: ../files/prometheus.yml.j2
+            dest: "{{ oss911_etc }}/prometheus.yml"
+            owner: root
+            group: root
+            mode: "0644"
+          register: _promcfg
+
+        # ---------- Quadlet 单元 ----------
+        - name: 下发 Quadlet 单元
+          ansible.builtin.template:
+            src: "../files/quadlet/{{ item }}.container.j2"
+            dest: "{{ quadlet_dir }}/{{ item }}.container"
+            owner: root
+            group: root
+            mode: "0644"
+          loop: [keycloak, seaweedfs, prometheus]
+          register: _quadlets
+
+        - name: 重载 systemd
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          when: _quadlets.changed
+
+        - name: 启动三个组件
+          ansible.builtin.systemd_service:
+            name: "{{ item }}.service"
+            state: "{{ 'restarted' if (_quadlets.changed or _promcfg.changed) else 'started' }}"
+          loop: [keycloak, seaweedfs, prometheus]
+
+        # ---------- 验证：验行为，不验「在运行」----------
+        - name: 等待 Keycloak 就绪
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ keycloak_mgmt_port }}/health/ready"
+            status_code: 200
+          register: _kchealth
+          retries: 30
+          delay: 5
+          until: _kchealth.status | default(0) == 200
+          failed_when: false
+
+        - name: 断言 Keycloak 就绪
+          ansible.builtin.assert:
+            that: ["_kchealth.status | default(0) == 200"]
+            fail_msg: >-
+              Keycloak 的 /health/ready 未返回 200（实际 {{ _kchealth.status | default('无响应') }}）。
+              查 journalctl -u keycloak -n 80。最常见的原因是连不上数据库：
+              容器里的 127.0.0.1 是容器自己，库必须监听 {{ podman_internal_gateway }}
+              且 pg_hba 放行 internal 网段（20-database 已处理，可用
+              sudo -u postgres psql -tAc "SHOW listen_addresses" 核对）。
+            success_msg: "Keycloak 就绪"
+
+        # 「起来了」不等于「用的是 PostgreSQL」——内置 H2 同样能起来，
+        # 而 H2 的数据在容器重建时会消失。故查它的库里到底有没有建出表。
+        - name: 查询 Keycloak 在库中建出的表数
+          ansible.builtin.command:
+            cmd: psql -d {{ keycloak_db }} -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"
+          become_user: postgres
+          register: _kctables
+          changed_when: false
+
+        - name: 断言 Keycloak 真的用了 PostgreSQL
+          ansible.builtin.assert:
+            that: ["_kctables.stdout | trim | int > 20"]
+            fail_msg: >-
+              {{ keycloak_db }} 库中只有 {{ _kctables.stdout | trim }} 张表，
+              Keycloak 多半回落到了内置 H2。H2 同样能让健康检查通过，
+              但数据在容器重建时消失——这类「看起来好的」配置必须在此刻验出来。
+              检查 keycloak.env 中的 KC_DB_PASSWORD 与库用户是否一致。
+            success_msg: "Keycloak 使用 PostgreSQL：{{ keycloak_db }} 库中有 {{ _kctables.stdout | trim }} 张表"
+
+        - name: SeaweedFS 写入一个对象
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ seaweedfs_filer_port }}/oss911-selftest/probe.txt"
+            method: PUT
+            body: "oss911-roundtrip"
+            status_code: [200, 201, 204]
+          register: _swput
+          retries: 20
+          delay: 3
+          until: _swput.status | default(0) in [200, 201, 204]
+          failed_when: false
+
+        - name: SeaweedFS 读回该对象
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ seaweedfs_filer_port }}/oss911-selftest/probe.txt"
+            return_content: true
+          register: _swget
+          failed_when: false
+
+        - name: 断言 SeaweedFS 的写入与读回一致
+          ansible.builtin.assert:
+            that: ["(_swget.content | default('')) is search('oss911-roundtrip')"]
+            fail_msg: >-
+              SeaweedFS 的往返校验失败。写入返回 {{ _swput.status | default('无响应') }}，
+              读回内容为「{{ _swget.content | default('') | truncate(60) }}」。
+              查 journalctl -u seaweedfs -n 80，并确认 {{ seaweedfs_dir }} 挂载存在且可写。
+            success_msg: "SeaweedFS 往返校验通过：写入后读回内容一致"
+
+        - name: 查询 Prometheus 的 up 指标
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ prometheus_port }}/api/v1/query?query=up%7Bjob%3D%22prometheus%22%7D"
+            return_content: true
+          register: _promup
+          retries: 20
+          delay: 3
+          until: (_promup.json.data.result | default([]) | length) > 0
+          failed_when: false
+
+        # Prometheus 起来了不代表它在采集。采不到数据的监控系统比没有监控更坏，
+        # 因为看板上会是一片平静。
+        - name: 断言 Prometheus 真的采到了数据
+          ansible.builtin.assert:
+            that:
+              - "(_promup.json.data.result | default([]) | length) > 0"
+              - "_promup.json.data.result[0].value[1] == '1'"
+            fail_msg: >-
+              Prometheus 查不到自身的 up 指标，说明它在运行但没有采集成功。
+              查 http://127.0.0.1:{{ prometheus_port }}/targets 看目标状态与错误。
+            success_msg: "Prometheus 采集正常：up{job=prometheus} = 1"

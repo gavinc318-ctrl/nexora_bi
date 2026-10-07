@@ -1,0 +1,25 @@
+# 由 infra/playbooks/22-containers.yml 管理，勿手改
+[Unit]
+Description=SeaweedFS (OSS911 dev)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image={{ _sw_image }}
+ContainerName=seaweedfs
+Network=internal
+PublishPort=127.0.0.1:{{ seaweedfs_master_port }}:9333
+PublishPort=127.0.0.1:{{ seaweedfs_filer_port }}:8888
+PublishPort=127.0.0.1:{{ seaweedfs_s3_port }}:8333
+# 数据落在独立卷上（00-base 已断言该挂载点存在）
+Volume={{ seaweedfs_dir }}:/data:Z
+# 单机 server 模式：master + volume + filer + S3 一体。
+# 生产是三节点，拓扑不同，但对象键与 S3 接口形态一致（LD-08）。
+Exec=server -dir=/data -s3 -filer -master.volumeSizeLimitMB=1024
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

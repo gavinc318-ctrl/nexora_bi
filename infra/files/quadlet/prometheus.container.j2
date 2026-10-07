@@ -1,0 +1,20 @@
+# 由 infra/playbooks/22-containers.yml 管理，勿手改
+[Unit]
+Description=Prometheus (OSS911 dev)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image={{ _pr_image }}
+ContainerName=prometheus
+Network=internal
+PublishPort=127.0.0.1:{{ prometheus_port }}:9090
+Volume=/etc/oss911/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+Volume=prometheus-data:/prometheus
+Exec=--config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time={{ prometheus_retention }}
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

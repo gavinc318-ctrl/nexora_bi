@@ -1,0 +1,35 @@
+# 由 infra/playbooks/22-containers.yml 管理，勿手改
+#
+# Quadlet：容器以 systemd 单元的形式管理（podman 4.4 起的受支持做法）。
+# 不用 podman run 起容器，也不用已废弃的 podman generate systemd——
+# 开机自启、依赖顺序、重启策略都交给 systemd，离网重建时少一套自制脚本。
+[Unit]
+Description=Keycloak (OSS911 dev)
+After=network-online.target postgresql@{{ postgres_version }}-{{ pg_cluster_name }}.service
+Wants=network-online.target
+
+[Container]
+Image={{ _kc_image }}
+ContainerName=keycloak
+Network=internal
+# 只绑回环：开发机上没有反向代理，不该让它出现在网络上
+PublishPort=127.0.0.1:{{ keycloak_http_port }}:8080
+PublishPort=127.0.0.1:{{ keycloak_mgmt_port }}:9000
+EnvironmentFile=/etc/oss911/keycloak.env
+Environment=KC_DB=postgres
+Environment=KC_DB_URL=jdbc:postgresql://{{ podman_internal_gateway }}:{{ pg_port }}/{{ keycloak_db }}
+Environment=KC_HEALTH_ENABLED=true
+Environment=KC_HOSTNAME_STRICT=false
+# start-dev 是开发机的形态：免 TLS、免 hostname 严格校验。
+# 生产用 start --optimized 并配证书与 hostname，属 LD-08 的范畴。
+Exec=start-dev
+HealthCmd=/bin/sh -c "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.0\\r\\n\\r' >&3 && grep -q UP <&3"
+HealthInterval=15s
+HealthRetries=10
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
