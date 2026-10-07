@@ -1,0 +1,22 @@
+# 由 infra/playbooks/30-python.yml 管理，勿手改
+#
+# dbt 走 pgBouncer 的会话级池（库名 {{ pg_database }}_etl）。
+# 事务级池上 dbt 的临时表、SET 与 advisory lock 会随机失败——
+# 不是必然失败而是偶尔失败，所以必须在这里把库名写对（DD-67）。
+#
+# threads 不得超过会话池大小 {{ pgb_pool_size_session }}：超了不会报错，
+# 会在池上排队，表现为「dbt 卡住但看不到错误」。
+oss911:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: 127.0.0.1
+      port: {{ pgb_listen_port }}
+      user: "{{ '{{ env_var(\'DBT_USER\') }}' }}"
+      password: "{{ '{{ env_var(\'DBT_PASSWORD\') }}' }}"
+      dbname: {{ pg_database }}_etl
+      schema: staging
+      threads: {{ pgb_pool_size_session }}
+      keepalives_idle: 0
+      connect_timeout: 10

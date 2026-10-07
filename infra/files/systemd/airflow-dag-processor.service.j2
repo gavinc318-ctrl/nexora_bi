@@ -1,0 +1,21 @@
+# 由 infra/playbooks/30-python.yml 管理，勿手改
+[Unit]
+Description=Airflow dag-processor (OSS911 dev)
+After=network-online.target pgbouncer.service haproxy.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=airflow
+Group=airflow
+EnvironmentFile={{ oss911_etc }}/airflow.env
+ExecStart={{ venv_root }}/venv-airflow/bin/airflow dag-processor
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=3
+KillMode=mixed
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

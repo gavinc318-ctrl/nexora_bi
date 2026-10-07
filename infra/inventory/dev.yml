@@ -94,7 +94,7 @@ all:
     pgb_pool_size_keycloak: 10         # Keycloak 的 JDBC 池，同样走会话级
     pgb_reserve_pool: 5
     pgb_max_client_conn: 400           # 客户端侧可以多，后端才是稀缺的
-    pgb_max_db_connections: 60         # 全局硬闸：30 + 10 + 10 + 5，防止池数一多悄悄超限
+    pgb_max_db_connections: 70         # 全局硬闸：30 + 10 + 10 + 10 + 5，防止池数一多悄悄超限
     haproxy_listen_port: 5000          # pgBouncer 的后端指向它，而不是直接指向库
     haproxy_stats_port: 7000
     # 开发机没有 Patroni，健康检查只能退化为 pgsql-check；生产用 Patroni 的
@@ -134,6 +134,32 @@ all:
       - { path: /var/backups/pg,         min_gb: 45  }
     vg_name: ubuntu-vg
     vg_free_min_gb: 200                  # 预留给在线扩容，低于此值告警
+
+    # ---- Python 侧（第 7 步）----
+    # 两个 venv，不是一个。Airflow 与 dbt 的依赖长期相互冲突（jinja2、protobuf 等），
+    # 合在一起要么装不上，要么装上之后某一方静默降级。Airflow 用 BashOperator
+    # 调 dbt 的可执行文件，两边只共享项目目录，不共享解释器环境。
+    python_bin: /usr/bin/python3            # Ubuntu 24.04 自带 3.12，Airflow 3.2+ 支持 3.10–3.14
+    venv_root: /opt/oss911
+    airflow_home: /var/lib/airflow
+    wheelhouse: /var/cache/build/wheelhouse  # 独立卷（00-base 已断言）
+
+    airflow_version: "3.3.2"
+    airflow_extras: "postgres"
+    # 官方 constraints 是 Airflow 能装出可运行环境的硬条件，不是建议。
+    # URL 由版本与 Python 次版本决定，两者任一变化都要重新取。
+    airflow_constraints_url: "https://raw.githubusercontent.com/apache/airflow/constraints-{{ airflow_version }}/constraints-3.12.txt"
+    airflow_api_port: 8081                  # 8080 已被 Keycloak 占用
+
+    # dbt 没有官方 constraints。做法是解析一次、冻结成 lock 文件进仓库，
+    # 此后一律按 lock 装——自己维护的 lock 与官方 constraints 作用相同，
+    # 区别只是维护责任在谁（DD-69）。
+    dbt_requirements:
+      - "dbt-core"
+      - "dbt-postgres"
+
+    airflow_db: airflow
+    pgb_pool_size_airflow: 10
 
     # ---- 容器化组件（第 6 步）----
     # 镜像一律按 digest 钉死，不按 tag。tag 会被重新发布，digest 不会——

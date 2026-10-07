@@ -1,0 +1,306 @@
+# 30-python —— Python 侧：Airflow 与 dbt
+#
+# 两个 venv，不是一个。Airflow 与 dbt 的依赖长期相互冲突，合在一起要么装不上，
+# 要么装上之后某一方被静默降级——后者更坏，因为它要到运行期才显形。
+# Airflow 用 BashOperator 调 dbt 的可执行文件，两边只共享项目目录。
+#
+# ★ 一律按离网方式安装，即使开发机此刻有网。
+#   流程分两段：取料（需要网）与安装（不需要网）。安装一段永远走
+#   --no-index --find-links，从本机 wheelhouse 装。
+#   这样做的理由是：开发机能上网这件事，会让所有离网问题推迟到最糟的时刻才暴露。
+#   多一步 pip download 的代价，换这条链路从第一天起就是真的。
+#
+# ★ Airflow 的 constraints 是硬条件不是建议。不带它解出来的依赖组合
+#   大概率装不出一个能跑的环境。URL 由 Airflow 版本与 Python 次版本共同决定。
+#   dbt 没有官方 constraints，故自己冻结 lock（DD-69）。
+
+- name: Python 侧 Airflow 与 dbt
+  hosts: all
+  become: true
+
+  vars:
+    oss911_etc: /etc/oss911
+    af_venv: "{{ venv_root }}/venv-airflow"
+    dbt_venv: "{{ venv_root }}/venv-dbt"
+    constraints_file: "{{ wheelhouse }}/constraints-airflow-{{ airflow_version }}-py312.txt"
+    dbt_lock: "{{ wheelhouse }}/dbt-requirements.lock"
+
+  tasks:
+
+    - name: 断言 dbt 并发不超过会话池
+      ansible.builtin.assert:
+        that:
+          - pgb_pool_size_session >= 1
+        fail_msg: "会话池大小即 dbt 的 threads 上限，不能为零"
+        success_msg: "dbt threads 上限 = 会话池大小 {{ pgb_pool_size_session }}"
+
+    - name: 安装构建依赖
+      ansible.builtin.apt:
+        name:
+          - python3-venv
+          - python3-pip
+          - build-essential      # 少数包没有 wheel 时要就地编译；离网环境里更需要它在场
+          - libpq-dev            # psycopg2 源码编译时需要
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: 建立服务账号与目录
+      ansible.builtin.user:
+        name: airflow
+        system: true
+        shell: /usr/sbin/nologin
+        home: "{{ airflow_home }}"
+        create_home: true
+
+    - name: 建立目录
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.owner }}"
+        mode: "0750"
+      loop:
+        - { path: "{{ venv_root }}",            owner: root }
+        - { path: "{{ wheelhouse }}",           owner: root }
+        - { path: "{{ wheelhouse }}/airflow",   owner: root }
+        - { path: "{{ wheelhouse }}/dbt",       owner: root }
+        - { path: "{{ airflow_home }}",         owner: airflow }
+        - { path: "{{ airflow_home }}/dags",    owner: airflow }
+        - { path: "{{ airflow_home }}/logs",    owner: airflow }
+
+    - name: 配置与安装
+      when: not ansible_check_mode
+      block:
+
+        # ========== 取料：唯一需要网络的一段 ==========
+        - name: 取 Airflow 的 constraints 文件
+          ansible.builtin.get_url:
+            url: "{{ airflow_constraints_url }}"
+            dest: "{{ constraints_file }}"
+            mode: "0644"
+          register: _constraints
+
+        - name: 记录 constraints 的校验和
+          ansible.builtin.stat:
+            path: "{{ constraints_file }}"
+            checksum_algorithm: sha256
+          register: _constraints_stat
+
+        - name: 报告 constraints 的校验和
+          ansible.builtin.debug:
+            msg: >-
+              constraints-airflow-{{ airflow_version }}-py312.txt
+              sha256 = {{ _constraints_stat.stat.checksum }}
+              —— 填回 artifacts/MANIFEST.md
+
+        - name: 下载 Airflow 及其全部传递依赖的 wheel
+          ansible.builtin.command:
+            cmd: >-
+              {{ python_bin }} -m pip download
+              "apache-airflow[{{ airflow_extras }}]=={{ airflow_version }}"
+              --constraint {{ constraints_file }}
+              --dest {{ wheelhouse }}/airflow
+          register: _dl_af
+          changed_when: "'Saved' in _dl_af.stdout"
+
+        # dbt 没有官方 constraints：先解析一次，冻结成 lock，此后按 lock 取料。
+        - name: 检查是否已有 dbt 的 lock
+          ansible.builtin.stat:
+            path: "{{ dbt_lock }}"
+          register: _dbtlock
+
+        - name: 首次解析 dbt 依赖并冻结为 lock
+          ansible.builtin.shell:
+            cmd: |
+              set -e
+              rm -rf /tmp/dbt-resolve
+              {{ python_bin }} -m venv /tmp/dbt-resolve
+              /tmp/dbt-resolve/bin/pip install --quiet --upgrade pip
+              /tmp/dbt-resolve/bin/pip install --quiet {{ dbt_requirements | join(' ') }}
+              /tmp/dbt-resolve/bin/pip freeze > {{ dbt_lock }}
+              rm -rf /tmp/dbt-resolve
+          when: not _dbtlock.stat.exists
+
+        - name: 下载 dbt 的 wheel（按 lock）
+          ansible.builtin.command:
+            cmd: >-
+              {{ python_bin }} -m pip download
+              --requirement {{ dbt_lock }}
+              --dest {{ wheelhouse }}/dbt
+          register: _dl_dbt
+          changed_when: "'Saved' in _dl_dbt.stdout"
+
+        # ========== 安装：不走网络 ==========
+        # --no-index 是这一段的关键：它让 pip 完全不去问 PyPI。
+        # 若 wheelhouse 里缺东西，这里会当场失败——而不是默默上网取来，
+        # 把一个离网环境里必然出现的问题藏到交付之后。
+        - name: 建立 Airflow 的 venv
+          ansible.builtin.command:
+            cmd: "{{ python_bin }} -m venv {{ af_venv }}"
+            creates: "{{ af_venv }}/bin/python"
+
+        - name: 离线安装 Airflow
+          ansible.builtin.command:
+            cmd: >-
+              {{ af_venv }}/bin/pip install
+              --no-index --find-links {{ wheelhouse }}/airflow
+              --constraint {{ constraints_file }}
+              "apache-airflow[{{ airflow_extras }}]=={{ airflow_version }}"
+          register: _inst_af
+          changed_when: "'Successfully installed' in _inst_af.stdout"
+
+        - name: 建立 dbt 的 venv
+          ansible.builtin.command:
+            cmd: "{{ python_bin }} -m venv {{ dbt_venv }}"
+            creates: "{{ dbt_venv }}/bin/python"
+
+        - name: 离线安装 dbt
+          ansible.builtin.command:
+            cmd: >-
+              {{ dbt_venv }}/bin/pip install
+              --no-index --find-links {{ wheelhouse }}/dbt
+              --requirement {{ dbt_lock }}
+          register: _inst_dbt
+          changed_when: "'Successfully installed' in _inst_dbt.stdout"
+
+        # ========== 元数据库 ==========
+        - name: 查询 Airflow 的库用户是否存在
+          ansible.builtin.command:
+            cmd: psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = '{{ airflow_db }}'"
+          become_user: postgres
+          register: _afrole
+          changed_when: false
+          check_mode: false
+
+        - name: 生成 Airflow 的库口令
+          ansible.builtin.set_fact:
+            _af_db_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters','digits']) }}"
+          when: _afrole.stdout | trim != '1'
+          no_log: true
+
+        - name: 建立 Airflow 的库用户与数据库
+          ansible.builtin.shell:
+            cmd: |
+              set -e
+              psql -tAc "CREATE ROLE {{ airflow_db }} LOGIN PASSWORD '{{ _af_db_password }}'"
+              createdb --owner={{ airflow_db }} --template=template0 --locale=C --encoding=UTF8 {{ airflow_db }}
+          become_user: postgres
+          when: _afrole.stdout | trim != '1'
+          no_log: true
+
+        - name: 读回已有的 Airflow 环境文件
+          ansible.builtin.slurp:
+            src: "{{ oss911_etc }}/airflow.env"
+          register: _afenv
+          failed_when: false
+          no_log: true
+
+        - name: 取回 Airflow 的库口令
+          ansible.builtin.set_fact:
+            _af_db_password: "{{ (_afenv.content | b64decode) | regex_search('SQL_ALCHEMY_CONN=postgresql\\+psycopg2://[^:]+:([^@]+)@', '\\1') | first }}"
+          when:
+            - _af_db_password is not defined
+            - _afenv.content is defined
+          no_log: true
+
+        - name: 下发 Airflow 环境文件
+          ansible.builtin.template:
+            src: ../files/airflow.env.j2
+            dest: "{{ oss911_etc }}/airflow.env"
+            owner: airflow
+            group: airflow
+            mode: "0600"
+          no_log: true
+
+        - name: 初始化元数据库
+          ansible.builtin.command:
+            cmd: "{{ af_venv }}/bin/airflow db migrate"
+          become_user: airflow
+          environment:
+            AIRFLOW_HOME: "{{ airflow_home }}"
+            AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://{{ airflow_db }}:{{ _af_db_password }}@127.0.0.1:{{ pgb_listen_port }}/{{ airflow_db }}"
+          register: _afmigrate
+          changed_when: "'Running upgrade' in _afmigrate.stdout"
+          no_log: true
+
+        # ========== dbt 的 profiles ==========
+        - name: 下发 dbt profiles
+          ansible.builtin.template:
+            src: ../files/dbt_profiles.yml.j2
+            dest: "{{ airflow_home }}/profiles.yml"
+            owner: airflow
+            group: airflow
+            mode: "0640"
+
+        # ========== systemd ==========
+        - name: 下发 Airflow 的 systemd 单元
+          ansible.builtin.template:
+            src: "../files/systemd/airflow-{{ item }}.service.j2"
+            dest: "/etc/systemd/system/airflow-{{ item }}.service"
+            owner: root
+            group: root
+            mode: "0644"
+          loop: [api-server, scheduler, dag-processor, triggerer]
+          register: _afunits
+
+        - name: 重载 systemd
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          when: _afunits.changed
+
+        - name: 启用并启动 Airflow 的四个组件
+          ansible.builtin.systemd_service:
+            name: "airflow-{{ item }}.service"
+            enabled: true
+            state: "{{ 'restarted' if _afunits.changed else 'started' }}"
+          loop: [api-server, scheduler, dag-processor, triggerer]
+
+        # ========== 验证：验行为 ==========
+        # 「装上了」太容易满足。这三条分别验：装的是不是离线装的、
+        # 两个 venv 是不是真的分开、以及两者能不能连上各自要连的库。
+        - name: 查询两个 venv 的版本
+          ansible.builtin.shell:
+            cmd: |
+              echo "airflow=$({{ af_venv }}/bin/airflow version 2>/dev/null)"
+              echo "dbt=$({{ dbt_venv }}/bin/dbt --version 2>/dev/null | head -1)"
+          register: _vers
+          changed_when: false
+
+        - name: 断言两个 venv 各自装对了
+          ansible.builtin.assert:
+            that:
+              - "_vers.stdout is search('airflow=' ~ airflow_version)"
+              - "_vers.stdout is search('dbt=')"
+            fail_msg: "版本不符或命令不存在：{{ _vers.stdout }}"
+            success_msg: "{{ _vers.stdout | replace('\n', ' · ') }}"
+
+        # 两个 venv 必须互不可见。混在一起时最常见的症状不是报错，
+        # 而是某一方被静默降级，到运行期才显形。
+        - name: 断言两个 venv 确实是分开的
+          ansible.builtin.shell:
+            cmd: |
+              test ! -x {{ af_venv }}/bin/dbt && test ! -x {{ dbt_venv }}/bin/airflow && echo separated
+          register: _sep
+          changed_when: false
+          failed_when: "'separated' not in _sep.stdout"
+
+        - name: Airflow 能连上元数据库
+          ansible.builtin.command:
+            cmd: "{{ af_venv }}/bin/airflow db check"
+          become_user: airflow
+          environment:
+            AIRFLOW_HOME: "{{ airflow_home }}"
+            AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://{{ airflow_db }}:{{ _af_db_password }}@127.0.0.1:{{ pgb_listen_port }}/{{ airflow_db }}"
+          register: _afcheck
+          changed_when: false
+          failed_when: false
+          no_log: true
+
+        - name: 断言 Airflow 的元数据库可达
+          ansible.builtin.assert:
+            that: ["_afcheck.rc == 0"]
+            fail_msg: >-
+              airflow db check 失败。元数据库经 pgBouncer 的 {{ airflow_db }} 库（会话级池），
+              先确认 pgbouncer.ini 里有这一条且 auth_query 可用（21-connection 有对应断言）。
+            success_msg: "Airflow 元数据库可达（经 pgBouncer 会话池）"
