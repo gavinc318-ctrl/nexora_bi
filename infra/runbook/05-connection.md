@@ -3,10 +3,16 @@
 ## 这一步在建什么
 
 ```
-应用 ──► pgBouncer :6432 事务级   ┐
-     └─► pgBouncer :6433 会话级   ├─► HAProxy :5000 ──► 当前主库
-                                  ┘   （健康检查决定谁是主）
+应用 ──► pgBouncer :6432 ──► HAProxy :5000 ──► 当前主库
+          │                   （健康检查决定谁是主）
+          ├─ 连库名 oss911      → 事务级池
+          ├─ 连库名 oss911_etl  → 会话级池
+          └─ 连库名 keycloak    → 会话级池
 ```
+
+**一个端口，三个池。** pgBouncer 一个实例只有一个 `listen_port`；
+「两个池」指的是 `[databases]` 段里的两条库名，**由客户端连哪个库名决定用哪种池模式**，
+不是两个端口。要两个端口得起两个实例、两份配置、两个 systemd 单元——没有必要。
 
 顺序不能颠倒。pgBouncer 的 `[databases]` 里只能写一个固定地址，它自己**没有选主能力**；
 知道谁是主库的是 Patroni，HAProxy 读它的健康检查。把 HAProxy 放在 pgBouncer 后面，
@@ -15,12 +21,15 @@ pgBouncer 的后端就永远是 `127.0.0.1:5000`，主库易主与它无关。
 反过来放（HAProxy 在前）的话，每个 pgBouncer 只能绑死一台库，池就跟着库走了，
 备库上那个池平时全闲置——集中控制连接数的意义就没了。
 
-## 两个池，以及一条必须一起记住的约束
+## 两种池模式，以及一条必须一起记住的约束
 
-| 池 | 端口 | 模式 | 给谁 |
-| --- | --- | --- | --- |
-| `oss911` | 6432 | transaction | 门户查询、Superset、服务层接口 |
-| `oss911_etl` | 6433 | session | Airflow、dbt、人工运维 |
+| 连接时写的库名 | 模式 | 给谁 |
+| --- | --- | --- |
+| `oss911` | transaction | 门户查询、Superset、服务层接口 |
+| `oss911_etl` | session | Airflow、dbt、人工运维 |
+| `keycloak` | session | Keycloak 的 JDBC 池 |
+
+三者都在 `6432` 上。连接串里换的是 `dbname`，不是端口。
 
 事务级省连接，但 `SET`、临时表、advisory lock、预处理语句**不保证落在同一个后端连接上**；
 会话级保行为，但**连接在客户端断开前不归还**。
@@ -78,8 +87,9 @@ ansible-playbook playbooks/21-connection.yml -e ansible_connection=local -K   # 
 sudo -u postgres psql -c \
   "CREATE ROLE verify_pool LOGIN PASSWORD 'TempVerify#2026' IN ROLE pg_read_all_data"
 
-# 1 会话池上，临时表必须可用。这是两个池存在的全部理由
-PGPASSWORD='TempVerify#2026' psql -h 127.0.0.1 -p 6433 -U verify_pool -d oss911 <<'SQL'
+# 1 会话池上，临时表必须可用。这是两种池模式存在的全部理由。
+#   注意：换的是 -d（库名 oss911_etl），不是 -p——端口只有一个
+PGPASSWORD='TempVerify#2026' psql -h 127.0.0.1 -p 6432 -U verify_pool -d oss911_etl <<'SQL'
 CREATE TEMP TABLE t(x int);
 INSERT INTO t VALUES (1);
 SELECT count(*) AS should_be_1 FROM t;

@@ -194,7 +194,7 @@
         - name: 查询 pgBouncer 的池清单
           ansible.builtin.command:
             cmd: >-
-              psql -h 127.0.0.1 -p {{ pgb_listen_port_txn }} -U pgbouncer -d pgbouncer
+              psql -h 127.0.0.1 -p {{ pgb_listen_port }} -U pgbouncer -d pgbouncer
               -tAc "SHOW DATABASES"
           environment:
             PGPASSWORD: "{{ _pgb_password | default('') }}"
@@ -214,7 +214,7 @@
             fail_msg: >-
               pgBouncer 的 SHOW DATABASES 里没有同时出现 transaction 与 session 两种池模式。
               先确认这一步本身没有因口令取不到而失败：
-              psql -h 127.0.0.1 -p {{ pgb_listen_port_txn }} -U pgbouncer -d pgbouncer -c "SHOW DATABASES"
+              psql -h 127.0.0.1 -p {{ pgb_listen_port }} -U pgbouncer -d pgbouncer -c "SHOW DATABASES"
               （口令在 {{ pgb_conf_dir }}/userlist.txt）。
               若连得上而池模式相同，则是模板或配置的问题：两个池都落成事务级时，
               dbt 与 Airflow 的 SET、临时表与 advisory lock 会在运行期随机失败，

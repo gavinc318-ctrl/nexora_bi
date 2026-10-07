@@ -78,15 +78,17 @@ all:
       - pgcrypto        # core.sk 的 UUID v5 需要 digest()
 
     # ---- 连接层 ----
-    # 两个池，因为两类客户端对连接的要求不同（DD-67）：
+    # 两个池模式，因为两类客户端对连接的要求不同（DD-67）：
     #   事务级省连接，但 SET、临时表、advisory lock、预处理语句不保证落在同一后端；
     #   会话级保行为，但连接在客户端断开前不归还。
     # 会话池大小即 dbt 的并发上限——这两个数绑在一起，调一个必须同时调另一个。
     connection_packages:
       - pgbouncer
       - haproxy
-    pgb_listen_port_txn: 6432          # 业务查询，事务级
-    pgb_listen_port_session: 6433      # Airflow / dbt / 人工运维，会话级
+    # ★ pgBouncer 一个实例只有一个 listen_port。两个「池」不是两个端口，
+    #   而是 [databases] 段里的两条库名，都在同一端口上，
+    #   由客户端连哪个库名决定用哪种池模式。要两个端口得起两个实例。
+    pgb_listen_port: 6432
     pgb_pool_size_txn: 30
     pgb_pool_size_session: 10          # = dbt threads 的上限
     pgb_pool_size_keycloak: 10         # Keycloak 的 JDBC 池，同样走会话级

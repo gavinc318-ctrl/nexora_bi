@@ -179,7 +179,7 @@
               echo "--- podman ps -a ---"
               podman ps -a --format '{% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}{% endraw %}' | grep -i keycloak || true
               echo "--- pgBouncer 是否在网关地址上监听 ---"
-              ss -lntp 2>/dev/null | grep -E ':{{ pgb_listen_port_session }}' || echo "没有监听 {{ pgb_listen_port_session }}"
+              ss -lntp 2>/dev/null | grep -E ':{{ pgb_listen_port }}' || echo "没有监听 {{ pgb_listen_port }}"
               echo "--- pgBouncer 里有没有 keycloak 这个池 ---"
               grep -c '^{{ keycloak_db }}' /etc/pgbouncer/pgbouncer.ini 2>/dev/null || true
               echo "--- journalctl -u keycloak (末 40 行) ---"
@@ -198,7 +198,7 @@
               -1 表示连接根本没建立，即端口上没有监听，容器多半没起来或在崩溃重启）。
               最常见的原因是连不上数据库——KC_DB=postgres 一旦设定，连不上库即启动失败，
               不会回落内置 H2。它连的是宿主机 pgBouncer 的会话池
-              {{ podman_internal_gateway }}:{{ pgb_listen_port_session }}，不是 PostgreSQL 本身。
+              {{ podman_internal_gateway }}:{{ pgb_listen_port }}，不是 PostgreSQL 本身。
               若 pgbouncer.ini 里没有 {{ keycloak_db }} 这个池，先重跑 21-connection。
               日志里 Connection refused 表示包到了但没人监听；超时才是网段隔离。
             success_msg: "Keycloak 就绪"

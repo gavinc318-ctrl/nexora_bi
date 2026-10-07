@@ -1,6 +1,7 @@
 ;; 由 infra/playbooks/21-connection.yml 管理，勿手改
 ;;
-;; 两个池的分工见 DD-67：
+;; 池模式按库名选择——本实例只有一个监听端口，客户端连哪个库名就用哪种池模式。
+;; 分工见 DD-67：
 ;;   oss911       事务级，门户查询 / Superset / 服务层接口
 ;;   oss911_etl   会话级，Airflow / dbt / 人工运维
 ;;   keycloak     会话级，Keycloak 的 JDBC 池（预处理语句要求同一后端连接）
@@ -15,7 +16,7 @@
 
 [pgbouncer]
 listen_addr = 0.0.0.0
-listen_port = {{ pgb_listen_port_txn }}
+listen_port = {{ pgb_listen_port }}
 auth_type = scram-sha-256
 auth_file = /etc/pgbouncer/userlist.txt
 admin_users = pgbouncer
