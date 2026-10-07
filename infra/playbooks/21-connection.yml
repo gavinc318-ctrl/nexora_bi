@@ -76,6 +76,17 @@
           no_log: true
 
         # pgBouncer 要能查 pg_shadow 才能做 SCRAM 透传；给一个只读函数而不是超级用户权限
+        - name: 查询 auth_query 函数是否已存在
+          ansible.builtin.command:
+            cmd: >-
+              psql -d {{ pg_database }} -tAc
+              "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+               WHERE n.nspname = 'public' AND p.proname = 'pgbouncer_get_auth'"
+          become_user: postgres
+          register: _authfn_have
+          changed_when: false
+          check_mode: false
+
         - name: 建立 auth_query 函数
           ansible.builtin.command:
             cmd: >-
@@ -87,8 +98,7 @@
                REVOKE ALL ON FUNCTION public.pgbouncer_get_auth(text) FROM PUBLIC;
                GRANT EXECUTE ON FUNCTION public.pgbouncer_get_auth(text) TO pgbouncer;"
           become_user: postgres
-          register: _authfn
-          changed_when: "'CREATE FUNCTION' in _authfn.stdout or _authfn.rc == 0"
+          when: _authfn_have.stdout | trim != '1'
 
         # ---------- HAProxy ----------
         - name: 下发 HAProxy 配置
@@ -138,24 +148,49 @@
           ansible.builtin.meta: flush_handlers
 
         # ---------- 验证：链路真的通，而且走的是这条链路 ----------
-        - name: 经 HAProxy 直连
+        # ---------- 验证：链路真的通，而且走的是这条链路 ----------
+        # 用 pg_isready 而不是 psql：这一步要验的是「HAProxy 这一跳能把 TCP 送到库」，
+        # 而 psql 还要过 pg_hba 的身份认证——认证失败会被误读成链路不通，
+        # 本项目实测踩过一次。一个会因为「它声称要测的事情之外的原因」而失败的检查，
+        # 比没有检查更费时间。
+        - name: 经 HAProxy 探活
           ansible.builtin.command:
-            cmd: psql -h 127.0.0.1 -p {{ haproxy_listen_port }} -d {{ pg_database }} -tAc "SELECT 'via-haproxy'"
-          become_user: postgres
+            cmd: pg_isready -h 127.0.0.1 -p {{ haproxy_listen_port }} -t 5
           register: _viahap
           changed_when: false
           failed_when: false
+          check_mode: false
 
         - name: 断言 HAProxy 这一跳可用
           ansible.builtin.assert:
-            that: ["_viahap.stdout | trim == 'via-haproxy'"]
+            that: ["_viahap.rc == 0"]
             fail_msg: >-
-              经 HAProxy（127.0.0.1:{{ haproxy_listen_port }}）连不到库。
-              先看 systemctl status haproxy 与 /var/log/haproxy.log；
-              再用 curl -s 127.0.0.1:{{ haproxy_stats_port }} 看后端是否被判为 down。
-            success_msg: "HAProxy → PostgreSQL 链路可用"
+              经 HAProxy（127.0.0.1:{{ haproxy_listen_port }}）探活失败。
+              实际输出：{{ _viahap.stdout | default('') }} {{ _viahap.stderr | default('') }}（rc={{ _viahap.rc }}）。
+              排查顺序：systemctl status haproxy → journalctl -u haproxy -n 50
+              （本机 HAProxy 日志进 journal，不在 /var/log/haproxy.log）→
+              curl -s 127.0.0.1:{{ haproxy_stats_port }}/\;csv 看后端状态列是否为 UP。
+            success_msg: "HAProxy → PostgreSQL 链路可用：{{ _viahap.stdout | trim }}"
 
-        - name: 查询事务池的池模式
+        # ---------- 两个池的池模式 ----------
+        # 口令只在首次创建角色时生成。重跑时角色已存在，口令要从 userlist 取回，
+        # 否则这一步会因为拿不到口令而失败——那同样是「因为别的原因失败」。
+        - name: 读取已有的 userlist
+          ansible.builtin.slurp:
+            src: "{{ pgb_conf_dir }}/userlist.txt"
+          register: _userlist
+          failed_when: false
+          no_log: true
+
+        - name: 取回池用户口令
+          ansible.builtin.set_fact:
+            _pgb_password: "{{ (_userlist.content | b64decode).split('\"')[3] }}"
+          when:
+            - _pgb_password is not defined
+            - _userlist.content is defined
+          no_log: true
+
+        - name: 查询 pgBouncer 的池清单
           ansible.builtin.command:
             cmd: >-
               psql -h 127.0.0.1 -p {{ pgb_listen_port_txn }} -U pgbouncer -d pgbouncer
@@ -177,8 +212,12 @@
               - "'session' in _pools.stdout"
             fail_msg: >-
               pgBouncer 的 SHOW DATABASES 里没有同时出现 transaction 与 session 两种池模式。
-              两个池若都落成事务级，dbt 与 Airflow 的 SET、临时表与 advisory lock 会在
-              运行期随机失败，而且失败现象与池无关——这正是必须在此刻验出来的原因。
+              先确认这一步本身没有因口令取不到而失败：
+              psql -h 127.0.0.1 -p {{ pgb_listen_port_txn }} -U pgbouncer -d pgbouncer -c "SHOW DATABASES"
+              （口令在 {{ pgb_conf_dir }}/userlist.txt）。
+              若连得上而池模式相同，则是模板或配置的问题：两个池都落成事务级时，
+              dbt 与 Airflow 的 SET、临时表与 advisory lock 会在运行期随机失败，
+              而且失败现象与池无关——这正是必须在此刻验出来的原因。
             success_msg: "两个池的池模式不同：事务级与会话级并存"
 
   handlers:
