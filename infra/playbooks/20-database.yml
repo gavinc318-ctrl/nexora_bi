@@ -172,6 +172,46 @@
             mode: "0644"
           notify: restart postgresql
 
+        # 放行网段取自 inventory，开发机为空列表。生产上这里是 LB 节点所在网段——
+        # pg_hba 属数据库本体的配置，故归本步而不归需要它的那一步。
+        - name: 放行指定网段的数据库连接
+          ansible.builtin.lineinfile:
+            path: "{{ pg_confdir }}/pg_hba.conf"
+            line: "host    all             all             {{ item.cidr }}        {{ item.method }}    # {{ item.comment | default('') }}"
+            regexp: "^host\\s+all\\s+all\\s+{{ item.cidr | replace('.','\\.') | replace('/','/') }}\\s"
+            insertafter: EOF
+            owner: postgres
+            group: postgres
+            mode: "0640"
+          loop: "{{ pg_hba_allow }}"
+          notify: restart postgresql
+
+        # 配置里写了什么，和地址是不是真的绑上了，是两回事——
+        # PG 对绑不上的监听地址是跳过并继续的（见 runbook/troubleshooting）。
+        - name: 查询实际监听的地址
+          ansible.builtin.command:
+            cmd: ss -lntH "sport = :{{ pg_port }}"
+          register: _pglisten
+          changed_when: false
+          check_mode: false
+
+        - name: 断言配置中的每个监听地址都真的绑上了
+          ansible.builtin.assert:
+            that:
+              - "_pglisten.stdout is search(item)"
+            fail_msg: >-
+              配置要求监听「{{ item }}」，但 {{ pg_port }} 端口上没有它。
+              实际监听：{{ _pglisten.stdout | default('（无）') }}。
+              PostgreSQL 对绑不上的地址是跳过并继续的，所以服务照常 running、
+              pg_settings 也照常显示配置值——配置「已加载」不等于地址「已绑上」。
+              日志里应有 could not create listen socket for 这一行。
+              最常见的原因是该地址所属的接口此刻不存在。
+            success_msg: "监听地址 {{ item }} 已绑定"
+          loop: >-
+            {{ pg_listen_addresses.split(',')
+               | map('trim') | reject('equalto','localhost') | list }}
+          when: pg_listen_addresses != 'localhost'
+
         # 参数要在建库之前真正加载，否则本次运行里的验证读到的是旧值
         - name: 立即应用参数变更
           ansible.builtin.meta: flush_handlers

@@ -51,6 +51,19 @@ all:
       - python3-pip
 
     # ---- 数据库 ----
+    # 监听地址与放行网段：开发机上一切都在同一台机器上，回环就够；
+    # 生产上 pgBouncer 与 HAProxy 在 LB 虚机、PostgreSQL 在库虚机，
+    # 库必须监听内网地址并放行 LB 节点所在网段。两边的差别收在这两个值里，
+    # 剧本与模板不动。
+    #   生产取值示例：
+    #     pg_listen_addresses: "localhost,<库虚机的应用流量网段地址>"
+    #     pg_hba_allow:
+    #       - { cidr: "<LB 节点网段>/24", method: "scram-sha-256", comment: "LB 节点的 HAProxy" }
+    #   另见 LD-08 NW-01：复制、应用、管理三类流量走独立网段，
+    #   此处监听的是应用流量段，复制流量另有其地址。
+    pg_listen_addresses: "localhost"
+    pg_hba_allow: []
+
     pg_cluster_name: main
     pg_port: 5432
     pg_database: oss911
