@@ -143,13 +143,13 @@ all:
     container_images:
       keycloak:
         ref: "quay.io/keycloak/keycloak:26.0"
-        digest: ""
+        digest: "sha256:09a381c715ab0b111835b70f2905955274843a219c6f27efb348e4d9f4086858"
       seaweedfs:
         ref: "docker.io/chrislusf/seaweedfs:3.80"
-        digest: ""
+        digest: "sha256:1055999e08eed1789b0ae45d235126e4495e23d3fb9d6396293fd42539b1ae6a"
       prometheus:
         ref: "docker.io/prom/prometheus:v2.55.1"
-        digest: ""
+        digest: "sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3"
 
     # 容器连库不直连 PostgreSQL，走宿主机 pgBouncer 的会话池（DD-67 的拓扑，
     # Keycloak 也是应用，不该有例外）。地址用 internal 网段的网关——

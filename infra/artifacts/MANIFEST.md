@@ -40,21 +40,37 @@
 | OS | postgresql-16 | 16.15-0ubuntu0.24.04.1 | Ubuntu noble 官方源 | 由 apt 源签名保证 | 2026-09-30 | 24.04 默认仓库即 PG 16，与已验证的 DDL 一致，零返工且少一条离网供给链（DD-62）。注意 PG 16 的上游支持到 2028-11，八年合同期内必然经历一次大版本升级，演练规程在 LD-08 | 在用 |
 | OS | postgresql-16-postgis-3 | 3.4.2+dfsg-1ubuntu3 | Ubuntu noble 官方源 | 由 apt 源签名保证 | 2026-09-30 | 随 PG 16 的配套版本。空间聚合（网格化、点在面内判定）依赖它；升级 PG 大版本时 PostGIS 须同步评估，二者的兼容矩阵是硬约束 | 在用 |
 | OS | ICU（随 PostgreSQL 引入） | 随 noble 基线 | Ubuntu noble 官方源 | 由 apt 源签名保证 | 2026-09-30 | DD-63 的列级 collation 依赖 ICU。ICU 版本变化会改变排序结果，升级时须检查 PostgreSQL 的 collation version 并按需 REINDEX——这是记在这里的原因 | 在用 |
+| CT | Keycloak | 26.0.8 | quay.io/keycloak/keycloak:26.0 | sha256:09a381c715ab0b111835b70f2905955274843a219c6f27efb348e4d9f4086858 | 2026-10-07 | 身份与令牌（LD-07 第 6 章）。26.x 是 KC_BOOTSTRAP_ADMIN_* 环境变量与独立管理端口 9000 的版本线；开发机用 start-dev，生产用 start --optimized。按 digest 钉死——tag 会被重新发布，digest 不会 | 在用 |
+| CT | SeaweedFS | 3.80 | docker.io/chrislusf/seaweedfs:3.80 | sha256:1055999e08eed1789b0ae45d235126e4495e23d3fb9d6396293fd42539b1ae6a | 2026-10-07 | 对象存储：现场媒体、发布制品、导出文件。选它而非 MinIO 的理由见 DD-46（上游健康度优先于许可）。开发机单机 server 模式，生产三节点（PL-04） | 在用 |
+| CT | Prometheus | v2.55.1 | docker.io/prom/prometheus:v2.55.1 | sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3 | 2026-10-07 | 可用性与指标采集。不用 Grafana（AGPL，见组件选型），看板由本方门户承担。开发机留存 15 天，生产按 LD-08 的留存要求另定 | 在用 |
 ---
 
 ## 待补
 
 这些是已知会引入、但尚未落地的物料，先占位以免遗漏：
 
-- pgBouncer、HAProxy（OS 源）
+- pgBouncer、HAProxy（OS 源）— 已安装，待补本清单
 - Apache Airflow、dbt-core（PY）
 - Apache Superset（PY 或 CT）
-- Keycloak（CT）
-- SeaweedFS（CT 或二进制）
-- Prometheus（CT）
 - WeasyPrint、python-docx（PY）
 - Node.js 工具链、React、TypeScript（NPM）
 - FreeTDS 驱动链（OS 源，迁移期组件）
+---
+
+## 容器镜像的两条纪律
+
+**一、按 digest 钉死，不按 tag。** tag 会被重新发布——同一个 `keycloak:26.0`
+今天和半年后可能是两个不同的镜像，而离网环境里你无从发现。digest 不会变。
+剧本首次按 tag 拉取时会把解析出的 digest 打印出来，**当场填回 inventory 与本清单**。
+这一步刻意保持手工：自动写回就没人看了，而「这是不是同一个镜像」正是要有人看一眼的事。
+
+**二、本机上不该有本清单之外的镜像。** 未登记的镜像在重建时不会被带过去，
+而依赖它的东西会悄悄失败。定期用下面这条对账，出现清单外的镜像就追一下来源，
+要么登记要么删除：
+
+```bash
+sudo podman images --digests --format '{{.Repository}}:{{.Tag}} {{.Digest}}'
+```
 
 ---
 
