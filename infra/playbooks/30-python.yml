@@ -176,7 +176,34 @@
           changed_when: "'Saved' in _dl_dbt.stdout or 'Created wheel' in _dl_dbt.stdout"
           when: _do_fetch | bool
 
-        # 这一条是「构建能力不进墙内」这条原则的执行者。
+        # 取料是**增量**的：pip wheel 往同一个目录里加东西，不会清理历史。
+        # 所以换取料方式之后，上一轮 pip download 留下的源码包还会躺在那里
+        # （2026-10-08 实测，dbt_core_experimental_parser-2.0.5.tar.gz）。
+        # 只在取料时清理：离网从介质安装时一个文件都不该删——那种情况下
+        # 断言失败就该让它失败，因为问题在介质，不在本机。
+        - name: 找出取料遗留的源码包
+          ansible.builtin.find:
+            paths:
+              - "{{ wheelhouse }}/airflow"
+              - "{{ wheelhouse }}/dbt"
+            patterns: "*.tar.gz,*.zip"
+          register: _sdist_stale
+          when: _do_fetch | bool
+
+        - name: 清掉取料遗留的源码包
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ _sdist_stale.files | default([]) | map(attribute='path') | list }}"
+          loop_control:
+            label: "{{ item | basename }}"
+          when: _do_fetch | bool
+
+        # 删掉源码包之后，对应的轮子必须在场。这里不逐个核对包名——
+        # 真正的兜底在安装一段：--no-index 的 pip 装不到就当场失败，
+        # 不会默默上网取来。那个失败比在这里做名字匹配更可靠，也更好读。
+
+        # 下面这一条是「构建能力不进墙内」这条原则的执行者。
         # 2026-10-08 实测：pip download 取下来的 190 个包里混着一个源码包
         # （dbt_core_experimental_parser-2.0.5.tar.gz）——上游没发轮子。
         # 改用 pip wheel 之后不应再有源码包；这条断言保证以后也不会悄悄混进来。
