@@ -28,7 +28,17 @@ ddl/*.sql、metrics/*.yaml、contracts/*.yaml、infra/**、各 README。
 退出码非零即有悬空引用。
 """
 import re, sys, glob, io, os, collections
-import openpyxl, docx, yaml
+try:
+    import openpyxl, docx, yaml
+except ModuleNotFoundError as e:
+    sys.exit(
+        f"缺少 {e.name}。本脚本要读 docx 与 xlsx 原件，依赖三个包：\n"
+        "  sudo apt-get install -y python3-openpyxl python3-docx python3-yaml\n"
+        "用 apt 而不是 pip：Ubuntu 24.04 有 PEP 668，pip 装进系统 Python 会被拒，\n"
+        "而这三个只是本仓库工具脚本的依赖，不值得为它们动系统的 site-packages。\n"
+        "注意提供 import docx 的包叫 python3-docx。\n"
+        "它们是开发工具链，不属于交付系统，故不进 artifacts/MANIFEST.md。"
+    )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)

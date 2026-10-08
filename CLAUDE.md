@@ -34,6 +34,22 @@
 **私钥不放这台机器。** 用 `ssh -A` 从 Mac 转发 agent 进来，`git push` 用的是
 Mac 上的密钥。
 
+### 一次性准备
+
+`tools/*.py` 要读 docx 与 xlsx 原件，依赖三个包：
+
+```bash
+sudo apt-get install -y python3-openpyxl python3-docx python3-yaml
+```
+
+用 apt 而不是 `pip`：Ubuntu 24.04 有 PEP 668，`pip install` 装进系统 Python 会被
+拒绝（要加 `--break-system-packages` 才行）；而这三个只是工具脚本的依赖，不值得
+为它们动系统的 site-packages。注意提供 `import docx` 的包叫 **`python3-docx`**。
+
+**这三个包是开发工具链，不进 `artifacts/MANIFEST.md`。** MANIFEST 只登记交付系统
+要用的物料——现场不做这类文档转换与一致性校验。同理：VS Code、插件、调试工具
+都不登记。判据是一句话：**这东西要不要跟着系统进生产网？不要，就不进 MANIFEST。**
+
 ---
 
 ## 2  写入点：谁改什么（**最重要的一条**）
