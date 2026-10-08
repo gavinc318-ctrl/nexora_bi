@@ -45,7 +45,7 @@
 | CT | Prometheus | v2.55.1 | docker.io/prom/prometheus:v2.55.1 | sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3 | 2026-10-07 | 可用性与指标采集。不用 Grafana（AGPL，见组件选型），看板由本方门户承担。开发机留存 15 天，生产按 LD-08 的留存要求另定 | 在用 |
 | PY | Airflow 官方 constraints 文件 constraints-3.3.2/constraints-3.12.txt | 对应 Airflow 3.3.2 / Python 3.12 | raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt | 821effd0f491975682f2774fca3427d7bc2f59ca6de68dcb413ad2c8f890e58c | 2026-10-08 | 这一行是整个 Airflow 依赖树的冻结依据（DD-69）。上游为每个版本发布经 CI 验证的约束集；不用它就等于让 pip 在装机时自行解析数百个包，同一份剧本在不同时间装出的环境会不同。文件名中的 py 版本必须与目标机的 python3 次版本一致（本机 3.12），换 OS 时要同步换 | 在用 |
 | PY | apache-airflow（含 postgres / celery 等 extras） | 3.3.2 | PyPI，经 constraints 解析后下载至 wheelhouse | 由 constraints 文件（上一行）与 wheelhouse 内各 wheel 自身的哈希保证 | 2026-10-08 | 调度。3.2.0 起支持 Python 3.10–3.14，组件为 api-server / scheduler / dag-processor / triggerer（不再是 webserver），剧本与 systemd 单元按此编排。版本钉在 3.3.2 而非跟随最新：constraints 是按版本发布的，升级意味着换一整套约束并重新验证 | 在用 |
-| PY | dbt-core 与 dbt-postgres | 见 infra/dbt-requirements.lock | PyPI，由本方解析一次后冻结 | 由 lock 文件内各包的钉死版本保证 | 2026-10-08 | 模型构建。dbt 没有上游 constraints，故由本方在有网环境解析一次、pip freeze 冻结入库（DD-69）。**这是一项长期运维义务**：升级 dbt 时要自己重新解析并复核组合可用，没有上游替我们验证 | 在用 |
+| PY | dbt-core 与 dbt-postgres（连同 dbt-adapters / dbt-common / agate / psycopg2-binary 等 59 个包） | dbt-core 1.12.5 · dbt-postgres 1.11.0（全部 59 个包的钉死版本见 infra/dbt-requirements.lock） | PyPI，由本方解析一次后冻结 | 由 lock 文件内各包的钉死版本保证 | 2026-10-08 | 模型构建。dbt 没有上游 constraints，故由本方在有网环境解析一次、pip freeze 冻结入库（DD-69）。**这是一项长期运维义务**：升级 dbt 时要自己重新解析并复核组合可用，没有上游替我们验证 | 在用 |
 ---
 
 ## 待补
