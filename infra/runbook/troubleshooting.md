@@ -400,3 +400,48 @@ bash: /opt/oss911/venv-airflow/bin/airflow: Permission denied
   这和 auth_query 那次（用 userlist 里唯一的用户去验 auth_query）是同一类错误，
   本项目已出现两次，值得当成一条检查清单：
   **写验证时先问——我用的身份、路径、网络位置，和真正使用它的那一方一样吗？**
+
+### 现象：`sudo sha256sum /某个只有 root 能读的目录/*.txt` 报 `No such file or directory`，但 `sudo ls` 能列出那个文件
+
+```
+$ sudo sha256sum /var/cache/build/wheelhouse/constraints-*.txt
+sha256sum: '/var/cache/build/wheelhouse/constraints-*.txt': No such file or directory
+$ sudo ls /var/cache/build/wheelhouse/
+airflow  constraints-airflow-3.3.2-py312.txt  dbt  dbt-requirements.lock
+```
+
+- **原因** —— **通配符是调用者的 shell 展开的，`sudo` 只提权它后面那个命令**。
+  wheelhouse 是 `0750 root:root`，非 root 的 shell 读不进去，glob 匹配不到任何文件；
+  按 shell 的惯例，匹配不到时把模式**原样**传下去，于是 `sha256sum` 真的去找了一个
+  名叫 `constraints-*.txt` 的文件。`sudo ls` 能成功是因为那条命令里没有通配符，
+  目录是由 root 的 `ls` 自己读的
+- **处置** —— 让展开也发生在 root 的 shell 里：
+  ```bash
+  sudo bash -c 'sha256sum /var/cache/build/wheelhouse/constraints-*.txt'
+  ```
+- **同一个坑的其它形态** —— 重定向符也一样由调用者的 shell 处理：
+  `sudo echo x > /root/f` 会以**你**的身份去写 `/root/f` 而失败，
+  要写成 `sudo bash -c 'echo x > /root/f'`。管道同理——`sudo cat a | grep b` 里
+  只有 `cat` 是 root。`rsync`、`scp` 也是以你的身份读源文件，
+  取 root-only 目录里的东西要先 `sudo cat ... | tee ~/文件名` 落到自己家目录
+- **归类** —— 这是本项目第三次踩同一个家族的问题：
+  **执行某个动作的身份，和该动作所要求的身份，不是同一回事。**
+  前两次是 auth_query（用 userlist 里唯一免验的用户去验 auth_query）
+  与 venv 权限（以 root 验一条只有 airflow 会走的路径）。
+  这次换了个外壳——命令行的一部分由谁来求值——但本质相同
+
+### 现象：剧本在开发机上一路通过，却在离网机器上跑不起来
+
+- **原因** —— `30-python.yml` 的取料阶段用 `pip download`。重复执行**不会**重新下载
+  字节（已存在的文件只打印 `File was already downloaded`，`changed_when` 盯的是
+  `Saved`，所以第二遍确实 `changed=0`），但 pip **仍会每次连 PyPI 重新解析依赖树**。
+  离网时这一步直接失败
+- **处置** —— 取料由 `wheelhouse_refresh` 控制，默认 false；仅在显式打开或 wheelhouse
+  为空时执行。安装阶段 `--no-index --find-links`，完全不联网。细节见
+  `artifacts/MANIFEST.md` 的「PyPI 侧的取料与安装」
+- **预防** —— **`changed=0` 不等于幂等。** 「跑两遍、第二遍 changed=0」这条纪律
+  检查的是*有没有重复改动*，检查不出*这一步在目标环境里能不能执行*。
+  开发机有网，把这个缺陷整整盖住了一个阶段。凡是为离网环境写的剧本，
+  都要再问一遍：**它依赖的外部可达性，在目标环境里存在吗？**
+  这类问题在开发环境里永远验不到——和 DD-68 漏掉传输加密是同一个成因
+  （开发机三者同机、回环不出网卡，所以 TLS 这一项在开发环境里不可能暴露）

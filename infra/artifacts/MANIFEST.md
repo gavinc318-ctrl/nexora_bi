@@ -43,6 +43,9 @@
 | CT | Keycloak | 26.0.8 | quay.io/keycloak/keycloak:26.0 | sha256:09a381c715ab0b111835b70f2905955274843a219c6f27efb348e4d9f4086858 | 2026-10-07 | 身份与令牌（LD-07 第 6 章）。26.x 是 KC_BOOTSTRAP_ADMIN_* 环境变量与独立管理端口 9000 的版本线；开发机用 start-dev，生产用 start --optimized。按 digest 钉死——tag 会被重新发布，digest 不会 | 在用 |
 | CT | SeaweedFS | 3.80 | docker.io/chrislusf/seaweedfs:3.80 | sha256:1055999e08eed1789b0ae45d235126e4495e23d3fb9d6396293fd42539b1ae6a | 2026-10-07 | 对象存储：现场媒体、发布制品、导出文件。选它而非 MinIO 的理由见 DD-46（上游健康度优先于许可）。开发机单机 server 模式，生产三节点（PL-04） | 在用 |
 | CT | Prometheus | v2.55.1 | docker.io/prom/prometheus:v2.55.1 | sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3 | 2026-10-07 | 可用性与指标采集。不用 Grafana（AGPL，见组件选型），看板由本方门户承担。开发机留存 15 天，生产按 LD-08 的留存要求另定 | 在用 |
+| PY | Airflow 官方 constraints 文件 constraints-3.3.2/constraints-3.12.txt | 对应 Airflow 3.3.2 / Python 3.12 | raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt | 821effd0f491975682f2774fca3427d7bc2f59ca6de68dcb413ad2c8f890e58c | 2026-10-08 | 这一行是整个 Airflow 依赖树的冻结依据（DD-69）。上游为每个版本发布经 CI 验证的约束集；不用它就等于让 pip 在装机时自行解析数百个包，同一份剧本在不同时间装出的环境会不同。文件名中的 py 版本必须与目标机的 python3 次版本一致（本机 3.12），换 OS 时要同步换 | 在用 |
+| PY | apache-airflow（含 postgres / celery 等 extras） | 3.3.2 | PyPI，经 constraints 解析后下载至 wheelhouse | 由 constraints 文件（上一行）与 wheelhouse 内各 wheel 自身的哈希保证 | 2026-10-08 | 调度。3.2.0 起支持 Python 3.10–3.14，组件为 api-server / scheduler / dag-processor / triggerer（不再是 webserver），剧本与 systemd 单元按此编排。版本钉在 3.3.2 而非跟随最新：constraints 是按版本发布的，升级意味着换一整套约束并重新验证 | 在用 |
+| PY | dbt-core 与 dbt-postgres | 见 infra/dbt-requirements.lock | PyPI，由本方解析一次后冻结 | 由 lock 文件内各包的钉死版本保证 | 2026-10-08 | 模型构建。dbt 没有上游 constraints，故由本方在有网环境解析一次、pip freeze 冻结入库（DD-69）。**这是一项长期运维义务**：升级 dbt 时要自己重新解析并复核组合可用，没有上游替我们验证 | 在用 |
 ---
 
 ## 待补
@@ -50,7 +53,6 @@
 这些是已知会引入、但尚未落地的物料，先占位以免遗漏：
 
 - pgBouncer、HAProxy（OS 源）— 已安装，待补本清单
-- Apache Airflow、dbt-core（PY）
 - Apache Superset（PY 或 CT）
 - WeasyPrint、python-docx（PY）
 - Node.js 工具链、React、TypeScript（NPM）
@@ -114,3 +116,30 @@ sha256sum -c SHA256SUMS 2>/dev/null | grep live-server
 
 输出里另外两行 `FAILED open or read` 是 SHA256SUMS 中列出的 24.04.3 与 24.04.4 的 ISO
 在本地不存在，不是校验失败。只有列出的文件存在时才会被实际比对。
+
+---
+
+## PyPI 侧的取料与安装
+
+Python 依赖不在装机时解析，分两步（DD-69）：
+
+```bash
+# 取料：需要联网，只在更新 wheelhouse 时做
+ansible-playbook playbooks/30-python.yml -e ansible_connection=local -K -e wheelhouse_refresh=true
+
+# 安装：不联网，pip --no-index --find-links 从 wheelhouse 读
+ansible-playbook playbooks/30-python.yml -e ansible_connection=local -K
+```
+
+`wheelhouse_refresh` 默认为 **false**，这是刻意的。`pip download` 虽然不会重复
+下载已存在的字节，但**仍会每次连 PyPI 重新解析依赖树**——若不加这个开关，
+剧本在真正离网的机器上会卡在取料阶段跑不起来。开发机有网，会把这个问题盖住。
+
+离网重建时，把介质上的 `wheelhouse/` 整个目录连同 `constraints-airflow-3.3.2-py312.txt`
+与 `dbt-requirements.lock` 放到 `/var/cache/build/wheelhouse/` 下，直接跑安装那一条。
+wheelhouse 为空而本次又没取料时，剧本会断言失败并把这段话打出来，不会让 pip 抛
+一句难读的 `no matching distribution found`。
+
+读取这个目录需要 root：它是 `0750 root:root`。注意 `sudo sha256sum .../constraints-*.txt`
+这种写法不行——通配符由调用者那个非 root 的 shell 展开，`sudo` 只作用于命令本身。
+要让展开也发生在 root 下：`sudo bash -c 'sha256sum .../constraints-*.txt'`。
