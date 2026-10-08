@@ -445,3 +445,81 @@ airflow  constraints-airflow-3.3.2-py312.txt  dbt  dbt-requirements.lock
   都要再问一遍：**它依赖的外部可达性，在目标环境里存在吗？**
   这类问题在开发环境里永远验不到——和 DD-68 漏掉传输加密是同一个成因
   （开发机三者同机、回环不出网卡，所以 TLS 这一项在开发环境里不可能暴露）
+
+### 现象：`podman save` 之后 `podman load` 报 `Digest of source image's manifest would not match destination reference`
+
+```
+$ podman save --format oci-archive -o kc.tar quay.io/keycloak/keycloak@sha256:09a381c7...
+Writing manifest to image destination           # 保存是成功的
+$ podman --root /var/tmp/altstore load -i kc.tar
+Error: payload does not match any of the supported image formats:
+ * oci-archive: Digest of source image's manifest would not match destination reference
+```
+
+- **原因** —— 上游 tag 是**多架构 manifest list**，我们记录的 digest 是 list 的 digest。
+  `podman save` 只导出当前平台那一份 manifest，list 丢了；归档内容算出的 digest
+  与归档里记着的引用名对不上，`load` 于是拒绝。**不是配置问题，是 `save/load`
+  这条路径本身不保 digest**
+- **处置** —— 改用 `skopeo copy --all` 到 OCI 目录（逐字节拷贝 manifest，list 一起带走）。
+  导入时**不能**带 `--all`——`containers-storage` 存不下一组镜像，要用
+  `--override-os linux --override-arch amd64` 指定一个平台。完整命令见
+  `artifacts/MANIFEST.md`「容器镜像的三条纪律」第三条
+- **顺带学到的** —— `skopeo inspect --raw <OCI 目录> | sha256sum` 就是 digest 的复验：
+  digest 的定义即 manifest 自身的 SHA-256，所以这条命令**离网可做、不需要仓库**。
+  这是跨墙交付里唯一还成立的验证方式
+- **为什么值得现在验** —— 如果按原计划把 `podman save` 写进交付规程，
+  这个问题会在现场才暴露，而那时已经没有网可以重拉镜像了。
+  **交付路径上的每一个工具，都要在还有退路的时候实际跑一遍。**
+
+### 现象：wheelhouse 里混着 `.tar.gz`，装机时却要编译
+
+```
+$ find /var/cache/build/wheelhouse -name '*.tar.gz'
+dbt/dbt_core_experimental_parser-2.0.5.tar.gz
+```
+
+- **原因** —— `pip download` 对只发源码包的上游（这个包 PyPI 上没有轮子）会把
+  `.tar.gz` 原样存下。190 个包里就这一个漏网
+- **处置** —— 取料改用 `pip wheel`：它在取料那台有网的机器上把源码包构建成 `.whl`。
+  并加一条断言「wheelhouse 中不许有源码包」，让这件事由剧本保证而不是靠人记得查
+- **为什么重要** —— 源码包意味着装机时要有编译器与各种 `-dev` 头文件，
+  也就是**把构建能力搬进了生产网**；而且构建失败时现场排查极难。
+  通用原则：**凡能在墙外完成的构建，就不要把构建能力带进墙内**——
+  带进去的每一样东西都是八年的维护义务
+- **同一原则的另一处应用** —— 门户前端的 Node / TypeScript 工具链是构建期依赖，
+  只带编译产物 `dist/` 进墙，整条 npm 供给链因此不进生产网
+
+### 现象：Ansible 任务的 `when:` 写在注释块之后，静默挂到了上一个任务上
+
+- **原因** —— YAML 的注释不占结构。写成下面这样时，`when:` 并没有开启一个新任务，
+  它仍属于**上一个**任务的映射：
+  ```yaml
+  - name: 甲
+    ansible.builtin.command: ...
+    register: _x
+
+  # 这里是一段说明……
+    when: _do_fetch | bool      # ← 挂在「甲」上，不是下面那个任务
+  ```
+  `yaml.safe_load` 不会报错，`--syntax-check` 也过，所以它能一直活着
+- **本项目的实际后果** —— 30-python 里出现过两处：一处恰好挂对了目标，
+  另一处把「断言离线安装的前提已具备」变成了只在取料时才执行，
+  也就是**这条断言永远不会在它该生效的那种情况下运行**
+- **定位手法** —— 不要靠读缩进，让解析器自己说。这段脚本把每个任务的 `when`
+  打印出来，一眼就能看出谁身上挂了不该有的条件：
+  ```bash
+  python3 - <<'PY'
+  import yaml
+  for play in yaml.safe_load(open('playbooks/30-python.yml')):
+      def walk(ts, d=0):
+          for t in ts or []:
+              if 'block' in t:
+                  print("  "*d + "[block] when=%s" % t.get('when')); walk(t['block'], d+1)
+              else:
+                  print("  "*d + "%-40s when=%s" % (str(t.get('name'))[:40], t.get('when')))
+      walk(play.get('tasks'))
+  PY
+  ```
+- **预防** —— 条件写在任务的 `name` 之后、紧挨着它；说明文字放在任务**之前**，
+  不要夹在任务的键之间。**凡是「语法正确但语义错位」的东西，都要用解析器复核，
+  不能用肉眼复核。**

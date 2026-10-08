@@ -8,7 +8,13 @@
 #   流程分两段：取料（需要网）与安装（不需要网）。安装一段永远走
 #   --no-index --find-links，从本机 wheelhouse 装。
 #   这样做的理由是：开发机能上网这件事，会让所有离网问题推迟到最糟的时刻才暴露。
-#   多一步 pip download 的代价，换这条链路从第一天起就是真的。
+#   多一步取料的代价，换这条链路从第一天起就是真的。
+#
+# ★ 取料用 pip wheel，不用 pip download。两者的区别只在一处，但那一处是关键：
+#   少数包（如 dbt-core-experimental-parser）上游只发源码包。pip download 会把
+#   .tar.gz 原样存下，装机时现场编译——那等于把编译器、头文件和一次可能失败的
+#   构建搬进了生产网。pip wheel 在**取料这台有网的机器上**就把源码包构建成 .whl，
+#   装机侧因此只会遇到轮子。取料之后有一条断言守着这件事。
 #
 # ★ Airflow 的 constraints 是硬条件不是建议。不带它解出来的依赖组合
 #   大概率装不出一个能跑的环境。URL 由 Airflow 版本与 Python 次版本共同决定。
@@ -39,8 +45,12 @@
         name:
           - python3-venv
           - python3-pip
-          - build-essential      # 少数包没有 wheel 时要就地编译；离网环境里更需要它在场
-          - libpq-dev            # psycopg2 源码编译时需要
+          # 下面两项只为**取料**服务：pip wheel 要把少数只发源码包的依赖构建成轮子。
+          # 安装侧不需要它们（wheelhouse 里只有轮子，见取料后的断言）。
+          # 生产机若由平台基线交付且不含编译器，这两项可以不装——届时取料必须
+          # 在另一台有网的同版本机器上完成。
+          - build-essential
+          - libpq-dev
         state: present
         update_cache: true
         cache_valid_time: 3600
@@ -124,18 +134,18 @@
               sha256 = {{ _constraints_stat.stat.checksum }}
               —— 填回 artifacts/MANIFEST.md
 
-        - name: 下载 Airflow 及其全部传递依赖的 wheel
+        - name: 取 Airflow 及其全部传递依赖的轮子
           ansible.builtin.command:
             cmd: >-
-              {{ python_bin }} -m pip download
+              {{ python_bin }} -m pip wheel
               "apache-airflow[{{ airflow_extras }}]=={{ airflow_version }}"
               --constraint {{ constraints_file }}
-              --dest {{ wheelhouse }}/airflow
+              --wheel-dir {{ wheelhouse }}/airflow
           register: _dl_af
-          changed_when: "'Saved' in _dl_af.stdout"
+          changed_when: "'Saved' in _dl_af.stdout or 'Created wheel' in _dl_af.stdout"
+          when: _do_fetch | bool
 
         # dbt 没有官方 constraints：先解析一次，冻结成 lock，此后按 lock 取料。
-          when: _do_fetch | bool
 
         - name: 检查是否已有 dbt 的 lock
           ansible.builtin.stat:
@@ -156,31 +166,68 @@
             - not _dbtlock.stat.exists
             - _do_fetch | bool
 
-        - name: 下载 dbt 的 wheel（按 lock）
+        - name: 取 dbt 的轮子（按 lock）
           ansible.builtin.command:
             cmd: >-
-              {{ python_bin }} -m pip download
+              {{ python_bin }} -m pip wheel
               --requirement {{ dbt_lock }}
-              --dest {{ wheelhouse }}/dbt
+              --wheel-dir {{ wheelhouse }}/dbt
           register: _dl_dbt
-          changed_when: "'Saved' in _dl_dbt.stdout"
+          changed_when: "'Saved' in _dl_dbt.stdout or 'Created wheel' in _dl_dbt.stdout"
+          when: _do_fetch | bool
+
+        # 这一条是「构建能力不进墙内」这条原则的执行者。
+        # 2026-10-08 实测：pip download 取下来的 190 个包里混着一个源码包
+        # （dbt_core_experimental_parser-2.0.5.tar.gz）——上游没发轮子。
+        # 改用 pip wheel 之后不应再有源码包；这条断言保证以后也不会悄悄混进来。
+        - name: 断言 wheelhouse 中没有源码包
+          ansible.builtin.find:
+            paths:
+              - "{{ wheelhouse }}/airflow"
+              - "{{ wheelhouse }}/dbt"
+            patterns: "*.tar.gz,*.zip"
+          register: _sdist
+
+        - name: 断言 wheelhouse 中没有源码包（判定）
+          ansible.builtin.assert:
+            that:
+              - "(_sdist.matched | int) == 0"
+            fail_msg: >-
+              wheelhouse 里有 {{ _sdist.matched }} 个源码包：
+              {{ _sdist.files | map(attribute='path') | map('basename') | join('、') }}。
+              源码包要在装机时现场编译，等于把编译器与一次可能失败的构建带进生产网。
+              处置：在有网的机器上 -e wheelhouse_refresh=true 重新取料
+              （pip wheel 会把它们构建成轮子），构建失败的包要单独查上游。
+            success_msg: "wheelhouse 中只有轮子，装机侧不需要编译器"
+
+        # 这里要重新数一遍，不能用取料前那次 _wh 的结果：
+        # 前一次的数字只说明「要不要取料」，这一次才说明「现在装得了吗」。
+        # 取料开着却一个包都没取到（源地址不通、constraints 解析失败），
+        # 以及离网时介质没放对位置，都只有在这一次计数里才看得见。
+        - name: 复数 wheelhouse 中的轮子
+          ansible.builtin.find:
+            paths:
+              - "{{ wheelhouse }}/airflow"
+              - "{{ wheelhouse }}/dbt"
+            patterns: "*.whl"
+          register: _wh_final
 
         - name: 断言离线安装的前提已具备
           ansible.builtin.assert:
             that:
-              - "(_wh.matched | int) > 0 or (_do_fetch | bool)"
+              - "(_wh_final.matched | int) > 0"
             fail_msg: >-
-              wheelhouse（{{ wheelhouse }}）是空的，而本次没有取料，无法离线安装。
+              wheelhouse（{{ wheelhouse }}）里没有轮子，无法离线安装。
               有网时用 -e wheelhouse_refresh=true 取一次；
               离网时把介质上的 wheelhouse 目录与 {{ constraints_file | basename }}、
               {{ dbt_lock | basename }} 一并放到该路径下再跑。
-            success_msg: "离线安装的前提具备：wheelhouse 中有 {{ _wh.matched }} 个包"
+              本次{{ '执行了取料但未取到任何轮子——先看上面取料那两步的输出' if _do_fetch else '未取料' }}。
+            success_msg: "离线安装的前提具备：wheelhouse 中有 {{ _wh_final.matched }} 个轮子"
 
         # ========== 安装：不走网络 ==========
         # --no-index 是这一段的关键：它让 pip 完全不去问 PyPI。
         # 若 wheelhouse 里缺东西，这里会当场失败——而不是默默上网取来，
         # 把一个离网环境里必然出现的问题藏到交付之后。
-          when: _do_fetch | bool
 
         - name: 建立 Airflow 的 venv
           ansible.builtin.command:

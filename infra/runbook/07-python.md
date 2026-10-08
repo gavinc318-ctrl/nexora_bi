@@ -21,14 +21,19 @@ Airflow 用 `BashOperator` 调 dbt 的可执行文件，两边只共享项目目
 
 | 段 | 做什么 | 要网络 |
 | --- | --- | --- |
-| 取料 | `pip download` 把全部 wheel 拉进 `/var/cache/build/wheelhouse` | 要 |
+| 取料 | `pip wheel` 把全部轮子拉进（必要时构建进）`/var/cache/build/wheelhouse` | 要 |
 | 安装 | `pip install --no-index --find-links <wheelhouse>` | **不要** |
 
 `--no-index` 是这件事的关键：它让 pip **完全不去问 PyPI**。wheelhouse 里缺东西就当场失败，
 而不是默默上网取来——后者会把一个离网环境里必然出现的问题，藏到交付之后才爆。
 
-**开发机能上网这件事，会让所有离网问题推迟到最糟的时刻才暴露。** 多一步 `pip download`
+**开发机能上网这件事，会让所有离网问题推迟到最糟的时刻才暴露。** 多一步取料
 的代价，换这条链路从第一天起就是真的。
+
+取料用的是 `pip wheel` 而不是 `pip download`，区别只在一处：少数包上游只发源码包，
+`pip download` 会把 `.tar.gz` 原样存下，装机时现场编译——那等于把编译器搬进了生产网。
+`pip wheel` 在取料这台有网的机器上就把它构建成轮子。取料之后有一条断言盯着
+「wheelhouse 里不许有源码包」。介质化的完整做法见 `90-offline-media.md`。
 
 ## 两种依赖锁定，作用相同、维护责任不同
 
@@ -100,7 +105,7 @@ dbt → pgBouncer 会话池 → HAProxy → PostgreSQL，并且会把每一跳�
 | --- | --- | --- |
 | 执行器 | `LocalExecutor`，单机 | 按 LD-08 的 ETL 对部署，执行器与并发另定 |
 | 认证 | Airflow 自带，尚未接 Keycloak | 经 Keycloak，与门户同一套身份（LD-07 第 6 章） |
-| wheelhouse 来源 | 本机 `pip download`（有网） | 内网 PyPI 镜像，或介质携带的 wheelhouse |
+| wheelhouse 来源 | 本机 `pip wheel`（有网） | **介质携带的 wheelhouse**（MOI 内网没有 PyPI 镜像，见 `90-offline-media.md`） |
 
 **Airflow 的认证配置是刻意留空的。** 它要和 Keycloak 一起配，而 Keycloak 的联邦
 又要等 AD FS 的元数据到位。在那之前 Airflow 的 API 只绑回环，不对外。

@@ -40,6 +40,7 @@
 | OS | postgresql-16 | 16.15-0ubuntu0.24.04.1 | Ubuntu noble 官方源 | 由 apt 源签名保证 | 2026-09-30 | 24.04 默认仓库即 PG 16，与已验证的 DDL 一致，零返工且少一条离网供给链（DD-62）。注意 PG 16 的上游支持到 2028-11，八年合同期内必然经历一次大版本升级，演练规程在 LD-08 | 在用 |
 | OS | postgresql-16-postgis-3 | 3.4.2+dfsg-1ubuntu3 | Ubuntu noble 官方源 | 由 apt 源签名保证 | 2026-09-30 | 随 PG 16 的配套版本。空间聚合（网格化、点在面内判定）依赖它；升级 PG 大版本时 PostGIS 须同步评估，二者的兼容矩阵是硬约束 | 在用 |
 | OS | ICU（随 PostgreSQL 引入） | 随 noble 基线 | Ubuntu noble 官方源 | 由 apt 源签名保证 | 2026-09-30 | DD-63 的列级 collation 依赖 ICU。ICU 版本变化会改变排序结果，升级时须检查 PostgreSQL 的 collation version 并按需 REINDEX——这是记在这里的原因 | 在用 |
+| OS | skopeo | 随 noble 仓库 | Ubuntu noble 官方源 | 由 apt 源签名保证 | 2026-10-08 | 容器镜像跨墙传递的唯一可用工具。`podman save/load` 会丢掉多架构 manifest list，导致 `load` 直接拒绝（2026-10-08 实测），skopeo 做的是 manifest 的逐字节拷贝。**墙内也要装**，因为导入与复验都靠它，所以它必须进 apt 闭包 | 在用 |
 | CT | Keycloak | 26.0.8 | quay.io/keycloak/keycloak:26.0 | sha256:09a381c715ab0b111835b70f2905955274843a219c6f27efb348e4d9f4086858 | 2026-10-07 | 身份与令牌（LD-07 第 6 章）。26.x 是 KC_BOOTSTRAP_ADMIN_* 环境变量与独立管理端口 9000 的版本线；开发机用 start-dev，生产用 start --optimized。按 digest 钉死——tag 会被重新发布，digest 不会 | 在用 |
 | CT | SeaweedFS | 3.80 | docker.io/chrislusf/seaweedfs:3.80 | sha256:1055999e08eed1789b0ae45d235126e4495e23d3fb9d6396293fd42539b1ae6a | 2026-10-07 | 对象存储：现场媒体、发布制品、导出文件。选它而非 MinIO 的理由见 DD-46（上游健康度优先于许可）。开发机单机 server 模式，生产三节点（PL-04） | 在用 |
 | CT | Prometheus | v2.55.1 | docker.io/prom/prometheus:v2.55.1 | sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3 | 2026-10-07 | 可用性与指标采集。不用 Grafana（AGPL，见组件选型），看板由本方门户承担。开发机留存 15 天，生产按 LD-08 的留存要求另定 | 在用 |
@@ -59,7 +60,7 @@
 - FreeTDS 驱动链（OS 源，迁移期组件）
 ---
 
-## 容器镜像的两条纪律
+## 容器镜像的三条纪律
 
 **一、按 digest 钉死，不按 tag。** tag 会被重新发布——同一个 `keycloak:26.0`
 今天和半年后可能是两个不同的镜像，而离网环境里你无从发现。digest 不会变。
@@ -73,6 +74,42 @@
 ```bash
 sudo podman images --digests --format '{{.Repository}}:{{.Tag}} {{.Digest}}'
 ```
+
+**三、跨墙传递用 skopeo + OCI 目录，不用 `podman save`。**
+2026-10-08 实测：`podman save --format oci-archive` 之后 `podman load` **直接失败**——
+
+```
+oci-archive: Digest of source image's manifest would not match destination reference
+```
+
+原因是上游 tag 是多架构 **manifest list**，本清单记的 digest 是 list 的 digest；
+而 `save` 只导出当前平台那一份 manifest，list 没了，于是归档内容算出的 digest
+与归档里记着的引用名对不上。**这不是配置问题，是这条路径本身不保 digest。**
+
+skopeo 做的是 manifest 的逐字节拷贝，`--all` 把整个 list 一起带走：
+
+```bash
+# 墙外：从仓库拷到介质上的 OCI 目录
+skopeo copy --all \
+  docker://quay.io/keycloak/keycloak@sha256:09a381c7... \
+  oci:/media/oss911/images/keycloak:26.0
+
+# 复验（离网可做，不需要仓库）：应等于本清单记的 digest
+skopeo inspect --raw oci:/media/oss911/images/keycloak:26.0 | sha256sum
+
+# 墙内：导入本机镜像库。导入时**不能**带 --all——
+# containers-storage 存不下一组镜像，必须指定一个平台
+skopeo copy --override-os linux --override-arch amd64 \
+  oci:/media/oss911/images/keycloak:26.0 \
+  containers-storage:quay.io/keycloak/keycloak:26.0
+```
+
+**为什么 `skopeo inspect --raw | sha256sum` 就是复验：** digest 的定义就是
+manifest 自身的 SHA-256。所以这一条命令不需要联网、不需要仓库、不需要信任任何
+中间环节，只看介质上那几个字节——这正是离网环境里唯一还成立的验证方式。
+
+导入之后 `podman images --digests` 显示的仍是 list 的 digest（2026-10-08 实测确认），
+与本清单一致，**不需要另记一个平台级的值**。
 
 ---
 
@@ -131,9 +168,22 @@ ansible-playbook playbooks/30-python.yml -e ansible_connection=local -K -e wheel
 ansible-playbook playbooks/30-python.yml -e ansible_connection=local -K
 ```
 
-`wheelhouse_refresh` 默认为 **false**，这是刻意的。`pip download` 虽然不会重复
-下载已存在的字节，但**仍会每次连 PyPI 重新解析依赖树**——若不加这个开关，
-剧本在真正离网的机器上会卡在取料阶段跑不起来。开发机有网，会把这个问题盖住。
+`wheelhouse_refresh` 默认为 **false**，这是刻意的。取料虽然不会重复下载已存在的
+字节，但**仍会每次连 PyPI 重新解析依赖树**——若不加这个开关，剧本在真正离网的
+机器上会卡在取料阶段跑不起来。开发机有网，会把这个问题盖住。
+
+**取料用 `pip wheel`，不是 `pip download`。** 2026-10-08 实测：`pip download`
+取下来的 190 个包里混着一个源码包 `dbt_core_experimental_parser-2.0.5.tar.gz`
+（上游没发轮子）。源码包要在装机时现场编译，等于把编译器、`-dev` 头文件和一次
+可能失败的构建带进生产网。`pip wheel` 在取料这台有网的机器上就把它构建成轮子，
+装机侧因此只会遇到轮子。剧本在取料之后有一条断言守着这件事：
+
+```bash
+find /var/cache/build/wheelhouse -name '*.tar.gz' -o -name '*.zip'   # 应为空
+```
+
+同理，`build-essential` 与 `libpq-dev` 只为**取料侧**服务。生产机若由平台基线
+交付且不含编译器，这两项可以不装——届时取料必须在另一台有网的同版本机器上完成。
 
 离网重建时，把介质上的 `wheelhouse/` 整个目录连同 `constraints-airflow-3.3.2-py312.txt`
 与 `dbt-requirements.lock` 放到 `/var/cache/build/wheelhouse/` 下，直接跑安装那一条。
