@@ -347,3 +347,32 @@ localhost,10.89.10.1|f                      ← 设置是对的，且不待重�
   验证用了一条不经过待验机制的路径，所以机制整个缺失也照样通过
 - **通用教训** —— **用于验证的身份不能是被验机制的例外。** 现在改成临时建一个
   只在库里存在、不在 userlist 中的用户去连一次，验完即删
+
+### 现象：任务失败，但输出是 `censored: ... no_log: true`
+
+```
+fatal: [dev01]: FAILED! => changed=false
+  censored: 'the output has been hidden due to the fact that ''no_log: true'' was specified'
+```
+
+- **原因** —— 剧本在该任务上加了 `no_log: true`。它挡住了口令，也挡住了错误信息
+- **这是剧本的设计问题，不是操作问题。** `no_log` 的用处是「本不该出现在日志里的东西」，
+  不是「失败时必须读到的东西」。加在**携带凭据的任务**上是对的；
+  加在**失败时需要排查的任务**上，等于把排障通道关掉
+- **正确的做法** —— 让命令本身不含凭据，再对输出做掩码：
+  ```yaml
+  - name: 初始化元数据库
+    ansible.builtin.shell:
+      cmd: |
+        set -a; . /etc/oss911/airflow.env; set +a      # 从 0600 的文件现读
+        .../airflow db migrate 2>&1 |
+          sed -E 's#(postgresql[^ ]*://[^:]+:)[^@]+@#\1***@#g'
+    failed_when: false
+  ```
+  口令不进命令行、不进 Ansible 的环境变量，于是不需要 `no_log`，
+  失败时能看到真实错误，而连接串里的口令已被掩码
+- **临时绕过** —— 急着看原因时可以手工复现那一条命令：
+  ```bash
+  sudo -u airflow bash -c 'set -a; . /etc/oss911/airflow.env; set +a; \
+    /opt/oss911/venv-airflow/bin/airflow db migrate'
+  ```

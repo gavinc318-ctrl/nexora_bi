@@ -213,16 +213,42 @@
             mode: "0600"
           no_log: true
 
+        # 口令不进命令行也不进 Ansible 的环境变量——从 0600 的环境文件里现读。
+        # 这样就不需要 no_log，失败时能看到真实错误；输出再对连接串做一次掩码。
+        #
+        # ★ 上一版在这里加了 no_log: true，结果把失败原因一起藏掉了。
+        #   no_log 挡的是「本不该出现在日志里的东西」，不是「失败时必须读到的东西」；
+        #   加在前者上是对的，加在后者上等于把排障通道关掉。
         - name: 初始化元数据库
-          ansible.builtin.command:
-            cmd: "{{ af_venv }}/bin/airflow db migrate"
+          ansible.builtin.shell:
+            cmd: |
+              set -a; . {{ oss911_etc }}/airflow.env; set +a
+              {{ af_venv }}/bin/airflow db migrate 2>&1 |
+                sed -E 's#(postgresql[^ ]*://[^:]+:)[^@]+@#\1***@#g'
+          args:
+            executable: /bin/bash
           become_user: airflow
-          environment:
-            AIRFLOW_HOME: "{{ airflow_home }}"
-            AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://{{ airflow_db }}:{{ _af_db_password }}@127.0.0.1:{{ pgb_listen_port }}/{{ airflow_db }}"
           register: _afmigrate
           changed_when: "'Running upgrade' in _afmigrate.stdout"
-          no_log: true
+          failed_when: false
+
+        - name: 断言元数据库初始化成功
+          ansible.builtin.assert:
+            that:
+              - "_afmigrate.stdout is not search('(?i)error|traceback|fatal')"
+            fail_msg: |-
+              airflow db migrate 失败（口令已掩码）：
+
+              {{ _afmigrate.stdout | default('（无输出）') }}
+
+              排查顺序：
+                一、pgBouncer 里有没有 {{ airflow_db }} 这个池：
+                    sudo grep '^{{ airflow_db }}' /etc/pgbouncer/pgbouncer.ini
+                二、该用户能否经池连上：
+                    sudo -u postgres psql -h 127.0.0.1 -p {{ pgb_listen_port }} -U {{ airflow_db }} -d {{ airflow_db }} -c 'select 1'
+                三、venv 里有没有 PostgreSQL 驱动：
+                    {{ af_venv }}/bin/python -c 'import psycopg2; print(psycopg2.__version__)'
+            success_msg: "元数据库已初始化"
 
         # ========== dbt 的 profiles ==========
         - name: 下发 dbt profiles
@@ -286,21 +312,26 @@
           failed_when: "'separated' not in _sep.stdout"
 
         - name: Airflow 能连上元数据库
-          ansible.builtin.command:
-            cmd: "{{ af_venv }}/bin/airflow db check"
+          ansible.builtin.shell:
+            cmd: |
+              set -a; . {{ oss911_etc }}/airflow.env; set +a
+              {{ af_venv }}/bin/airflow db check 2>&1 |
+                sed -E 's#(postgresql[^ ]*://[^:]+:)[^@]+@#\1***@#g'
+          args:
+            executable: /bin/bash
           become_user: airflow
-          environment:
-            AIRFLOW_HOME: "{{ airflow_home }}"
-            AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://{{ airflow_db }}:{{ _af_db_password }}@127.0.0.1:{{ pgb_listen_port }}/{{ airflow_db }}"
           register: _afcheck
           changed_when: false
           failed_when: false
-          no_log: true
 
         - name: 断言 Airflow 的元数据库可达
           ansible.builtin.assert:
             that: ["_afcheck.rc == 0"]
-            fail_msg: >-
-              airflow db check 失败。元数据库经 pgBouncer 的 {{ airflow_db }} 库（会话级池），
+            fail_msg: |-
+              airflow db check 失败（口令已掩码）：
+
+              {{ _afcheck.stdout | default('（无输出）') }}
+
+              元数据库经 pgBouncer 的 {{ airflow_db }} 库（会话级池）；
               先确认 pgbouncer.ini 里有这一条且 auth_query 可用（21-connection 有对应断言）。
             success_msg: "Airflow 元数据库可达（经 pgBouncer 会话池）"
