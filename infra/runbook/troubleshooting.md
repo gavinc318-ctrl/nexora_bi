@@ -376,3 +376,27 @@ fatal: [dev01]: FAILED! => changed=false
   sudo -u airflow bash -c 'set -a; . /etc/oss911/airflow.env; set +a; \
     /opt/oss911/venv-airflow/bin/airflow db migrate'
   ```
+
+### 现象：以服务账号执行 venv 里的二进制报 `Permission denied`
+
+```
+$ sudo -u airflow /opt/oss911/venv-airflow/bin/airflow db migrate
+bash: /opt/oss911/venv-airflow/bin/airflow: Permission denied
+```
+
+- **原因** —— 不是程序的问题，是**目录权限**。`/opt/oss911` 建成了 `0750 root:root`，
+  `airflow` 用户不在 root 组，连进不去这个目录
+- **处置** —— `venv_root` 改 `0755`。**权限按「谁要用」给，不按「越紧越好」给**：
+  venv 里没有秘密（口令都在 `/etc/oss911` 下，0600），把它锁成 0750 换不来安全，
+  只换来一个看起来像程序损坏的故障
+- **定位手法** —— `namei -l <完整路径>` 一行行列出路径上每一级的权限，
+  比逐级 `ls -ld` 快得多：
+  ```bash
+  namei -l /opt/oss911/venv-airflow/bin/airflow
+  ```
+- **为什么拖到 db migrate 才暴露** —— 之前的版本检查是以 **root** 跑的，
+  而 root 进得去任何目录。**用于验证的身份不是实际使用的身份**，
+  于是这条路径从来没被真正验过。现在改为以 `airflow` 身份验一次——
+  这和 auth_query 那次（用 userlist 里唯一的用户去验 auth_query）是同一类错误，
+  本项目已出现两次，值得当成一条检查清单：
+  **写验证时先问——我用的身份、路径、网络位置，和真正使用它的那一方一样吗？**

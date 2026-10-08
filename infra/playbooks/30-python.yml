@@ -53,21 +53,27 @@
         home: "{{ airflow_home }}"
         create_home: true
 
+    # 权限按「谁要用」给，不按「越紧越好」给。
+    #   venv_root  0755：airflow 服务账号要能进去执行里面的二进制。
+    #              venv 里没有秘密——口令都在 /etc/oss911 下，0600。
+    #              给 0750 root:root 的话 airflow 连目录都进不去，
+    #              症状是执行二进制报 Permission denied，看着像程序坏了。
+    #   wheelhouse 0750：只有 root 装包，服务账号不需要
     - name: 建立目录
       ansible.builtin.file:
         path: "{{ item.path }}"
         state: directory
         owner: "{{ item.owner }}"
         group: "{{ item.owner }}"
-        mode: "0750"
+        mode: "{{ item.mode }}"
       loop:
-        - { path: "{{ venv_root }}",            owner: root }
-        - { path: "{{ wheelhouse }}",           owner: root }
-        - { path: "{{ wheelhouse }}/airflow",   owner: root }
-        - { path: "{{ wheelhouse }}/dbt",       owner: root }
-        - { path: "{{ airflow_home }}",         owner: airflow }
-        - { path: "{{ airflow_home }}/dags",    owner: airflow }
-        - { path: "{{ airflow_home }}/logs",    owner: airflow }
+        - { path: "{{ venv_root }}",            owner: root,    mode: "0755" }
+        - { path: "{{ wheelhouse }}",           owner: root,    mode: "0750" }
+        - { path: "{{ wheelhouse }}/airflow",   owner: root,    mode: "0750" }
+        - { path: "{{ wheelhouse }}/dbt",       owner: root,    mode: "0750" }
+        - { path: "{{ airflow_home }}",         owner: airflow, mode: "0750" }
+        - { path: "{{ airflow_home }}/dags",    owner: airflow, mode: "0750" }
+        - { path: "{{ airflow_home }}/logs",    owner: airflow, mode: "0750" }
 
     - name: 配置与安装
       when: not ansible_check_mode
@@ -163,6 +169,36 @@
               --requirement {{ dbt_lock }}
           register: _inst_dbt
           changed_when: "'Successfully installed' in _inst_dbt.stdout"
+
+        # 以真正要用它的身份验一次——不是以 root。
+        # 上一版的版本检查是 root 跑的，而 root 进得去任何目录，
+        # 于是「airflow 用户能不能执行这个二进制」从来没被验过，
+        # 直到 db migrate 报 Permission denied 才显形。
+        # 与 auth_query 那次同一条教训：用于验证的身份不能是实际使用身份的例外。
+        - name: 以服务账号验证两个 venv 可执行
+          ansible.builtin.command:
+            cmd: "{{ item }}"
+          become_user: airflow
+          register: _asuser
+          changed_when: false
+          failed_when: false
+          loop:
+            - "{{ af_venv }}/bin/airflow version"
+            - "{{ dbt_venv }}/bin/dbt --version"
+
+        - name: 断言服务账号能执行两个 venv 里的程序
+          ansible.builtin.assert:
+            that:
+              - "item.rc == 0"
+            fail_msg: >-
+              airflow 用户执行「{{ item.item }}」失败：{{ item.stderr | default(item.stdout) | truncate(200) }}。
+              最常见的原因是 {{ venv_root }} 的权限不允许该用户进入目录——
+              venv 里没有秘密，应为 0755；口令在 /etc/oss911 下另行保护。
+              核对：namei -l {{ af_venv }}/bin/airflow
+            success_msg: "服务账号可执行：{{ item.item }}"
+          loop: "{{ _asuser.results }}"
+          loop_control:
+            label: "{{ item.item }}"
 
         # ========== 元数据库 ==========
         - name: 查询 Airflow 的库用户是否存在
