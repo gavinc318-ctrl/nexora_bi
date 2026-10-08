@@ -79,8 +79,31 @@
       when: not ansible_check_mode
       block:
 
-        # ========== 取料：唯一需要网络的一段 ==========
+        # ========== 取料：唯一需要网络的一段，默认不跑 ==========
+        # 为什么要有开关：pip download 即使不重传字节，也仍然要连 PyPI 重新解析依赖。
+        # 没有开关的话，这个「为离网写的」剧本在真正离网的机器上第一步就失败。
+        # 规则：wheelhouse 已就绪就跳过；空的时候自动取一次；要更新时显式
+        # -e wheelhouse_refresh=true。
+        - name: 检查 wheelhouse 是否已就绪
+          ansible.builtin.find:
+            paths:
+              - "{{ wheelhouse }}/airflow"
+              - "{{ wheelhouse }}/dbt"
+            patterns: "*.whl,*.tar.gz"
+          register: _wh
+
+        - name: 判定本次是否取料
+          ansible.builtin.set_fact:
+            _do_fetch: "{{ (wheelhouse_refresh | bool) or (_wh.matched | int) == 0 }}"
+
+        - name: 报告取料决定
+          ansible.builtin.debug:
+            msg: >-
+              wheelhouse 现有 {{ _wh.matched }} 个包；本次{{ '取料（需要网络）' if _do_fetch else '不取料，直接离线安装' }}。
+              要更新 wheelhouse：-e wheelhouse_refresh=true
+
         - name: 取 Airflow 的 constraints 文件
+          when: _do_fetch | bool
           ansible.builtin.get_url:
             url: "{{ airflow_constraints_url }}"
             dest: "{{ constraints_file }}"
@@ -94,6 +117,7 @@
           register: _constraints_stat
 
         - name: 报告 constraints 的校验和
+          when: _do_fetch | bool
           ansible.builtin.debug:
             msg: >-
               constraints-airflow-{{ airflow_version }}-py312.txt
@@ -111,12 +135,14 @@
           changed_when: "'Saved' in _dl_af.stdout"
 
         # dbt 没有官方 constraints：先解析一次，冻结成 lock，此后按 lock 取料。
+          when: _do_fetch | bool
+
         - name: 检查是否已有 dbt 的 lock
           ansible.builtin.stat:
             path: "{{ dbt_lock }}"
           register: _dbtlock
 
-        - name: 首次解析 dbt 依赖并冻结为 lock
+        - name: 首次解析 dbt 依赖并冻结为 lock（需要网络）
           ansible.builtin.shell:
             cmd: |
               set -e
@@ -126,7 +152,9 @@
               /tmp/dbt-resolve/bin/pip install --quiet {{ dbt_requirements | join(' ') }}
               /tmp/dbt-resolve/bin/pip freeze > {{ dbt_lock }}
               rm -rf /tmp/dbt-resolve
-          when: not _dbtlock.stat.exists
+          when:
+            - not _dbtlock.stat.exists
+            - _do_fetch | bool
 
         - name: 下载 dbt 的 wheel（按 lock）
           ansible.builtin.command:
@@ -137,10 +165,23 @@
           register: _dl_dbt
           changed_when: "'Saved' in _dl_dbt.stdout"
 
+        - name: 断言离线安装的前提已具备
+          ansible.builtin.assert:
+            that:
+              - "(_wh.matched | int) > 0 or (_do_fetch | bool)"
+            fail_msg: >-
+              wheelhouse（{{ wheelhouse }}）是空的，而本次没有取料，无法离线安装。
+              有网时用 -e wheelhouse_refresh=true 取一次；
+              离网时把介质上的 wheelhouse 目录与 {{ constraints_file | basename }}、
+              {{ dbt_lock | basename }} 一并放到该路径下再跑。
+            success_msg: "离线安装的前提具备：wheelhouse 中有 {{ _wh.matched }} 个包"
+
         # ========== 安装：不走网络 ==========
         # --no-index 是这一段的关键：它让 pip 完全不去问 PyPI。
         # 若 wheelhouse 里缺东西，这里会当场失败——而不是默默上网取来，
         # 把一个离网环境里必然出现的问题藏到交付之后。
+          when: _do_fetch | bool
+
         - name: 建立 Airflow 的 venv
           ansible.builtin.command:
             cmd: "{{ python_bin }} -m venv {{ af_venv }}"

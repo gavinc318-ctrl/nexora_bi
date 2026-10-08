@@ -143,6 +143,11 @@ all:
     venv_root: /opt/oss911
     airflow_home: /var/lib/airflow
     wheelhouse: /var/cache/build/wheelhouse  # 独立卷（00-base 已断言）
+    # 取料（pip download）默认不跑。它需要网络，而本剧本是为离网写的——
+    # 每次运行都去 PyPI 重新解析依赖的话，这个剧本在真正离网的机器上跑不起来。
+    # 要更新 wheelhouse 时显式打开：-e wheelhouse_refresh=true
+    # wheelhouse 为空时会自动跑一次，并在之后提示把它备份进介质。
+    wheelhouse_refresh: false
 
     airflow_version: "3.3.2"
     airflow_extras: "postgres"
