@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """HD-01 需求规格：转为逐条 Markdown，验收标准单列 —— 测试用例与实现都从这里派生。"""
 import docx, os, re
-BASE=os.path.expanduser('~/mnt/bi_datawarehouse'); OUT=os.path.join(BASE,'LLD')
+# 仓库根由脚本自身位置推出。不要写成某台机器上的绝对路径——
+# 这些脚本要在 Mac 与开发机上都能跑。
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.path.join(BASE, 'LLD')
 d=docx.Document(os.path.join(BASE,'HD-01_需求规格说明书.docx'))
 out=['---','id: HD-01','title: 需求规格说明书','layer: 参考',
      'summary: 124 条编号需求，每条含需求描述、RFP 条款、验收标准、责任组件、优先级。'

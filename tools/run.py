@@ -2,7 +2,9 @@
 import os, sys, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from conv import convert
-BASE = os.path.expanduser('~/mnt/bi_datawarehouse')
+# 仓库根由脚本自身位置推出。不要写成某台机器上的绝对路径——
+# 这些脚本要在 Mac 与开发机上都能跑。
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT  = os.path.join(BASE, 'LLD')
 os.makedirs(OUT, exist_ok=True)
 
@@ -30,7 +32,16 @@ BOOKS = [
  ('LD-10_测试方案.docx','LD-10-test-plan.md','LD-10','测试方案','横切',
   '用例从验收标准派生、十八条纪律用例、测试层级、专项测试、准入准出'),
 ]
-for src, dst, bid, title, layer, summary in BOOKS:
+# HD-00 与 HD-03 此前没有 md 镜像，而它们恰是「怎么接手」与「哪些还是假设」
+# 这两份最该先读的文件。开发机上的 Claude 读 LLD/*.md，读不到 docx。
+HANDOFF = [
+ ('HD-00_开发交接说明与文件索引.docx','REF-HD-00-handoff.md','HD-00','开发交接说明与文件索引','—',
+  '交接包结构、四处必须先知道的事、开工前必须完成的事、六条实现纪律、完整文件索引'),
+ ('HD-03_假设与信息需求登记册.docx','REF-HD-03-assumptions.md','HD-03','假设与信息需求登记册','—',
+  'AS-01 至 AS-31 的假设与状态、IR-01 至 IR-49 的信息需求与紧急度、客户已答复事项'),
+]
+
+for src, dst, bid, title, layer, summary in BOOKS + HANDOFF:
     meta = {'id': bid, 'title': title, 'layer': layer, 'summary': summary,
             'source': src, 'format': 'converted from docx, content unchanged'}
     md = convert(os.path.join(BASE, src), meta)

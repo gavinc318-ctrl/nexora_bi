@@ -35,7 +35,8 @@ def convert(path, meta, title):
     return '\n'.join(out).rstrip() + '\n'
 
 if __name__ == '__main__':
-    BASE = os.path.expanduser('~/mnt/bi_datawarehouse')
+    # 仓库根由脚本自身位置推出，见 run.py 的同一处注释
+    BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     OUT = os.path.join(BASE, 'LLD')
     JOBS = [
      ('LD-05A_报表与仪表板规格册.xlsx','LD-05A-report-specs.md','LD-05A','报表与仪表板规格册','L5',
