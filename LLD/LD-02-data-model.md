@@ -154,6 +154,8 @@ RFP 2.7.7.5 要求迁移数据保持百分之百保真，明确包括带原始�
 | raw | 与源逐字一致，附完整原始载荷（JSONB）与接入元数据：run_id、contract_version、源水位、原始时区偏移、落地时间。只追加，永不覆盖、永不修正（DD-02）。一源一表，表名 raw.<源标识>__<源表名>。 |
 | staging | 类型规范、去重、软删除与迟到处理、语义映射。一源一模型，不做跨源关联。全部转换写在 dbt 模型中，不写入契约 YAML（DD-05）。未映射取值落显式的未映射桶，不得归入"其他"（DD-06）。 |
 
+raw 表只能由结构变更建，接入程序不得在运行时自建。理由在属主：对象的属主天然拥有 DELETE 与 TRUNCATE，接入程序若自建 raw 表即成其属主，「只追加」随之退回靠约定（DD-02）。由结构变更建表、归属主角色，接入角色只被授予 SELECT 与 INSERT，只追加就由数据库授权执行。因此每一份接入契约的 target_raw 都对应一个结构变更（DD-73 · DD-74）。
+
 ## 10  mart 与 ai 的处理方式
 
 本册不穷举 mart 的聚合表。它们由 LD-03 的指标定义与 LD-05A 的报表清单决定，而报表清单尚未经工作坊冻结；现在把四十张报表对应的聚合表逐一写死，是在为一份会变的清单建表。本册只定义模式：
@@ -179,6 +181,10 @@ meta 与 audit 连同 raw 是仅有的三个不可重建的 schema。meta 中值
 
 audit.access_log 的 sensitive_fields 列记录本次返回的敏感字段名清单——记名不记值。审计表本身不得成为系统内最集中的泄露点。audit.delivery_log 保存投递交接点证据：短信与邮件网关由总包商提供、其故障不计入本方服务水平，但本方必须能证明消息确已交给网关（CN-30）。
 
+隔离区（LD-01 7.2）以登记实现，不以搬移实现：未通过校验的批次照常落入 raw——raw 是源端交来什么就记什么的原始记录，「交来过一批坏数据」本身也是要留的事实——同时在 meta.quarantine_batch 登记一行，记批次标识、运行标识、来源、失败原因、状态（待处理 · 已放行 · 已丢弃）以及处理人、处理时间与理由。staging 模型只读取未被隔离或已放行的批次。放行必须填写理由，不允许无理由放行；丢弃只改登记状态，不删 raw 中的数据。这样隔离不需要第二份数据副本，也不破坏 raw 只追加（DD-76）。
+
+运行参数的热调另记于 audit.runtime_param_change_log，与 audit.reference_data_change_log、audit.permission_change_log 并列，只增不改。它不写入 meta.run_log：后者是接入运行的记录，source_id、contract_version 与 outcome 必填且 outcome 只取四个接入结果，热调记录在结构上写不进去；放宽约束则会同时放松对接入记录本身的约束（DD-75）。
+
 ## 12  索引与检索路径
 
 记录检索（DD-34）走业务字段索引，不走主键。meta.search_criteria 中每一条启用的条件都在 ddl/05 中有对应索引。时间范围一律先做分区裁剪，索引只负责分区内的选择性。
@@ -192,7 +198,39 @@ audit.access_log 的 sensitive_fields 列记录本次返回的敏感字段名清
 
 派警单与出警单上的索引以 agency_type_sk 打头，因为行级过滤的下推条件永远带它（DD-41）。
 
-## 13  交付物
+## 13  对象属主与分层写权限
+
+七层 schema 的边界（第 1 章）若只写在文档里，就只靠约定维持。本章把它落到数据库授权上：谁拥有哪一层、谁能写哪一层，由角色决定，违反时数据库直接拒绝，而不是等到某天有人发现 raw 被改过（DD-74）。
+
+### 13.1  五个权限角色
+
+五个角色都不能登录。可登录用户按环境由剧本建立并加入相应角色——角色定义随发布制品进入生产，用户名与口令不进制品。
+
+oss911_owner：持有七个 schema，以及 raw、core、meta、audit 中的全部对象。没有任何程序以它的身份运行。
+
+oss911_ingest（接入）：对 raw 只有 SELECT 与 INSERT，没有 UPDATE、DELETE、TRUNCATE；另写 meta 中的水位、运行日志、值剖析与映射登记。raw 只追加由此执行（DD-02）。
+
+oss911_transform（dbt）：对 raw 只读；对 core 可增删改但不能 DROP；staging、mart、ai 由它在运行时建，归它所有。mart 与 ai 只从 core 构建（DD-03）。
+
+oss911_query_svc（服务层查询路径）：读 core、mart、ai 与 meta；对 audit 只有 INSERT，用于每次查询的访问与投递留痕（DD-17）。它不是纯只读角色，这一点容易被误设。
+
+oss911_admin_svc（服务层管理路径）：继承 query_svc，另写权限矩阵与参照配置表及其变更留痕，可查 audit（M-07）。与查询路径分开，是为了让调用量最大、暴露面最大的查询路径即使被打穿，也改不了字段可见性矩阵（LD-06 2.1）。
+
+### 13.2  按层分属主
+
+raw、core、meta、audit 由结构变更建，归 oss911_owner；staging、mart、ai 由 dbt 运行时建，归 oss911_transform。ALTER DEFAULT PRIVILEGES 只管授权、不管属主——它保证新对象自动授权给其他角色，但属主仍是建表的那个角色。
+
+由此产生三条写代码时必须守的约束：一、dbt 的 profile 必须设 role: oss911_transform，否则新表的属主是 dbt 的登录用户，默认权限不生效，服务层读不到 mart。二、core 模型只能以增量方式写入既有表——core 表由结构变更定义且为分区表，dbt 不是属主，不能 DROP，--full-refresh 会失败，这是期望的行为。三、raw 表必须由结构变更建，接入程序不得自建（第 9 章）。
+
+### 13.3  分区函数
+
+CREATE TABLE … PARTITION OF 要求调用者是父表的属主，而编排每日调用 meta.ensure_daily_partitions 时并不是。该函数因此改为 SECURITY DEFINER，以属主身份执行，search_path 钉死，并收窄到 core 与 audit 的分区表；EXECUTE 只授 oss911_transform，core 与 meta 的函数一律收回 PUBLIC 的 EXECUTE。
+
+### 13.4  写权限只授有依据的
+
+依据不明的写权限本次一律不授。代码写到时报错，届时以新增结构变更补授，并在提交说明里写明依据——宁可多一次报错，也不预先放出一条没人说得清为什么存在的写权限。当前未授的有：meta.clarification_queue、meta.reference_value 的新码入表、meta.field_availability 与 meta.metric_availability、audit.sla_probe 与 audit.sla_daily（探测执行者待 IR-21）。
+
+## 14  交付物
 
 | 交付物 | 产生方式 |
 | --- | --- |
@@ -201,7 +239,7 @@ audit.access_log 的 sensitive_fields 列记录本次返回的敏感字段名清
 | 非加密完整库副本（RFP 1.6.2.32） | 标准 PostgreSQL 环境可导入。本方为开源自研，不存在 OEM 对库结构的限制，属优势项 |
 | 逻辑与物理模型及查看编辑工具（REQ-DOC-06） | 工具的许可须满足 REQ-LIC-01（永久、非订阅、非按席位） |
 
-## 14  待确认项
+## 15  待确认项
 
 | 编号 | 事项 | 影响 |
 | --- | --- | --- |

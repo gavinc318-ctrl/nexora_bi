@@ -27,7 +27,7 @@ format: converted from docx, content unchanged
 
 ### 2.2  每一个写动作都留痕，格式统一
 
-留痕只增不改。参照数据的维护写 audit.reference_data_change_log（LD-01 9.3），权限相关的写 audit.permission_change_log，运行参数的热调写 meta.run_log 的关联记录。三张表结构不同但字段语义一致，查询时可以合并成一条时间线。
+留痕只增不改。参照数据的维护写 audit.reference_data_change_log（LD-01 9.3），权限相关的写 audit.permission_change_log，运行参数的热调写 audit.runtime_param_change_log（DD-75；不写 meta.run_log——后者是接入运行的记录，热调记录在结构上写不进去）。三张表结构不同但字段语义一致，查询时可以合并成一条时间线。
 
 ### 2.3  危险动作需要显式确认与原因
 
