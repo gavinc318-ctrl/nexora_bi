@@ -1,0 +1,280 @@
+# 40-schema —— 数据库结构：结构变更、库登录用户、初始分区
+#
+# 依据：DD-73（结构变更机制，LD-08 7.5）· DD-74（库角色，LD-02 第 13 章）
+# 前置：20-database（库）· 21-connection（pgBouncer，最后的登录验证要走它）·
+#       30-python（airflow 账号，环境文件的属主）
+#
+# ★ 用词：「结构变更」，不叫「迁移」——本项目中迁移专指归档数据迁入（DD-73）。
+#
+# ★ 幂等性来自「这个变更执行过没有」，不来自「对象存不存在」。
+#   执行器读 ddl/changes.yml，与库中 meta.ddl_change 的登记行逐个比对：
+#     已登记且校验和相同 → 跳过
+#     已登记但校验和变了 → 失败。已执行的变更不得修改，要改只能新增变更
+#     未登记            → 按编号顺序执行，每个变更连同登记行在同一事务里
+#   CREATE TABLE IF NOT EXISTS 的做法在这里是错的：表已存在但定义变了时它静默
+#   跳过，第二遍 changed=0，而库里还是旧结构。
+#
+# ★ 执行器就是本剧本加 psql，不另写工具、不引入 Flyway 一类：多一个工具就多一份
+#   要送进离网环境、要维护八年的依赖（DD-70 · LD-08 7.5）。
+
+- name: 数据库结构
+  hosts: all
+  become: true
+
+  vars:
+    oss911_etc: /etc/oss911
+    repo_ddl: "{{ playbook_dir }}/../../ddl"
+    repo_test: "{{ playbook_dir }}/../../test"
+    # 清单在控制节点上读（开发机上控制节点即本机）
+    ddl_changes: "{{ lookup('ansible.builtin.file', repo_ddl ~ '/changes.yml') | from_yaml }}"
+
+  tasks:
+
+    # ================= 一、前置检查 =================
+
+    - name: 查询业务库是否存在
+      ansible.builtin.command:
+        cmd: psql -X -tA -c "SELECT count(*) FROM pg_database WHERE datname = '{{ pg_database }}'"
+      become_user: postgres
+      register: _db
+      changed_when: false
+      check_mode: false
+
+    - name: 断言业务库存在
+      ansible.builtin.assert:
+        that:
+          - _db.stdout | trim == '1'
+        fail_msg: "库 {{ pg_database }} 不存在。先跑 20-database.yml"
+        success_msg: "库 {{ pg_database }} 存在"
+
+    # 清单本身的规矩用断言守，不靠评审时肉眼看
+    - name: 断言变更清单的编号连续、run_as 合规
+      ansible.builtin.assert:
+        that:
+          - (ddl_changes | map(attribute='id') | list) == (ddl_changes | map(attribute='id') | sort | unique | list)
+          - (ddl_changes | map(attribute='id') | map('int') | list) == range(ddl_changes | length) | list
+          - ddl_changes | selectattr('id', '>=', '0003') | rejectattr('run_as', 'equalto', 'owner') | list | length == 0
+          - ddl_changes | rejectattr('run_as', 'in', ['superuser', 'owner']) | list | length == 0
+        fail_msg: >-
+          ddl/changes.yml 不合规。要求：编号从 0000 起连续、按顺序、不重复；
+          run_as 只能是 superuser 或 owner，且 0003 起一律 owner（新对象须归属主，DD-74）。
+          当前编号：{{ ddl_changes | map(attribute='id') | join(' ') }}
+        success_msg: "变更清单合规：{{ ddl_changes | length }} 个变更，{{ ddl_changes | map(attribute='id') | first }} 至 {{ ddl_changes | map(attribute='id') | last }}"
+
+    # ================= 二、装入 DDL 文件 =================
+    # 从仓库复制到 ddl_dir，由 postgres 从这里读。
+    # 仓库里删掉的文件不会从这里消失（增量目录会沉积历史，CLAUDE.md 第 5 节第四条）。
+    # 这在此处无害：执行器只按 changes.yml 列出的文件执行，且已执行变更的文件
+    # 按规矩不删不改。但不要据此推断「ddl_dir 里有的就是在用的」。
+
+    - name: 建立 DDL 目录
+      ansible.builtin.file:
+        path: "{{ ddl_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: 复制 DDL 文件
+      ansible.builtin.copy:
+        src: "{{ repo_ddl }}/"
+        dest: "{{ ddl_dir }}/"
+        owner: root
+        group: root
+        mode: "0644"
+        directory_mode: "0755"
+
+    # ================= 三、结构变更 =================
+
+    # 校验和按 changes.yml 头部的定义：按 files 顺序拼接各文件字节后的 SHA-256。
+    # 在目标机上对将要执行的那份文件算，不在仓库里算。
+    - name: 计算每个变更的文件校验和
+      ansible.builtin.shell:
+        cmd: cat {{ item.files | join(' ') }} | sha256sum | cut -d' ' -f1
+        chdir: "{{ ddl_dir }}"
+      loop: "{{ ddl_changes }}"
+      loop_control:
+        label: "{{ item.id }}"
+      register: _sha
+      changed_when: false
+      check_mode: false
+
+    # 登记表不存在 = 空库，一个变更都没执行过
+    - name: 查询库中已登记的变更
+      ansible.builtin.command:
+        cmd: >-
+          psql -X -tA -d {{ pg_database }} -c
+          "SELECT change_id || ' ' || content_sha256 FROM meta.ddl_change ORDER BY change_id"
+      become_user: postgres
+      register: _applied_q
+      changed_when: false
+      failed_when:
+        - _applied_q.rc != 0
+        - "'relation \"meta.ddl_change\" does not exist' not in _applied_q.stderr"
+      check_mode: false
+
+    - name: 整理比对所需的数据
+      ansible.builtin.set_fact:
+        _repo_sha: "{{ dict(_sha.results | map(attribute='item.id') | zip(_sha.results | map(attribute='stdout'))) }}"
+        _applied: "{{ dict(_applied_q.stdout_lines | map('split', ' ')) if _applied_q.rc == 0 else {} }}"
+
+    - name: 断言已执行的变更都还在清单里
+      ansible.builtin.assert:
+        that:
+          - _applied.keys() | difference(_repo_sha.keys()) | length == 0
+        fail_msg: >-
+          库中登记了清单里没有的变更：{{ _applied.keys() | difference(_repo_sha.keys()) | join(' ') }}。
+          已执行的变更不得从 ddl/changes.yml 中删除——回退以新增反向变更实现（LD-08 7.5）。
+        success_msg: "库中已登记 {{ _applied | length }} 个变更，均在清单中"
+
+    # ★ 本机制的要害：已执行变更的文件被改过，必须在这里停下
+    - name: 断言已执行变更的文件未被改动
+      ansible.builtin.assert:
+        that:
+          - _repo_sha[item.key] == item.value
+        fail_msg: |-
+          变更 {{ item.key }} 已在库中执行，但它的文件被改过：
+            库中登记的校验和：{{ item.value }}
+            现在文件的校验和：{{ _repo_sha[item.key] }}
+          已执行的变更不得修改。把文件恢复原样（git log -p ddl/ 查是哪次提交改的），
+          要改的内容写成一个新的变更追加到 ddl/changes.yml 末尾。
+        success_msg: "变更 {{ item.key }}：已执行，文件未改动"
+      loop: "{{ _applied | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: 找出待执行的变更
+      ansible.builtin.set_fact:
+        _pending: "{{ ddl_changes | rejectattr('id', 'in', _applied.keys() | list) | list }}"
+
+    # 只许在末尾追加：若库里已执行到 0005，清单里却冒出一个未执行的 0004，
+    # 按编号执行就会在 0005 之后补跑 0004，与其他环境的执行顺序不同
+    - name: 断言待执行的变更都排在已执行的之后
+      ansible.builtin.assert:
+        that:
+          - _applied | length == 0 or _pending | length == 0 or
+            (_pending | map(attribute='id') | min) > (_applied.keys() | max)
+        fail_msg: >-
+          待执行的变更 {{ _pending | map(attribute='id') | join(' ') }} 中有编号小于已执行的
+          {{ _applied.keys() | max if _applied else '' }}。新变更只能追加在清单末尾。
+        success_msg: "待执行：{{ _pending | map(attribute='id') | join(' ') if _pending else '无' }}"
+
+    # 逐个执行，第一个失败即停（set -e）——不能用 loop：loop 中一项失败后
+    # Ansible 仍会继续跑后面的项，0003 失败了 0004 照样会被执行。
+    # 每个变更：[SET LOCAL ROLE] + 各文件 + 登记行，经 psql -1 放进一个事务，
+    # 中途出错整体回滚，不留半套结构、也不留登记行。
+    # PGOPTIONS 让服务端不发 NOTICE（01 中 IF NOT EXISTS 的「已存在，跳过」），
+    # 只留警告与错误——不用 grep 在客户端过滤：管道末尾的过滤会把 psql 的失败一起吞掉。
+    - name: 执行待执行的结构变更
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          export PGOPTIONS='-c client_min_messages=warning'
+          {% for c in _pending %}
+          echo "==> 结构变更 {{ c.id }}（run_as={{ c.run_as }}）：{{ c.summary }}"
+          {
+          {% if c.run_as == 'owner' %}
+            echo "SET LOCAL ROLE oss911_owner;"
+          {% endif %}
+            cat {{ c.files | join(' ') }}
+            echo
+            echo "INSERT INTO meta.ddl_change (change_id, files, content_sha256, summary) VALUES ('{{ c.id }}', '{{ '{' ~ (c.files | join(',')) ~ '}' }}', '{{ _repo_sha[c.id] }}', \$chg\${{ c.summary }}\$chg\$);"
+          } | psql -X -q -1 -v ON_ERROR_STOP=1 -d {{ pg_database }} -f -
+          echo "    完成"
+          {% endfor %}
+        chdir: "{{ ddl_dir }}"
+      args:
+        executable: /bin/bash
+      become_user: postgres
+      register: _exec
+      when: _pending | length > 0
+
+    - name: 显示执行输出
+      ansible.builtin.debug:
+        msg: "{{ _exec.stdout_lines }}"
+      when: _exec is not skipped
+
+    - name: 复查登记表与清单完全一致
+      ansible.builtin.command:
+        cmd: >-
+          psql -X -tA -d {{ pg_database }} -c
+          "SELECT change_id || ' ' || content_sha256 FROM meta.ddl_change ORDER BY change_id"
+      become_user: postgres
+      register: _after
+      changed_when: false
+      check_mode: false
+
+    - name: 断言全部变更已执行且校验和一致
+      ansible.builtin.assert:
+        that:
+          - dict(_after.stdout_lines | map('split', ' ')) == _repo_sha
+        fail_msg: |-
+          执行后登记表与清单不一致。
+            登记表：{{ _after.stdout_lines | join(' / ') }}
+            清单：  {{ _repo_sha | dict2items | map(attribute='key') | join(' ') }}
+        success_msg: "结构变更 {{ _repo_sha.keys() | first }} 至 {{ _repo_sha.keys() | last }} 均已执行，校验和一致"
+
+    # ================= 四、库登录用户 =================
+
+    - name: 建立库登录用户
+      ansible.builtin.include_tasks: tasks/db_login.yml
+      loop: "{{ db_logins }}"
+      loop_control:
+        loop_var: login
+        label: "{{ login.name }} → {{ login.role }}"
+
+    # ================= 五、初始分区 =================
+    # 以编排的真实身份（dbt 用户，经 pgBouncer）调分区函数，
+    # 顺带验证 0002 的 SECURITY DEFINER 在真实身份下确实可用。
+    - name: 建立初始分区窗口
+      ansible.builtin.shell:
+        cmd: |
+          set -a; . {{ oss911_etc }}/dbt.env; set +a
+          PGPASSWORD="$DBT_PASSWORD" psql -X -tA -v ON_ERROR_STOP=1 \
+            -h 127.0.0.1 -p {{ pgb_listen_port }} -U "$DBT_USER" -d {{ pg_database }}_etl -c "
+            SELECT coalesce(sum(meta.ensure_daily_partitions(
+                       n.nspname || '.' || c.relname,
+                       current_date - {{ partition_days_back }},
+                       current_date + {{ partition_days_ahead }})), 0)
+            FROM pg_partitioned_table pt
+            JOIN pg_class c     ON c.oid = pt.partrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname IN ('core', 'audit')"
+      args:
+        executable: /bin/bash
+      become_user: airflow
+      register: _parts
+      changed_when: _parts.stdout | trim | int > 0
+
+    - name: 显示新建分区数
+      ansible.builtin.debug:
+        msg: >-
+          本次新建分区 {{ _parts.stdout | trim }} 个
+          （窗口：今天 -{{ partition_days_back }} 至 +{{ partition_days_ahead }} 天）。
+          编排就位之前，窗口在 {{ partition_days_ahead }} 天后用完，届时重跑本剧本前推。
+
+    # ================= 六、权限验证 =================
+    # 66 项检查，整体在一个事务里，结尾回滚，不留痕。脚本自建临时登录用户、
+    # 以其身份逐项验证五个权限角色。脚本经标准输入喂给 psql——postgres 读不到
+    # /home 下的仓库（troubleshooting 第 23 条）。
+    - name: 运行库角色与授权验证（test/db_roles_check.sql）
+      ansible.builtin.command:
+        cmd: psql -X -v ON_ERROR_STOP=1 -d {{ pg_database }}
+        stdin: "{{ lookup('ansible.builtin.file', repo_test ~ '/db_roles_check.sql', rstrip=False) }}"
+      become_user: postgres
+      register: _rolecheck
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: 断言库角色与授权验证全部通过
+      ansible.builtin.assert:
+        that:
+          - _rolecheck.rc == 0
+        fail_msg: |-
+          验证未通过（退出码 {{ _rolecheck.rc }}）。最后几行：
+          {{ (_rolecheck.stdout_lines + _rolecheck.stderr_lines) | select('search', 'FAIL|ERROR') | list | join('\n') }}
+
+          FAIL 行写明了以哪个身份、执行哪条语句、期望允许还是拒绝。
+          完整输出：sudo -u postgres psql -d {{ pg_database }} < ~/src/nexora_bi/test/db_roles_check.sql
+        success_msg: "库角色与授权验证：{{ _rolecheck.stderr_lines | select('search', 'PASS') | list | length }} 项全部通过（已回滚）"

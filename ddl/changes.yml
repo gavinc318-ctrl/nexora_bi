@@ -39,3 +39,9 @@
   summary: 五个权限角色、属主归一、授权与默认权限、分区函数改为 SECURITY DEFINER
   files:
     - changes/0002_roles_and_grants.sql
+
+- id: "0003"
+  run_as: owner
+  summary: 隔离登记表 meta.quarantine_batch（DD-76）与热调留痕表 audit.runtime_param_change_log（DD-75）
+  files:
+    - changes/0003_quarantine_and_param_log.sql

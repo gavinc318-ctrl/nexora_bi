@@ -16,6 +16,10 @@ oss911:
       user: "{{ '{{ env_var(\'DBT_USER\') }}' }}"
       password: "{{ '{{ env_var(\'DBT_PASSWORD\') }}' }}"
       dbname: {{ pg_database }}_etl
+      # 连上后 SET ROLE 到权限角色，dbt 建的表才归 oss911_transform 所有。
+      # 不设则属主是登录用户，0002 中 FOR ROLE oss911_transform 的默认权限不生效，
+      # 服务层读不到 mart（DD-74 · LD-02 13.2）。此行不得删。
+      role: oss911_transform
       schema: staging
       threads: {{ pgb_pool_size_session }}
       keepalives_idle: 0

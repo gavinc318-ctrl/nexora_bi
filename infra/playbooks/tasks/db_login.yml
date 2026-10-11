@@ -1,0 +1,129 @@
+# 由 40-schema.yml 按 db_logins 逐个引入，变量 login 为其中一项。
+#
+# 一个库登录用户的完整流程：口令 → 用户 → 环境文件 → 加入权限角色 → 以使用方身份验证。
+#
+# 口令的唯一存放处是 /etc/oss911/<env_file>（0600，属主为使用方）。四种状态：
+#   环境文件有、用户有    → 沿用；口令是否一致由最后一步的真实登录来验
+#   环境文件有、用户无    → 以文件中的口令建用户（库重建过的情形）
+#   环境文件无、用户无    → 生成口令、建用户、写文件
+#   环境文件无、用户有    → 口令已无处可查，生成新口令并 ALTER ROLE（即一次轮换）
+
+- name: "{{ login.name }}：读回已有的环境文件"
+  ansible.builtin.slurp:
+    src: "{{ oss911_etc }}/{{ login.env_file }}"
+  register: _envf
+  failed_when: false
+  no_log: true
+
+- name: "{{ login.name }}：取口令（沿用文件中的，或新生成）"
+  ansible.builtin.set_fact:
+    _pw: >-
+      {{ ((_envf.content | b64decode) | regex_search('(?m)^' ~ login.env_prefix ~ '_PASSWORD=(.+)$', '\1') | first)
+         if _envf.content is defined
+         else lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters', 'digits']) }}
+    _pw_is_new: "{{ _envf.content is not defined }}"
+  no_log: true
+
+- name: "{{ login.name }}：查询库用户的现状"
+  ansible.builtin.command:
+    cmd: >-
+      psql -X -tA -d {{ pg_database }} -c
+      "SELECT rolcanlogin::text || '|' || (rolsuper OR rolcreaterole OR rolcreatedb
+              OR rolreplication OR rolbypassrls)::text
+       FROM pg_roles WHERE rolname = '{{ login.name }}'"
+  become_user: postgres
+  register: _role
+  changed_when: false
+  check_mode: false
+
+# 同名用户若已存在却不能登录或带特权，说明它不是本剧本建的——停下来让人看，
+# 而不是把口令改掉接着用。
+- name: "{{ login.name }}：断言已有用户的属性"
+  ansible.builtin.assert:
+    that:
+      - _role.stdout | trim in ['', 'true|false']
+    fail_msg: >-
+      库用户 {{ login.name }} 已存在但属性不符（可登录|有特权 = {{ _role.stdout | trim }}），
+      应为 true|false。它可能不是本剧本建的。核对：
+      sudo -u postgres psql -c '\du {{ login.name }}'
+    success_msg: "{{ login.name }}：{{ '尚不存在，将新建' if _role.stdout | trim == '' else '已存在，属性正确' }}"
+
+# 口令走标准输入而不是命令行：命令行参数在进程表里对本机所有用户可见。
+# 这一步必须 no_log（口令就在 SQL 里）。失败时 Ansible 只会说「失败」——
+# 上一步已把可能的原因（同名用户属性不符）提前断言掉了。
+- name: "{{ login.name }}：建立库用户，或为它设新口令"
+  ansible.builtin.command:
+    cmd: psql -X -q -v ON_ERROR_STOP=1 -d {{ pg_database }}
+    stdin: >-
+      {{ 'CREATE ROLE ' ~ login.name ~ ' LOGIN' if _role.stdout | trim == '' else 'ALTER ROLE ' ~ login.name }}
+      PASSWORD '{{ _pw }}';
+  become_user: postgres
+  when: _role.stdout | trim == '' or (_pw_is_new | bool)
+  no_log: true
+
+- name: "{{ login.name }}：写环境文件"
+  ansible.builtin.copy:
+    dest: "{{ oss911_etc }}/{{ login.env_file }}"
+    owner: "{{ login.file_owner }}"
+    group: "{{ login.file_owner }}"
+    mode: "0600"
+    content: |
+      # 由 infra/playbooks/40-schema.yml 管理，勿手改
+      # 库登录用户 {{ login.name }}，权限全部来自权限角色 {{ login.role }}
+      {{ login.env_prefix }}_USER={{ login.name }}
+      {{ login.env_prefix }}_PASSWORD={{ _pw }}
+  no_log: true
+
+- name: "{{ login.name }}：查询是否已在权限角色 {{ login.role }} 中"
+  ansible.builtin.command:
+    cmd: >-
+      psql -X -tA -d {{ pg_database }} -c
+      "SELECT count(*) FROM pg_auth_members
+       WHERE roleid = '{{ login.role }}'::regrole AND member = '{{ login.name }}'::regrole"
+  become_user: postgres
+  register: _member
+  changed_when: false
+  check_mode: false
+
+- name: "{{ login.name }}：加入权限角色 {{ login.role }}"
+  ansible.builtin.command:
+    cmd: psql -X -q -v ON_ERROR_STOP=1 -d {{ pg_database }} -c "GRANT {{ login.role }} TO {{ login.name }}"
+  become_user: postgres
+  when: _member.stdout | trim == '0'
+
+# 以真正的使用方（airflow 账号）读它自己的环境文件、经 pgBouncer 登录。
+# 不用 postgres 代验：postgres 走本地 socket 的 peer 认证，验不到口令，
+# 也验不到 auth_query（CLAUDE.md 第 5 节第二条）。
+# 结果三列：当前用户 | 是否继承到权限角色的权限 | 能否 SET ROLE 到它（dbt 的 role: 要用）
+- name: "{{ login.name }}：以使用方身份经 pgBouncer 登录验证"
+  ansible.builtin.shell:
+    cmd: |
+      set -a; . {{ oss911_etc }}/{{ login.env_file }}; set +a
+      PGPASSWORD="${{ login.env_prefix }}_PASSWORD" psql -X -tA \
+        -h 127.0.0.1 -p {{ pgb_listen_port }} -U "${{ login.env_prefix }}_USER" -d {{ pg_database }}_etl \
+        -c "SELECT current_user || '|' || pg_has_role(current_user, '{{ login.role }}', 'USAGE')
+                                || '|' || pg_has_role(current_user, '{{ login.role }}', 'SET')" 2>&1
+  args:
+    executable: /bin/bash
+  become_user: "{{ login.file_owner }}"
+  register: _login_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: "{{ login.name }}：断言登录与权限角色均生效"
+  ansible.builtin.assert:
+    that:
+      - _login_check.stdout | trim == login.name ~ '|t|t'
+    fail_msg: |-
+      {{ login.file_owner }} 以 {{ login.name }} 经 pgBouncer 登录的结果不对：
+        期望：{{ login.name }}|t|t
+        实际：{{ _login_check.stdout | trim }}
+
+      排查顺序：
+        一、口令不符（password authentication failed）：环境文件与库中口令不一致。
+            删掉 {{ oss911_etc }}/{{ login.env_file }} 后重跑本剧本，即生成新口令并轮换
+        二、pgBouncer 认证失败：auth_query 是否可用（runbook/05）
+        三、第二、三列为 f：未加入 {{ login.role }}，或加入时被设了 INHERIT FALSE / SET FALSE
+            sudo -u postgres psql -d {{ pg_database }} -c '\drg {{ login.name }}'
+    success_msg: "{{ login.name }}：经 pgBouncer 登录成功，继承 {{ login.role }}，可 SET ROLE"

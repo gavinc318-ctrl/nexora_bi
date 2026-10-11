@@ -166,6 +166,24 @@ all:
     airflow_db: airflow
     pgb_pool_size_airflow: 10
 
+    # ---- 数据库结构（第 8 步）----
+    # 结构变更的文件从仓库装到这里再执行：postgres 读不到 /home 下的仓库
+    # （troubleshooting 第 23 条），生产上则是发布制品解包的位置。
+    ddl_dir: /opt/oss911/ddl
+    # 可登录的库用户。权限全部来自所加入的权限角色（DD-74 · LD-02 第 13 章），
+    # 用户本身不直接持有任何授权——换人、轮换口令都不动授权。
+    # 本步只建已有使用方的两个：接入与 dbt 都由 Airflow 调起（属主 airflow）。
+    # 服务层的 query_svc / admin_svc 两个用户随服务层一起建——现在建了没有程序用，
+    # 只会多两份没人轮换的口令。
+    #   env_prefix 决定环境文件里的变量名：DBT_USER / DBT_PASSWORD 是 dbt profile 读的名字
+    db_logins:
+      - { name: ingest, role: oss911_ingest,    env_file: ingest.env, env_prefix: INGEST_DB, file_owner: airflow }
+      - { name: dbt,    role: oss911_transform, env_file: dbt.env,    env_prefix: DBT,       file_owner: airflow }
+    # 初始分区窗口。此后每日由编排调 meta.ensure_daily_partitions 前推——
+    # 编排就位之前，窗口在 partition_days_ahead 天后用完，届时重跑本剧本即可前推。
+    partition_days_back: 7
+    partition_days_ahead: 30
+
     # ---- 容器化组件（第 6 步）----
     # 镜像一律按 digest 钉死，不按 tag。tag 会被重新发布，digest 不会——
     # 离网重建时 digest 是「这是同一个镜像」的唯一依据。

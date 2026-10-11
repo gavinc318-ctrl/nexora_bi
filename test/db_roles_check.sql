@@ -1,16 +1,17 @@
 -- =====================================================================
--- 库角色与授权的验证（结构变更 0002）
+-- 库角色与授权的验证（结构变更 0002 · 0003 · DD-74 · DD-75 · DD-76）
 --
--- 以【每个真实登录用户】的身份去验它自己，不用超级用户的身份代验
--- （CLAUDE.md 第 5 节第二条）。做法是超级用户会话里 SET ROLE 到被测登录用户：
--- 权限判定看 current_user，与该用户直连时一致；好处是全程一个事务，结尾回滚，
--- 在真集群上跑也不留任何痕迹。
--- 验不到的：登录用户能否经 pgBouncer 认证——那是 21-connection 的事。
+-- 验的是五个权限角色本身：脚本在事务里为四个角色各建一个临时登录用户，
+-- 超级用户会话 SET ROLE 到这个登录用户，再逐项执行「应允许 / 应拒绝 / 应报错」
+-- 的语句。权限判定看 current_user，与该用户直连时一致，而不是以超级用户代验
+-- （CLAUDE.md 第 5 节第二条）。全程一个事务，结尾回滚——临时用户、夹具表、
+-- 新分区、写入的行一并消失，在真集群上跑也不留痕。
 --
--- 用法（四个变量为各环境的登录用户名）：
---   sudo -u postgres psql -d oss911 -X -v ON_ERROR_STOP=1 \
---     -v ingest_user=... -v transform_user=... -v query_user=... -v admin_user=... \
---     < test/db_roles_check.sql
+-- 验不到的：真实登录用户的口令、经 pgBouncer 的认证、是否真的加入了权限角色。
+-- 那三件由 40-schema.yml 以使用方身份经 pgBouncer 登录来验。
+--
+-- 用法（40-schema.yml 末尾会自动跑；手工跑时）：
+--   sudo -u postgres psql -d oss911 -X < ~/src/nexora_bi/test/db_roles_check.sql
 -- 用重定向而非 -f：postgres 读不到 /home 下的文件，重定向由调用者的 shell 完成
 -- （troubleshooting 第 23 条）。
 --
@@ -55,31 +56,15 @@ BEGIN
     RAISE EXCEPTION 'FAIL 应报错却成功 [%] %', current_user, p_sql;
 END $$;
 
--- ---------- 成员关系：登录用户确实在相应的权限角色里 ----------
--- psql 变量不会在 $$ 内展开，先经会话设置传进去
-SELECT set_config('roles_check.ingest',    :'ingest_user',    true),
-       set_config('roles_check.transform', :'transform_user', true),
-       set_config('roles_check.query',     :'query_user',     true),
-       set_config('roles_check.admin',     :'admin_user',     true) \gset
-DO $$
-DECLARE
-    pairs text[][] := ARRAY[[current_setting('roles_check.ingest'),    'oss911_ingest'],
-                            [current_setting('roles_check.transform'), 'oss911_transform'],
-                            [current_setting('roles_check.query'),     'oss911_query_svc'],
-                            [current_setting('roles_check.admin'),     'oss911_admin_svc']];
-    i int;
-BEGIN
-    FOR i IN 1 .. array_length(pairs, 1) LOOP
-        IF NOT pg_has_role(pairs[i][1], pairs[i][2], 'USAGE') THEN
-            RAISE EXCEPTION 'FAIL % 不是 % 的成员（或未继承其权限）', pairs[i][1], pairs[i][2];
-        END IF;
-    END LOOP;
-    -- dbt 以 role: oss911_transform 运行，须能 SET ROLE 过去
-    IF NOT pg_has_role(current_setting('roles_check.transform'), 'oss911_transform', 'SET') THEN
-        RAISE EXCEPTION 'FAIL % 不能 SET ROLE oss911_transform', current_setting('roles_check.transform');
-    END IF;
-    RAISE NOTICE 'PASS 成员关系';
-END $$;
+-- ---------- 临时登录用户：每个权限角色一个，随事务回滚消失 ----------
+\set ingest_user    zz_chk_ingest
+\set transform_user zz_chk_transform
+\set query_user     zz_chk_query
+\set admin_user     zz_chk_admin
+CREATE ROLE :"ingest_user"    LOGIN IN ROLE oss911_ingest;
+CREATE ROLE :"transform_user" LOGIN IN ROLE oss911_transform;
+CREATE ROLE :"query_user"     LOGIN IN ROLE oss911_query_svc;
+CREATE ROLE :"admin_user"     LOGIN IN ROLE oss911_admin_svc;
 
 -- ---------- 夹具：以属主身份建一张 raw 表，走默认权限 ----------
 SET ROLE oss911_owner;
@@ -117,6 +102,17 @@ SELECT pg_temp.expect_denied($$SELECT meta.ensure_daily_partitions('core.fact_ca
 SELECT pg_temp.expect_ok    ($$UPDATE meta.watermark_state SET updated_at = now() WHERE false$$);
 SELECT pg_temp.expect_denied($$DELETE FROM meta.run_log WHERE false$$);
 SELECT pg_temp.expect_denied($$UPDATE meta.field_visibility SET is_visible = true WHERE false$$);
+-- 隔离登记（DD-76）：接入只登记，不能处理
+SELECT pg_temp.expect_ok    ($$INSERT INTO meta.run_log (run_id, source_id, contract_version, started_at, outcome)
+                               VALUES ('00000000-0000-0000-0000-0000000000c1', 'zz_check', 1, now(), 'quarantined')$$);
+SELECT pg_temp.expect_ok    ($$INSERT INTO meta.quarantine_batch (run_id, batch_seq, failure_reason)
+                               VALUES ('00000000-0000-0000-0000-0000000000c1', 1, 'zz')$$);
+SELECT pg_temp.expect_ok    ($$INSERT INTO meta.quarantine_batch (run_id, batch_seq, failure_reason)
+                               VALUES ('00000000-0000-0000-0000-0000000000c1', 2, 'zz')$$);
+SELECT pg_temp.expect_denied($$UPDATE meta.quarantine_batch SET state = 'discarded' WHERE false$$);
+SELECT pg_temp.expect_denied($$DELETE FROM meta.quarantine_batch WHERE false$$);
+SELECT pg_temp.expect_denied($$INSERT INTO audit.runtime_param_change_log (source_id, param_name, changed_by, reason)
+                               VALUES ('x', 'x', 'x', 'x')$$);
 RESET ROLE;
 
 -- ---------- dbt：raw 只读；core 增删改不可删表；自建 staging · mart ----------
@@ -169,6 +165,23 @@ SELECT pg_temp.expect_denied($$UPDATE audit.access_log SET row_count = 0$$);
 SELECT pg_temp.expect_denied($$DELETE FROM meta.sql_grant WHERE false$$); -- 撤销走 is_revoked
 SELECT pg_temp.expect_denied($$DELETE FROM meta.field_visibility WHERE false$$);
 SELECT pg_temp.expect_denied($$UPDATE meta.watermark_state SET updated_at = now() WHERE false$$);
+-- 隔离处理（DD-76）：只能改处理四列；必须有理由；结论只能写一次
+SELECT pg_temp.expect_error ($$UPDATE meta.quarantine_batch SET state = 'released', handled_by = 'x', handled_at = now()
+                               WHERE batch_seq = 1$$, '%ck_quarantine_handled%');
+SELECT pg_temp.expect_ok    ($$UPDATE meta.quarantine_batch SET state = 'released', handled_by = 'x', handled_at = now(),
+                               handling_reason = '源端已确认' WHERE batch_seq = 1$$);
+SELECT pg_temp.expect_error ($$UPDATE meta.quarantine_batch SET state = 'discarded', handled_by = 'x', handled_at = now(),
+                               handling_reason = '改主意' WHERE batch_seq = 1$$, '%处理结论不可改%');
+SELECT pg_temp.expect_denied($$UPDATE meta.quarantine_batch SET failure_reason = 'x' WHERE batch_seq = 2$$);
+SELECT pg_temp.expect_denied($$DELETE FROM meta.quarantine_batch WHERE batch_seq = 2$$);
+-- 热调留痕（DD-75）：只增不改，理由必填
+SELECT pg_temp.expect_ok    ($$INSERT INTO audit.runtime_param_change_log (source_id, param_name, old_value, new_value, changed_by, reason)
+                               VALUES ('x', 'interval_minutes', '5', '10', 'x', '源端限流')$$);
+SELECT pg_temp.expect_error ($$INSERT INTO audit.runtime_param_change_log (source_id, param_name, changed_by, reason)
+                               VALUES ('x', 'x', 'x', '  ')$$, '%runtime_param_change_log_reason_check%');
+SELECT pg_temp.expect_ok    ($$SELECT * FROM audit.runtime_param_change_log$$);
+SELECT pg_temp.expect_denied($$UPDATE audit.runtime_param_change_log SET reason = 'x'$$);
+SELECT pg_temp.expect_denied($$DELETE FROM audit.runtime_param_change_log$$);
 RESET ROLE;
 
 -- ---------- 属主与 PUBLIC ----------

@@ -88,6 +88,8 @@ systemctl status airflow-api-server airflow-scheduler airflow-dag-processor airf
   --no-pager | grep -E 'Active:|●'
 
 # dbt 能连上数仓（走会话级池）
+# 第 8 步之后 dbt 的库用户与口令在 /etc/oss911/dbt.env，核验命令见 08-schema.md 人工核验第 6 条。
+# 第 8 步之前库里还没有 dbt 用户，这条只能临时手填：
 sudo -u airflow env DBT_USER=<业务用户> DBT_PASSWORD=<口令> \
   /opt/oss911/venv-dbt/bin/dbt debug --profiles-dir /var/lib/airflow
 
