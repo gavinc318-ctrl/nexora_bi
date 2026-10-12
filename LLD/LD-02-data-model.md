@@ -198,6 +198,36 @@ audit.access_log 的 sensitive_fields 列记录本次返回的敏感字段名清
 
 派警单与出警单上的索引以 agency_type_sk 打头，因为行级过滤的下推条件永远带它（DD-41）。
 
+### 12.1  时间列索引：按写入模式选 BRIN 或 B-tree
+
+分区按月（DD-77），月内按时间定位靠分区内的索引。选 BRIN 还是 B-tree，只看一个条件：行写进去之后还会不会被改写（DD-78）。BRIN 记的是每一段物理页中时间列的最小值与最大值，前提是物理顺序与时间顺序一致。一行只要被 UPDATE，新版本就落到别处——表尾，或 VACUUM 腾出的旧页空洞——几个落错位置的行就能把一整段的最小到最大值撑宽，此后查询任何一天都要扫它，且这种退化只会随时间累积。因此：只追加、按时间顺序写入的表用 BRIN，一个月的分区只需几十 KB；写入后会被改写的表（状态推进、结案回填、源端原地更新后重取）用 B-tree。
+
+| 表 | 写入模式 | 时间索引 |
+| --- | --- | --- |
+| audit.access_log | 只插不改，occurred_at 取写入时刻 | BRIN (occurred_at) |
+| audit.delivery_log | 只插不改 | BRIN (handed_over_at) |
+| audit.sla_probe | 只插不改 | BRIN (probed_at) |
+| core.fact_call_leg | 话单结束后不再变化，仅在 15 分钟回看窗口内覆盖写 | BRIN (wait_begin) |
+| core.fact_call | 由腿级聚合，写入模式同上 | BRIN (offered_at) |
+| core.fact_feedback | 一条反馈一行，写后不改 | BRIN (reported_at) |
+| core.fact_intake | 结案前持续更新，结案回填 closed_at；源端原地更新时重取（LD-01 3.4） | B-tree (created_at) |
+| core.fact_dispatch_order | 确认、结案、取消时间陆续回填 | B-tree (issued_at)；用户查询由以 agency_type_sk 打头的复合索引承担，本索引服务不带行过滤的管理与导出路径 |
+| core.fact_turnout | 出动、到达、结束时间陆续回填 | B-tree (assigned_at) |
+| core.fact_agent_session | 签出时回填，量很小 | 不单建时间索引；保留 (agent_sk, signin_at) |
+| core.fact_agent_day | 一日一批，量很小 | (agent_sk, date_key) |
+| core.fact_ai_inference | 一次写入不改，查询按实体或模型 | 不单建；已有 (model_id, model_version, inferred_at) |
+| core.bridge_call_intake | 只经两端的键访问 | 不需要 |
+
+量很小的三张表（坐席会话、坐席日累计、桥表）一个月的分区不过数千到数万行，顺序扫描以毫秒计，再建时间索引只增加写入成本。
+
+### 12.2  随之而来的三条规则
+
+一、凡按时间范围访问分区表的查询，必须同时带 date_key 条件。分区按 date_key 切分，只按 created_at 一类时间列过滤，规划器裁不掉任何分区，一百余个月分区都要过一遍。服务层与 dbt 须把时间范围同时翻译为 date_key 范围（用于裁剪分区）与时间列范围（用于分区内走索引）；翻译须使用第 6 章的同一套归日时区规则——零点附近两者一旦不一致，结果是静默漏行，不报错（LD-04 3.2）。
+
+二、增量写入不得改写内容未变的行。UPDATE 一行完全相同的数据，照样生成一个新的行版本。话单每日回扫若把整天的行重写一遍，BRIN 被打散、表膨胀、备库复制量翻倍。dbt 增量模型须先比内容哈希，只写真正变化的行。
+
+三、BRIN 索引一律开启 autosummarize = on；归档历史数据按月、按时间列排序灌入。不开 autosummarize，新写的页在下次 VACUUM 之前不在索引摘要中，每次查询都要扫它们；历史数据乱序灌入，BRIN 从一开始就是失效的。
+
 ## 13  对象属主与分层写权限
 
 七层 schema 的边界（第 1 章）若只写在文档里，就只靠约定维持。本章把它落到数据库授权上：谁拥有哪一层、谁能写哪一层，由角色决定，违反时数据库直接拒绝，而不是等到某天有人发现 raw 被改过（DD-74）。
