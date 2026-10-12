@@ -217,7 +217,7 @@
     # ================= 四、库登录用户 =================
 
     - name: 建立库登录用户
-      ansible.builtin.include_tasks: tasks/db_login.yml
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/db_login.yml"
       loop: "{{ db_logins }}"
       loop_control:
         loop_var: login

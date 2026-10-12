@@ -68,8 +68,9 @@ ansible-playbook playbooks/22-containers.yml -e ansible_connection=local -K   # 
 sudo podman ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
 systemctl status keycloak seaweedfs prometheus --no-pager | head -40
 
-# Keycloak 管理员口令（首次创建时生成）
-sudo grep BOOTSTRAP_ADMIN_PASSWORD /etc/oss911/keycloak.env
+# 引导管理员是临时的：首次安装后按 91-credential-rotation.md 第三节换成正式管理员。
+# 换掉之前，它的口令在 keycloak.env（只看有没有，不打印值）：
+sudo grep -c '^KC_BOOTSTRAP_ADMIN_PASSWORD=' /etc/oss911/keycloak.env
 
 # Prometheus 的采集目标
 curl -s http://127.0.0.1:9090/api/v1/targets | python3 -m json.tool | grep -E '"health"|"scrapeUrl"'
@@ -77,6 +78,11 @@ curl -s http://127.0.0.1:9090/api/v1/targets | python3 -m json.tool | grep -E '"
 # 网段隔离仍然成立（第 3 步验过，组件上线后再确认一次）
 sudo podman exec prometheus sh -c 'wget -qO- --timeout=3 http://10.89.20.1 2>&1 | head -1'
 ```
+
+## 口令轮换
+
+删掉口令的存放文件、重跑本剧本即轮换：剧本生成新口令、`ALTER ROLE`、写回文件并重启
+使用方。各口令存在哪里、按什么顺序轮换，见 `91-credential-rotation.md`。
 
 ## 开发机不等于生产的三处
 

@@ -86,31 +86,57 @@
           changed_when: false
           check_mode: false
 
-        - name: 生成 Keycloak 的库口令与管理员口令
-          ansible.builtin.set_fact:
-            _kc_db_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters','digits']) }}"
-            _kc_admin_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=24, chars=['ascii_letters','digits']) }}"
-          when: _kcrole.stdout | trim != '1'
-          no_log: true
-
-        # 库必须先建出来，21-connection 的池配置才指得上。pgBouncer 不校验库是否
-        # 存在，连接时才报错——所以这里建库、那里配池，两者的顺序只在验证时才显形。
-        - name: 建立 Keycloak 的库用户与数据库
-          ansible.builtin.shell:
-            cmd: |
-              set -e
-              psql -tAc "CREATE ROLE keycloak LOGIN PASSWORD '{{ _kc_db_password }}'"
-              createdb --owner=keycloak --template=template0 --locale=C --encoding=UTF8 {{ keycloak_db }}
-          become_user: postgres
-          when: _kcrole.stdout | trim != '1'
-          no_log: true
-
+        # 库用户口令的唯一存放处是 keycloak.env。四种状态与 40-schema 的 db_login 相同；
+        # 轮换的做法是删掉 keycloak.env 重跑本剧本（runbook/06）。
+        #
+        # 引导管理员（KC_BOOTSTRAP_ADMIN_*，及旧名 KEYCLOAK_ADMIN*）在 Keycloak 26 是
+        # 【临时】的，只在首次启动、master realm 里还没有管理员时起作用。故：
+        #   首次安装（库用户尚不存在）→ 生成引导管理员口令写入
+        #   此后 → 环境文件里还有就原样保留，没有就不再写回
+        # 建好正式管理员、删掉引导管理员之后，从环境文件里去掉这几行即可，剧本不会
+        # 再把它们加回来（runbook/06「换掉引导管理员」）。
+        # 要轮换库口令时，先换掉引导管理员——否则删环境文件会连同引导管理员口令一起丢掉。
         - name: 读回已有的 Keycloak 环境文件
           ansible.builtin.slurp:
             src: "{{ oss911_etc }}/keycloak.env"
           register: _kcenv
           failed_when: false
           no_log: true
+
+        - name: 取库口令与引导管理员口令（沿用环境文件中的，或新生成）
+          ansible.builtin.set_fact:
+            _kcenv_text: "{{ (_kcenv.content | b64decode) if _kcenv.content is defined else '' }}"
+          no_log: true
+
+        - name: 整理 Keycloak 的口令
+          ansible.builtin.set_fact:
+            _kc_db_password: >-
+              {{ (_kcenv_text | regex_search('(?m)^KC_DB_PASSWORD=(.+)$', '\1') | first)
+                 if _kcenv_text is search('(?m)^KC_DB_PASSWORD=')
+                 else lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters', 'digits']) }}
+            _kc_db_password_is_new: "{{ _kcenv_text is not search('(?m)^KC_DB_PASSWORD=') }}"
+            _kc_admin_password: >-
+              {{ (_kcenv_text | regex_search('(?m)^KC_BOOTSTRAP_ADMIN_PASSWORD=(.+)$', '\1') | first)
+                 if _kcenv_text is search('(?m)^KC_BOOTSTRAP_ADMIN_PASSWORD=')
+                 else (lookup('ansible.builtin.password', '/dev/null', length=24, chars=['ascii_letters', 'digits'])
+                       if _kcrole.stdout | trim != '1' else '') }}
+          no_log: true
+
+        - name: 建立 Keycloak 的库用户，或为它设新口令
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/role_password.yml"
+          vars:
+            rp_role: keycloak
+            rp_password: "{{ _kc_db_password }}"
+            rp_create: "{{ _kcrole.stdout | trim != '1' }}"
+          when: _kcrole.stdout | trim != '1' or (_kc_db_password_is_new | bool)
+
+        # 库必须先建出来，21-connection 的池配置才指得上。pgBouncer 不校验库是否
+        # 存在，连接时才报错——所以这里建库、那里配池，两者的顺序只在验证时才显形。
+        - name: 建立 Keycloak 的数据库
+          ansible.builtin.command:
+            cmd: createdb --owner=keycloak --template=template0 --locale=C --encoding=UTF8 {{ keycloak_db }}
+          become_user: postgres
+          when: _kcrole.stdout | trim != '1'
 
         - name: 下发 Keycloak 环境文件
           ansible.builtin.copy:
@@ -121,11 +147,13 @@
             content: |
               KC_DB_PASSWORD={{ _kc_db_password }}
               KC_DB_USERNAME=keycloak
+              {% if _kc_admin_password %}
               KC_BOOTSTRAP_ADMIN_USERNAME=admin
               KC_BOOTSTRAP_ADMIN_PASSWORD={{ _kc_admin_password }}
               KEYCLOAK_ADMIN=admin
               KEYCLOAK_ADMIN_PASSWORD={{ _kc_admin_password }}
-          when: _kc_db_password is defined
+              {% endif %}
+          register: _kcenv_w
           no_log: true
 
         # ---------- Prometheus 配置 ----------
@@ -157,7 +185,10 @@
         - name: 启动三个组件
           ansible.builtin.systemd_service:
             name: "{{ item }}.service"
-            state: "{{ 'restarted' if (_quadlets.changed or _promcfg.changed) else 'started' }}"
+            # 环境文件变了（如库口令轮换）只重启 Keycloak
+            state: >-
+              {{ 'restarted' if (_quadlets.changed or _promcfg.changed
+                                 or (item == 'keycloak' and _kcenv_w.changed)) else 'started' }}
           loop: [keycloak, seaweedfs, prometheus]
 
         # ---------- 验证：验行为，不验「在运行」----------

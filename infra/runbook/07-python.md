@@ -101,6 +101,11 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8081/
 `dbt debug` 是这一步最有价值的一条人工核验——它一次走完
 dbt → pgBouncer 会话池 → HAProxy → PostgreSQL，并且会把每一跳的结果分别打出来。
 
+## 口令轮换
+
+删掉口令的存放文件、重跑本剧本即轮换：剧本生成新口令、`ALTER ROLE`、写回文件并重启
+使用方。各口令存在哪里、按什么顺序轮换，见 `91-credential-rotation.md`。
+
 ## 开发机不等于生产的三处
 
 | | 开发机 | 生产 |

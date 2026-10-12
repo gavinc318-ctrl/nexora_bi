@@ -324,22 +324,9 @@
           changed_when: false
           check_mode: false
 
-        - name: 生成 Airflow 的库口令
-          ansible.builtin.set_fact:
-            _af_db_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters','digits']) }}"
-          when: _afrole.stdout | trim != '1'
-          no_log: true
-
-        - name: 建立 Airflow 的库用户与数据库
-          ansible.builtin.shell:
-            cmd: |
-              set -e
-              psql -tAc "CREATE ROLE {{ airflow_db }} LOGIN PASSWORD '{{ _af_db_password }}'"
-              createdb --owner={{ airflow_db }} --template=template0 --locale=C --encoding=UTF8 {{ airflow_db }}
-          become_user: postgres
-          when: _afrole.stdout | trim != '1'
-          no_log: true
-
+        # 库口令的唯一存放处是 airflow.env（连接串里）。四种状态与 40-schema 的
+        # db_login 相同；轮换的做法是删掉 airflow.env 重跑本剧本（runbook/07）。
+        # 该文件其余内容都由模板生成，删掉不丢任何东西。
         - name: 读回已有的 Airflow 环境文件
           ansible.builtin.slurp:
             src: "{{ oss911_etc }}/airflow.env"
@@ -350,10 +337,28 @@
         - name: 取回 Airflow 的库口令
           ansible.builtin.set_fact:
             _af_db_password: "{{ (_afenv.content | b64decode) | regex_search('SQL_ALCHEMY_CONN=postgresql\\+psycopg2://[^:]+:([^@]+)@', '\\1') | first }}"
-          when:
-            - _af_db_password is not defined
-            - _afenv.content is defined
+          when: _afenv.content is defined
           no_log: true
+
+        - name: 生成 Airflow 的库口令（环境文件不存在时）
+          ansible.builtin.set_fact:
+            _af_db_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters','digits']) }}"
+          when: _afenv.content is not defined
+          no_log: true
+
+        - name: 建立 Airflow 的库用户，或为它设新口令
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/role_password.yml"
+          vars:
+            rp_role: "{{ airflow_db }}"
+            rp_password: "{{ _af_db_password }}"
+            rp_create: "{{ _afrole.stdout | trim != '1' }}"
+          when: _afrole.stdout | trim != '1' or _afenv.content is not defined
+
+        - name: 建立 Airflow 的数据库
+          ansible.builtin.command:
+            cmd: createdb --owner={{ airflow_db }} --template=template0 --locale=C --encoding=UTF8 {{ airflow_db }}
+          become_user: postgres
+          when: _afrole.stdout | trim != '1'
 
         - name: 下发 Airflow 环境文件
           ansible.builtin.template:
@@ -362,6 +367,7 @@
             owner: airflow
             group: airflow
             mode: "0600"
+          register: _afenv_w
           no_log: true
 
         # 口令不进命令行也不进 Ansible 的环境变量——从 0600 的环境文件里现读。
@@ -430,7 +436,8 @@
           ansible.builtin.systemd_service:
             name: "airflow-{{ item }}.service"
             enabled: true
-            state: "{{ 'restarted' if _afunits.changed else 'started' }}"
+            # 环境文件变了（如库口令轮换）也要重启，否则四个组件仍拿旧口令连库
+            state: "{{ 'restarted' if (_afunits.changed or _afenv_w.changed) else 'started' }}"
           loop: [api-server, scheduler, dag-processor, triggerer]
 
         # ========== 验证：验行为 ==========

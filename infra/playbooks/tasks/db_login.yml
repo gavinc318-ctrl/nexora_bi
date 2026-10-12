@@ -48,18 +48,15 @@
       sudo -u postgres psql -c '\du {{ login.name }}'
     success_msg: "{{ login.name }}：{{ '尚不存在，将新建' if _role.stdout | trim == '' else '已存在，属性正确' }}"
 
-# 口令走标准输入而不是命令行：命令行参数在进程表里对本机所有用户可见。
-# 这一步必须 no_log（口令就在 SQL 里）。失败时 Ansible 只会说「失败」——
-# 上一步已把可能的原因（同名用户属性不符）提前断言掉了。
+# 口令只走标准输入，并在同一事务内关掉会把语句原文写进服务端日志的设置——
+# 细节在共用的 role_password.yml，21 / 22 / 30 也用它。
 - name: "{{ login.name }}：建立库用户，或为它设新口令"
-  ansible.builtin.command:
-    cmd: psql -X -q -v ON_ERROR_STOP=1 -d {{ pg_database }}
-    stdin: >-
-      {{ 'CREATE ROLE ' ~ login.name ~ ' LOGIN' if _role.stdout | trim == '' else 'ALTER ROLE ' ~ login.name }}
-      PASSWORD '{{ _pw }}';
-  become_user: postgres
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/role_password.yml"
+  vars:
+    rp_role: "{{ login.name }}"
+    rp_password: "{{ _pw }}"
+    rp_create: "{{ _role.stdout | trim == '' }}"
   when: _role.stdout | trim == '' or (_pw_is_new | bool)
-  no_log: true
 
 - name: "{{ login.name }}：写环境文件"
   ansible.builtin.copy:
