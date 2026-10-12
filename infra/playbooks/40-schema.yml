@@ -223,7 +223,7 @@
         loop_var: login
         label: "{{ login.name }} → {{ login.role }}"
 
-    # ================= 五、初始分区 =================
+    # ================= 五、初始分区（按月，DD-77） =================
     # 以编排的真实身份（dbt 用户，经 pgBouncer）调分区函数，
     # 顺带验证 0002 的 SECURITY DEFINER 在真实身份下确实可用。
     - name: 建立初始分区窗口
@@ -232,10 +232,10 @@
           set -a; . {{ oss911_etc }}/dbt.env; set +a
           PGPASSWORD="$DBT_PASSWORD" psql -X -tA -v ON_ERROR_STOP=1 \
             -h 127.0.0.1 -p {{ pgb_listen_port }} -U "$DBT_USER" -d {{ pg_database }}_etl -c "
-            SELECT coalesce(sum(meta.ensure_daily_partitions(
+            SELECT coalesce(sum(meta.ensure_monthly_partitions(
                        n.nspname || '.' || c.relname,
-                       current_date - {{ partition_days_back }},
-                       current_date + {{ partition_days_ahead }})), 0)
+                       (current_date - interval '{{ partition_months_back }} months')::date,
+                       (current_date + interval '{{ partition_months_ahead }} months')::date)), 0)
             FROM pg_partitioned_table pt
             JOIN pg_class c     ON c.oid = pt.partrelid
             JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -250,8 +250,8 @@
       ansible.builtin.debug:
         msg: >-
           本次新建分区 {{ _parts.stdout | trim }} 个
-          （窗口：今天 -{{ partition_days_back }} 至 +{{ partition_days_ahead }} 天）。
-          编排就位之前，窗口在 {{ partition_days_ahead }} 天后用完，届时重跑本剧本前推。
+          （按月，DD-77；窗口：本月 -{{ partition_months_back }} 至 +{{ partition_months_ahead }} 个月）。
+          编排就位之前，窗口在 {{ partition_months_ahead }} 个月后用完，届时重跑本剧本前推。
 
     # ================= 六、权限验证 =================
     # 66 项检查，整体在一个事务里，结尾回滚，不留痕。脚本自建临时登录用户、

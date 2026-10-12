@@ -11,7 +11,7 @@
 | 结构变更 0002 | `ddl/changes/0002_roles_and_grants.sql` | 五个权限角色、属主、授权（DD-74） |
 | 结构变更 0003 | `ddl/changes/0003_quarantine_and_param_log.sql` | 隔离登记表（DD-76）、热调留痕表（DD-75） |
 | 库登录用户 | inventory 的 `db_logins` | `ingest`、`dbt` 两个用户，口令在 `/etc/oss911/{ingest,dbt}.env` |
-| 初始分区 | `meta.ensure_daily_partitions` | 13 张分区表，各建今天 -7 至 +30 天 |
+| 初始分区 | `meta.ensure_monthly_partitions` | 13 张分区表按月分区（DD-77），各建上月、本月、后 3 个月 |
 
 ## 先懂三件事
 
@@ -89,12 +89,14 @@ TASK [显示执行输出]                              ==> 结构变更 0000 …
 TASK [断言全部变更已执行且校验和一致]            结构变更 0000 至 0003 均已执行，校验和一致
 TASK [ingest：断言登录与权限角色均生效]          ingest：经 pgBouncer 登录成功 …
 TASK [dbt：断言登录与权限角色均生效]             dbt：经 pgBouncer 登录成功 …
-TASK [显示新建分区数]                            本次新建分区 494 个
+TASK [显示新建分区数]                            本次新建分区 65 个
 TASK [断言库角色与授权验证全部通过]              库角色与授权验证：65 项全部通过（已回滚）
 PLAY RECAP   … failed=0
 ```
 
-494 = 13 张分区表 × 38 天（今天前 7 天 + 今天 + 后 30 天）。
+65 = 13 张分区表 × 5 个月（上月 + 本月 + 后 3 个月）。分区按月不按天（DD-77）：
+按天的话八年加上归档约 8.5 万个分区，查询会撞上锁数上限，而单日数据量只有十余万行，
+按天切分换不来任何查询收益。
 
 ### 2  第二遍：必须 `changed=0`
 
@@ -141,11 +143,12 @@ sudo -u postgres psql -d oss911 -c '\du oss911_*' -c '\drg ingest|dbt'
 sudo -u postgres psql -d oss911 -c "
   SELECT n.nspname,
          count(*) FILTER (WHERE c.relkind IN ('r','p') AND NOT c.relispartition) AS 表,
-         count(*) FILTER (WHERE c.relispartition)                                AS 分区
+         count(*) FILTER (WHERE c.relkind = 'r' AND c.relispartition)            AS 分区
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE n.nspname IN ('raw','staging','core','mart','ai','meta','audit')
   GROUP BY 1 ORDER BY 1"
-#   预期：audit 7 张表 · core 24 · meta 22；分区 core 380、audit 114
+#   预期：audit 7 张表 · core 24 · meta 22；分区 core 50、audit 15（分区名形如 fact_call_p202610）
+#   只数 relkind = 'r'：分区表上的索引也是「分区」（relispartition 为真），不加这条会数出 core 300
 
 # 5 亲手试一次「raw 只追加」：以 ingest 身份删 raw 里的东西，应被拒绝
 #   raw 现在还没有表，借 meta.run_log 演示同一件事——ingest 能写、不能删：
@@ -177,7 +180,7 @@ sudo -u postgres psql -d oss911 -X < ~/src/nexora_bi/test/db_roles_check.sql 2>&
 | `角色 oss911_xxx 已存在但属性不符` | 同名角色被人改成了可登录或带特权 | 查 `\du oss911_*`，弄清是谁改的再决定；不要直接删 |
 | `库用户 xxx 已存在但属性不符` | 同名登录用户不是本剧本建的 | 同上 |
 | `password authentication failed` | 环境文件与库中口令不一致 | 删掉 `/etc/oss911/<用户>.env` 重跑剧本：生成新口令并 ALTER ROLE（一次轮换） |
-| 新建分区数报错 `permission denied for function ensure_daily_partitions` | 0002 的 EXECUTE 授权没生效 | 把输出贴回来，这是变更本身的问题 |
+| 新建分区数报错 `permission denied for function ensure_monthly_partitions` | 0002 的 EXECUTE 授权没生效 | 把输出贴回来，这是变更本身的问题 |
 | `库角色与授权验证` 失败 | 某个权限与设计不符 | FAIL 行写明了「哪个身份、哪条语句、期望允许还是拒绝」；按上面第 7 条单独跑看完整输出 |
 
 ## 开发机不等于生产的三处
@@ -185,5 +188,5 @@ sudo -u postgres psql -d oss911 -X < ~/src/nexora_bi/test/db_roles_check.sql 2>&
 | | 开发机 | 生产 |
 | --- | --- | --- |
 | DDL 来源 | 从仓库复制到 `/opt/oss911/ddl` | 发布制品解包到同一位置，`meta.ddl_change.release_version` 填制品版本（DD-49） |
-| 分区前推 | 编排未就位，30 天后重跑本剧本前推 | Airflow 每日调 `meta.ensure_daily_partitions`；分区缺失使当日写入失败，属必须监控项 |
+| 分区前推 | 编排未就位，3 个月后重跑本剧本前推 | Airflow 定期调 `meta.ensure_monthly_partitions` 提前建出未来月份；分区缺失使当日写入失败，属必须监控项 |
 | 服务层登录用户 | 未建 | 随服务层建，加入 `oss911_query_svc` / `oss911_admin_svc` |

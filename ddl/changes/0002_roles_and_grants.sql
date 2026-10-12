@@ -44,16 +44,17 @@ GRANT oss911_query_svc TO oss911_admin_svc;
 
 -- ---------------------------------------------------------------------
 -- 二、分区函数改为 SECURITY DEFINER
--- CREATE TABLE ... PARTITION OF 要求调用者是父表属主。编排每日调用本函数时
+-- CREATE TABLE ... PARTITION OF 要求调用者是父表属主。编排定期调用本函数时
 -- 不是属主身份，不改则必然失败。改为以属主身份执行，并收窄到 core 与 audit
 -- 的分区表——SECURITY DEFINER 函数接受表名参数，不收窄就是一个以属主身份
 -- 对任意表建分区的入口。
 -- ---------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION meta.ensure_daily_partitions(
+CREATE OR REPLACE FUNCTION meta.ensure_monthly_partitions(
     p_table text, p_from date, p_to date) RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
-    d    date    := p_from;
+    m    date    := date_trunc('month', p_from)::date;
+    mend date    := date_trunc('month', p_to)::date;
     n    integer := 0;
     sch  text    := split_part(p_table, '.', 1);
     tbl  text    := split_part(p_table, '.', 2);
@@ -68,16 +69,16 @@ BEGIN
            WHERE ns.nspname = sch AND c.relname = tbl) THEN
         RAISE EXCEPTION '只能为 core 与 audit 下的分区表建分区：%', p_table;
     END IF;
-    WHILE d <= p_to LOOP
-        part := tbl || '_p' || to_char(d, 'YYYYMMDD');
-        k1   := to_char(d,     'YYYYMMDD')::integer;
-        k2   := to_char(d + 1, 'YYYYMMDD')::integer;
+    WHILE m <= mend LOOP
+        part := tbl || '_p' || to_char(m, 'YYYYMM');
+        k1   := to_char(m, 'YYYYMMDD')::integer;
+        k2   := to_char((m + interval '1 month')::date, 'YYYYMMDD')::integer;
         IF to_regclass(format('%I.%I', sch, part)) IS NULL THEN
             EXECUTE format('CREATE TABLE %I.%I PARTITION OF %I.%I FOR VALUES FROM (%s) TO (%s)',
                            sch, part, sch, tbl, k1, k2);
             n := n + 1;
         END IF;
-        d := d + 1;
+        m := (m + interval '1 month')::date;
     END LOOP;
     RETURN n;
 END $$;
@@ -202,8 +203,8 @@ REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA core, meta FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES FOR ROLE oss911_owner REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA core TO oss911_transform;          -- 代理键与坐标系函数
-GRANT EXECUTE ON FUNCTION meta.ensure_daily_partitions(text, date, date)
-    TO oss911_transform;                                                    -- 由编排每日调用
+GRANT EXECUTE ON FUNCTION meta.ensure_monthly_partitions(text, date, date)
+    TO oss911_transform;                                                    -- 由编排提前建出未来月份（DD-77）
 
 -- ---------------------------------------------------------------------
 -- 七、自检：本变更的结果用查询复核，不用肉眼复核

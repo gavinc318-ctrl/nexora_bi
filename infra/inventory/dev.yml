@@ -179,10 +179,12 @@ all:
     db_logins:
       - { name: ingest, role: oss911_ingest,    env_file: ingest.env, env_prefix: INGEST_DB, file_owner: airflow }
       - { name: dbt,    role: oss911_transform, env_file: dbt.env,    env_prefix: DBT,       file_owner: airflow }
-    # 初始分区窗口。此后每日由编排调 meta.ensure_daily_partitions 前推——
-    # 编排就位之前，窗口在 partition_days_ahead 天后用完，届时重跑本剧本即可前推。
-    partition_days_back: 7
-    partition_days_ahead: 30
+    # 初始分区窗口，按月（DD-77）：上 1 个月、本月、后 3 个月。此后由编排调
+    # meta.ensure_monthly_partitions 提前建出未来月份——编排就位之前，窗口在
+    # partition_months_ahead 个月后用完，届时重跑本剧本即可前推。
+    # 回溯更早的月份（如 ICP 历史补数）不靠这里调大，由补数作业按需先建分区。
+    partition_months_back: 1
+    partition_months_ahead: 3
 
     # ---- 容器化组件（第 6 步）----
     # 镜像一律按 digest 钉死，不按 tag。tag 会被重新发布，digest 不会——

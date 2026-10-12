@@ -169,3 +169,35 @@ DD-76 与 LD-01 7.2 把「批次标识」与「运行标识」并列，LD-01 3.3
   全仓库没有任何地方用 pgcrypto。pgcrypto 去留待定
 - `playbooks/site.yml` 只引入了 00 / 10 / 20，没有 21、22、30、40——「离网重建时跑
   这一个」目前跑不出完整环境
+
+---
+
+## DD-77 的落实（2026-10-12，开发机）
+
+按 DD-77 把分区粒度改为按月：`ddl/05` 与变更 0002 中的分区函数改名为
+`meta.ensure_monthly_partitions`，分区名 `<表>_pYYYYMM`、边界 [当月 1 日, 次月 1 日)；
+剧本初始窗口改为上月至后 3 个月（13 × 5 = 65 个分区）。
+
+**直接改 0001 / 0002 而不新增变更的依据**：两者均未在任何真实环境执行过——
+开发机上 40-schema 从未运行（`/opt/oss911/ddl` 与 `/etc/oss911/{ingest,dbt}.env`
+都不存在），只在临时实例中跑过。这正是 DD-77「在 40-schema 落库前修改代价为零」
+的前提。**40-schema 一旦在开发库执行，此后再改分区只能以新的结构变更进行。**
+
+临时实例验证：跨年（12 月 → 1 月）、2 月边界、月末与月初的行各落其月分区；
+同一窗口重复调用返回 0；新分区属主为 `oss911_owner`；65 项权限验证通过。
+
+本文件前面各节提到的 `meta.ensure_daily_partitions` 均为当时的名称，保留不改。
+
+## 待 Mac 侧判断：DD-77「月内按日定位依靠已有的 BRIN 索引」与 DDL 不符
+
+13 张分区表中只有 4 张有 BRIN：`fact_call_leg (wait_begin)`、`fact_call (offered_at)`、
+`fact_intake (created_at)`、`fact_agent_session (signin_at)`。其余 9 张没有：
+`bridge_call_intake`、`fact_dispatch_order`、`fact_turnout`、`fact_feedback`、
+`fact_agent_day`、`fact_ai_inference`、`audit.access_log`、`audit.delivery_log`、`audit.sla_probe`。
+
+另外**没有任何索引建在 `date_key` 本身上**。按天分区时「按某天查」由分区裁剪直接
+定位；按月后同一查询要扫整月分区——结果不变、不报错，只是变慢，这类退化不会自己
+冒出来。
+
+需要决定的是：这 9 张是否补 BRIN、补在 `date_key` 还是各自的业务时间列。开发机
+未擅自加；若决定补，在 40-schema 落库前可直接并入 05，落库后则为一个新的结构变更。

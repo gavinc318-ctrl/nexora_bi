@@ -1,16 +1,24 @@
 -- =====================================================================
 -- OSS911 BI/DW  LD-02  05  分区与索引
--- 分区：全部事实表按 date_key 逐日 RANGE 分区。
+-- 分区：13 张事实表与审计表按 date_key 按月 RANGE 分区（DD-77）。
+--   分区键仍为 date_key（YYYYMMDD 整数），一个分区覆盖 [当月 1 日, 次月 1 日)，
+--   月内按日定位靠 BRIN 索引。不按天分：八年加归档约 8.5 万个分区，裁不掉分区的
+--   查询会撞 max_locks_per_transaction，而单日十余万行换不来查询收益（DD-77）。
+--   封账是逻辑冻结（close_version 与修正行），不依赖分区物理只读——
+--   一个月的分区里同时有已封账与未封账的日子。
 --   PostgreSQL 要求分区表的唯一约束包含分区键，故主键为 (xxx_sk, date_key)。
 --   代理键本身在全局唯一（确定性 UUID），但该唯一性由模型构建的测试保证，
 --   数据库层不跨分区强制——这是分区表的固有限制，不是设计取舍。
 -- =====================================================================
 
-CREATE OR REPLACE FUNCTION meta.ensure_daily_partitions(
+-- 为 [p_from, p_to] 覆盖到的每个月建一个分区（两端按所在月取整），已有的跳过。
+-- 分区名 <表名>_pYYYYMM。
+CREATE OR REPLACE FUNCTION meta.ensure_monthly_partitions(
     p_table text, p_from date, p_to date) RETURNS integer
 LANGUAGE plpgsql AS $$
 DECLARE
-    d    date    := p_from;
+    m    date    := date_trunc('month', p_from)::date;
+    mend date    := date_trunc('month', p_to)::date;
     n    integer := 0;
     sch  text    := split_part(p_table, '.', 1);
     tbl  text    := split_part(p_table, '.', 2);
@@ -18,20 +26,20 @@ DECLARE
     k1   integer;
     k2   integer;
 BEGIN
-    WHILE d <= p_to LOOP
-        part := tbl || '_p' || to_char(d, 'YYYYMMDD');
-        k1   := to_char(d,     'YYYYMMDD')::integer;
-        k2   := to_char(d + 1, 'YYYYMMDD')::integer;
-        IF to_regclass(sch || '.' || part) IS NULL THEN
+    WHILE m <= mend LOOP
+        part := tbl || '_p' || to_char(m, 'YYYYMM');
+        k1   := to_char(m, 'YYYYMMDD')::integer;
+        k2   := to_char((m + interval '1 month')::date, 'YYYYMMDD')::integer;
+        IF to_regclass(format('%I.%I', sch, part)) IS NULL THEN
             EXECUTE format('CREATE TABLE %I.%I PARTITION OF %I.%I FOR VALUES FROM (%s) TO (%s)',
                            sch, part, sch, tbl, k1, k2);
             n := n + 1;
         END IF;
-        d := d + 1;
+        m := (m + interval '1 month')::date;
     END LOOP;
     RETURN n;
 END $$;
-COMMENT ON FUNCTION meta.ensure_daily_partitions IS '由批量编排每日提前创建未来分区。分区缺失会使当日写入失败，属必须监控项';
+COMMENT ON FUNCTION meta.ensure_monthly_partitions IS '由编排提前建出未来若干个月的分区（DD-77）。分区缺失会使该月写入失败，属必须监控项';
 
 -- ---------------------------------------------------------------------
 -- 索引策略

@@ -73,15 +73,15 @@ RESET ROLE;
 
 -- ---------- 编排（transform）：建分区 ----------
 SET ROLE :"transform_user";
-SELECT pg_temp.expect_ok($$SELECT meta.ensure_daily_partitions('core.fact_call', current_date, current_date)$$);
-SELECT pg_temp.expect_ok($$SELECT meta.ensure_daily_partitions('audit.access_log', current_date, current_date)$$);
-SELECT pg_temp.expect_error($$SELECT meta.ensure_daily_partitions('meta.srid_config', current_date, current_date)$$,
+SELECT pg_temp.expect_ok($$SELECT meta.ensure_monthly_partitions('core.fact_call', current_date, current_date)$$);
+SELECT pg_temp.expect_ok($$SELECT meta.ensure_monthly_partitions('audit.access_log', current_date, current_date)$$);
+SELECT pg_temp.expect_error($$SELECT meta.ensure_monthly_partitions('meta.srid_config', current_date, current_date)$$,
                             '只能为 core 与 audit 下的分区表建分区%');
 RESET ROLE;
 
 -- 分区函数建出的分区归属主，且继承默认权限
 DO $$
-DECLARE p regclass := to_regclass('core.fact_call_p' || to_char(current_date, 'YYYYMMDD'));
+DECLARE p regclass := to_regclass('core.fact_call_p' || to_char(current_date, 'YYYYMM'));
 BEGIN
     IF pg_get_userbyid((SELECT relowner FROM pg_class WHERE oid = p)) <> 'oss911_owner' THEN
         RAISE EXCEPTION 'FAIL 新分区 % 的属主不是 oss911_owner', p;
@@ -98,7 +98,7 @@ SELECT pg_temp.expect_denied($$DELETE FROM raw.zz_roles_check$$);
 SELECT pg_temp.expect_denied($$TRUNCATE raw.zz_roles_check$$);
 SELECT pg_temp.expect_denied($$CREATE TABLE raw.zz_own (x int)$$);       -- 自建即成属主，只追加随之失效
 SELECT pg_temp.expect_denied($$INSERT INTO core.dim_shift (shift_sk) VALUES (gen_random_uuid())$$);
-SELECT pg_temp.expect_denied($$SELECT meta.ensure_daily_partitions('core.fact_call', current_date, current_date)$$);
+SELECT pg_temp.expect_denied($$SELECT meta.ensure_monthly_partitions('core.fact_call', current_date, current_date)$$);
 SELECT pg_temp.expect_ok    ($$UPDATE meta.watermark_state SET updated_at = now() WHERE false$$);
 SELECT pg_temp.expect_denied($$DELETE FROM meta.run_log WHERE false$$);
 SELECT pg_temp.expect_denied($$UPDATE meta.field_visibility SET is_visible = true WHERE false$$);
