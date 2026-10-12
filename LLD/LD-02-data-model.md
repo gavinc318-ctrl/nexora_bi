@@ -212,9 +212,9 @@ audit.access_log 的 sensitive_fields 列记录本次返回的敏感字段名清
 | core.fact_feedback | 一条反馈一行，写后不改 | BRIN (reported_at) |
 | core.fact_intake | 结案前持续更新，结案回填 closed_at；源端原地更新时重取（LD-01 3.4） | B-tree (created_at) |
 | core.fact_dispatch_order | 确认、结案、取消时间陆续回填 | B-tree (issued_at)；用户查询由以 agency_type_sk 打头的复合索引承担，本索引服务不带行过滤的管理与导出路径 |
-| core.fact_turnout | 出动、到达、结束时间陆续回填 | B-tree (assigned_at) |
+| core.fact_turnout | 出动、到达、结束时间陆续回填 | B-tree (assigned_at)；用户查询由以 agency_type_sk 打头的复合索引承担，本索引服务不带行过滤的管理与导出路径。另有只覆盖未结案单据的部分索引 ix_turnout_open，不能替代本索引 |
 | core.fact_agent_session | 签出时回填，量很小 | 不单建时间索引；保留 (agent_sk, signin_at) |
-| core.fact_agent_day | 一日一批，量很小 | (agent_sk, date_key) |
+| core.fact_agent_day | 一日一批，量很小 | 已有唯一索引 ux_agentday (agent_sk, date_key)，不另建 |
 | core.fact_ai_inference | 一次写入不改，查询按实体或模型 | 不单建；已有 (model_id, model_version, inferred_at) |
 | core.bridge_call_intake | 只经两端的键访问 | 不需要 |
 
