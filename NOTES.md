@@ -99,7 +99,7 @@ Hexagon 归档数据迁入（CN-15 · CN-16 · REQ-MIG-* · DD-37 · DD-57 至 D
 staging · mart · ai 归 `oss911_transform`（dbt 运行时建）。`ALTER DEFAULT PRIVILEGES`
 管授权不管属主——它保证新对象自动授权给其他角色，但不改变属主是谁。
 
-**由此产生的三条硬约束（写代码时要守）**：
+**由此产生的硬约束（写代码时要守）**：
 
 1. **dbt 的 profile 必须设 `role: oss911_transform`**。否则新表属主是 dbt 的登录
    用户，`FOR ROLE oss911_transform` 的默认权限不生效，服务层读不到 mart。
@@ -109,6 +109,15 @@ staging · mart · ai 归 `oss911_transform`（dbt 运行时建）。`ALTER DEFA
 3. **raw 表必须由结构变更建，接入程序不得自建**。属主天然拥有 DELETE 与
    TRUNCATE；接入若在运行时自建 raw 表即成属主，只追加随之失效。
    每份契约的 `target_raw` 都对应一个结构变更（ICP 话单将是 0003）
+   （后注：0003 给了隔离登记表与热调留痕表，ICP 话单的 raw 表顺延为 0004）
+4. **按时间范围访问分区表的查询，必须同时带 `date_key` 条件**（DD-78 · LD-02 12.2 规则一）。
+   分区按 `date_key` 切分，只按 `created_at` 一类时间列过滤，规划器裁不掉任何分区。
+   服务层与 dbt 都要把时间范围同时翻译成 `date_key` 范围（裁分区）与时间列范围（走分区内
+   索引），**两者的归日一律用 LD-02 第 6 章那一套时区规则**——零点附近两边一旦不一致，
+   结果是静默漏行，不报错。第 2 批写 dbt 与服务层时用
+5. **增量模型先比内容哈希，只写真正变化的行**（DD-78 · LD-02 12.2 规则二）。UPDATE 一行
+   完全相同的数据照样生成新的行版本：话单每日回扫若整天重写，BRIN 被打散、表膨胀、
+   备库复制量翻倍。第 2 批写 dbt 增量模型时用
 
 **分区函数**：`CREATE TABLE ... PARTITION OF` 要求调用者是父表属主，编排每日
 调用 `meta.ensure_daily_partitions` 时不是属主，不改必然失败。0002 将其改为
@@ -190,6 +199,8 @@ DD-76 与 LD-01 7.2 把「批次标识」与「运行标识」并列，LD-01 3.3
 
 ## 待 Mac 侧判断：DD-77「月内按日定位依靠已有的 BRIN 索引」与 DDL 不符
 
+> 已由 DD-78 处理（2026-10-12）：时间列索引按写入模式选 BRIN 或 B-tree，见 LD-02 12.1。开发机落实见本文件末节。
+
 13 张分区表中只有 4 张有 BRIN：`fact_call_leg (wait_begin)`、`fact_call (offered_at)`、
 `fact_intake (created_at)`、`fact_agent_session (signin_at)`。其余 9 张没有：
 `bridge_call_intake`、`fact_dispatch_order`、`fact_turnout`、`fact_feedback`、
@@ -201,3 +212,25 @@ DD-76 与 LD-01 7.2 把「批次标识」与「运行标识」并列，LD-01 3.3
 
 需要决定的是：这 9 张是否补 BRIN、补在 `date_key` 还是各自的业务时间列。开发机
 未擅自加；若决定补，在 40-schema 落库前可直接并入 05，落库后则为一个新的结构变更。
+
+---
+
+## DD-78 的落实（2026-10-12，开发机）
+
+按 LD-02 12.1 逐表改 `ddl/05`（0001 仍未进入真实环境，直接改不违反 DD-73）：
+新增 BRIN `ix_audit_occurred` · `ix_delivery_handed` · `ix_probe_probed` · `ix_fb_reported`；
+`ix_intake_created` 由 BRIN 改为 B-tree；新增 B-tree `ix_disp_issued` · `ix_turnout_assigned`；
+删去 `ix_agentsess_t`；全部 BRIN 加 `autosummarize = on`。05 的 CREATE INDEX 由 49 条变为 54 条，
+全部 DDL 合计 60 条（加 0003 的 2 条，库中显式索引 62 条）。
+
+临时实例上 pg_indexes 核对：BRIN 6 个且均带 autosummarize（月分区上的子索引同样继承）；
+fact_intake、fact_dispatch_order 上无 BRIN；库中显式索引名集合与 DDL 完全一致。
+
+**与 Mac 侧指令不一致的两处（请据此更正 DD-78 或 LD-02 12.1 的措辞）**：
+
+1. **fact_agent_day「新增 (agent_sk, date_key)」未加**：05 中本已有完全同列的
+   `ux_agentday` 唯一索引，再建一条是纯重复，只增写入成本
+2. **fact_turnout「B-tree (assigned_at)，已有」实际没有**：现有含 assigned_at 的索引
+   只有两种——复合索引的第二列（如 `(agency_type_sk, assigned_at)`），以及只覆盖未结案
+   单据的部分索引 `ix_turnout_open`，都撑不起不带行过滤的时间范围访问。开发机按 LD-02 12.1
+   的意图补了 `ix_turnout_assigned`。若 Mac 侧另有考虑，在 40-schema 落库前删掉即可

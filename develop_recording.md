@@ -7,6 +7,69 @@
 
 ---
 
+## 2026-10-12　第 1 批 · 第三步：剧本 40-schema（待执行）· 按月分区 · 时间列索引
+
+**目标**：写出把 0000 至 0003 落到开发库的剧本与执行指南；并在落库前吸收 Mac 侧
+新登记的四条决策（DD-75 · DD-76 · DD-77 · DD-78）。
+
+### 做了什么
+
+1. **变更 0003**（第一个 `run_as=owner` 的变更）：`meta.quarantine_batch`（DD-76，键
+   `(run_id, batch_seq)`，处理结论只能从 pending 写一次、列级授权、理由必填）与
+   `audit.runtime_param_change_log`（DD-75）
+2. **剧本** `infra/playbooks/40-schema.yml` + `tasks/db_login.yml`：按 `ddl/changes.yml` 执行
+   结构变更（校验和变了即失败、只许末尾追加、逐个事务执行、第一个失败即停）；建 `ingest`、
+   `dbt` 两个登录用户，口令在 `/etc/oss911/{ingest,dbt}.env`，以 airflow 身份经 pgBouncer
+   登录验证；建初始分区；末尾跑权限验证
+3. `dbt_profiles.yml.j2` 加 `role: oss911_transform`；`test/db_roles_check.sql` 改为事务内
+   自建临时登录用户
+4. **DD-77**：分区由按天改为按月，函数改名 `meta.ensure_monthly_partitions`
+5. **DD-78**：时间列索引按写入模式逐表调整（BRIN 6 个，全部 autosummarize）
+6. 执行指南 `infra/runbook/08-schema.md`
+
+### 结果（均在临时实例上）
+
+| 验证 | 结果 |
+| --- | --- |
+| 剧本副本（去掉 sudo、跳过要 pgBouncer 的第四、五节）连跑两遍 | 第一遍执行 0000–0003；第二遍 `changed=0` |
+| 权限验证 | 65 项全部通过 |
+| 反向：篡改已执行的 0003 | 剧本在校验和断言处停下，报出新旧两个值 |
+| 校验和：剧本 vs 第二步的模拟执行器 | 完全一致 |
+| 按月分区 | 跨年、2 月、月末月初的行各落其月；同窗口重复调用返回 0；新分区归 `oss911_owner` |
+| 时间列索引（pg_indexes） | BRIN 6 个均带 autosummarize，月分区子索引同样继承；fact_intake、fact_dispatch_order 无 BRIN；库中显式索引 62 条，名称集合与 DDL 一致 |
+| 取口令逻辑（单独抽出测试） | 有环境文件沿用、无则生成 32 位新口令，两支都对 |
+
+### 过程中发现与修正
+
+- **0003 的 CHECK 有 NULL 陷阱**：理由为 NULL 时 `length(btrim(NULL)) > 0` 得 NULL，CHECK
+  视 NULL 为通过——「不允许无理由放行」恰在最需要时失效且不报错。由权限验证抓到，已显式
+  加 `IS NOT NULL`
+- **执行指南核验查询数错分区**：`relispartition` 对分区上的索引也为真，原写法会数出
+  core 300 而非 50。改为只数 `relkind = 'r'`
+- **设计措辞未经核对**：DD-77「月内按日定位依靠已有的 BRIN」与 DDL 不符（13 张里只有 4 张
+  有 BRIN），由开发机报告后 Mac 侧登记 DD-78 更正。DD-78 的落实中又发现两处同类：
+  fact_agent_day 要「新增」的索引已存在、fact_turnout 说「已有」的索引实际没有——见 NOTES.md
+- **两侧分叉**：Mac 侧在开发机提交第三步的同时提交了 DD-77。文件不重叠，rebase 即可；但内容
+  上 DD-77 推翻了刚写好的按天分区。核实 40-schema 从未运行（`/opt/oss911/ddl` 不存在）后，
+  按 DD-77「落库前改，代价为零」直接改 0001 / 0002
+- **更正第二步的记录**：第二步写的「权限验证 45 项」是目测估数，按当时脚本实数为 50 项
+  （47 条 expect + 3 个 DO 块检查）
+
+### 没验到的
+
+- **剧本的第四、五节**（建登录用户、经 pgBouncer 登录、建分区）需要 sudo 与真实 pgBouncer，
+  临时实例上测不了——首次执行若出问题，大概率在这里
+- 开发库 `oss911` 仍未建任何对象：剧本由 Gavin 按 `08-schema.md` 执行
+
+### 遗留与下一步
+
+- **Gavin 执行 40-schema**（两遍，第二遍 `changed=0`），再重跑 30-python 使 dbt 的 `role:` 生效
+- 待 Mac 侧：批次粒度 `(run_id, batch_seq)` 的登记；DD-78 两处措辞的更正
+- 开发机侧旧账：inventory 中 pgcrypto 的注释有误；`site.yml` 只引入 00 / 10 / 20
+- 第 2 批写 dbt 与服务层时守 NOTES.md「写代码时要守」第 4、5 条（带 `date_key`、只写变化的行）
+
+---
+
 ## 2026-10-11　第 1 批 · 第二步：结构变更机制与库角色
 
 **目标**：让 DDL 可以重复执行、可以记录版本（取代 `IF NOT EXISTS`），并补上属主与授权。
