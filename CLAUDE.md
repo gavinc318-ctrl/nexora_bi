@@ -71,6 +71,12 @@ sudo apt-get install -y python3-openpyxl python3-docx python3-yaml
 | `LLD/*.md` | **谁都不手改** | 它们是 docx/xlsx 的**转换产物**。改原件后跑 `tools/run.py` 等重新生成；手改会在下次生成时被覆盖，并让两边悄悄分叉 |
 | `infra/**` | 本机 | 剧本与被部署的机器同源 |
 | 本机上的执行（剧本、psql、apt、systemctl） | **只在本机** | Mac 侧给文本指令，由本机这一侧执行并回报结果 |
+| `NOTES.md` | 两边都可追加 | 只追加新节、节标题写明日期与来源；不改对方写的节，只在其中注明处理结果与提交号 |
+| `develop_recording.md` | 只由本机写 | 开发日志 |
+| `CLAUDE.md` | 只由 Mac 侧写 | 本机发现需要改的，写进 `NOTES.md` |
+
+**动笔前先 `git pull --rebase`，提交后马上推送。** 两边的写入面基本不重叠，分叉几乎
+都出在「一边改完没推、另一边已经在旧版本上动手」。
 | `ddl/`、`contracts/`、`metrics/`、`tools/`、`test/`、`recon/` | 本机 | 代码与配置 |
 
 重新生成 md 镜像：

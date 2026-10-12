@@ -170,6 +170,7 @@ DD-76 与 LD-01 7.2 把「批次标识」与「运行标识」并列，LD-01 3.3
 校验失败就要整次隔离，好的窗口也被扣下；且与契约中「每批回看一段」的窗口语义对不上。
 
 **依据缺口**：LD-01 3.3「任一批次可以按 run_id 重跑」的表述需相应改为「任一运行」。
+> 已改（2026-10-12，Mac 侧）。
 
 ---
 
@@ -236,3 +237,51 @@ fact_intake、fact_dispatch_order 上无 BRIN；库中显式索引名集合与 D
    只有两种——复合索引的第二列（如 `(agency_type_sk, assigned_at)`），以及只覆盖未结案
    单据的部分索引 `ix_turnout_open`，都撑不起不带行过滤的时间范围访问。开发机按 LD-02 12.1
    的意图补了 `ix_turnout_assigned`。若 Mac 侧另有考虑，在 40-schema 落库前删掉即可
+
+---
+
+## 2026-10-12  Mac 侧移交：尚未处理的秘密问题与其他遗留
+
+> 由 Mac 侧在审 40-schema 及回顾此前各步时汇总。**本节不写任何口令值。**
+> 开发机处理完一项，就在该项后注明提交号，不删。
+
+### 一、秘密（按优先级）
+
+1. **pgBouncer 的探测用户口令由另一口令派生**（`21-connection.yml`「建立 auth_query 的
+   验证用户」）。口令写成 `probe_` 加 pgBouncer 口令的前 12 位，且经 `psql -tAc` 写在
+   命令行上——执行期间对本机任何用户的 `ps` 可见，等于暴露了 pgBouncer 口令的大半截。
+   **处置**：探测用户改用独立随机口令（`lookup('ansible.builtin.password', '/dev/null', …)`），
+   经标准输入传入，并套上下面第 2 条的 `SET LOCAL`；**并轮换 pgBouncer 口令**——
+   此前的运行已经暴露过它的前 12 位
+2. **21 / 22 / 30 三个剧本建角色时，口令写在命令行上**（`psql -tAc "CREATE ROLE … PASSWORD '…'"`），
+   涉及 pgbouncer、keycloak、airflow 三个库用户。**处置**：改为 40-schema 的写法——
+   口令走标准输入，同一事务内先 `SET LOCAL log_min_error_statement = panic` 与
+   `SET LOCAL log_min_duration_statement = -1`（否则出错或慢的语句原文连同口令进服务端日志）。
+   改完后三个库用户的口令各轮换一次：剧本沿用环境文件中的旧口令，删掉对应环境文件
+   重跑即生成新口令（40-schema 的 db_login 已支持这一流程，三个旧剧本需照此补齐）
+3. **Keycloak 引导管理员仍在用**（`22-containers.yml`，`KC_BOOTSTRAP_ADMIN_*`）。
+   Keycloak 26 的引导管理员设计上是**临时的**。**处置**：在管理控制台建一个正式管理员，
+   删除引导管理员，再从环境文件与 Quadlet 中去掉 `KC_BOOTSTRAP_ADMIN_*` 两项。
+   另：该口令曾以明文出现在 Mac 侧的对话记录中——**无论上述做没做，都要换**
+4. **`usr` 的 sudo 口令曾以明文出现在 Mac 侧的对话记录中**。由 Gavin 自行更换（`passwd`），
+   不经剧本
+5. **pgBouncer 的 `userlist.txt` 存的是明文口令**（0600，属主 postgres）。评估能否改存
+   SCRAM 校验值（取自 `pg_authid.rolpassword`）。注意：auth_user 自己连库时 pgBouncer
+   可能仍需明文，**须实测**，不要按文档推断后直接改
+
+### 二、其他遗留
+
+6. **传输加密（DD-68 · LD-07 第 7 章）在开发机上验不到**：库、pgBouncer、HAProxy 同机，
+   连接走回环、不出网卡。`sslmode = verify-full` 与 CRL/OCSP 内网可达，须在跨虚机的
+   测试环境验证，不能以开发机通过为准
+7. **身份未接**：Keycloak 对 AD FS 的身份代理（DD-72）待 IR-49 答复；Airflow 的认证
+   尚未接 Keycloak（runbook/07 已注明刻意留空，API 只绑回环）
+8. **服务层的两个库登录用户**（query_svc、admin_svc）待服务层写出后再建，按 db_logins 加
+9. **ICP 四份契约与将来的 raw 表须带 `run_id` 与 `batch_seq`**（LD-02 第 9 章 · DD-76）
+10. **离网介质**：`90-bundle.yml` 尚未写；`22-containers.yml` 仍直接从仓库拉镜像，
+    介质路径（skopeo + OCI 目录，DD-71）还没有进剧本。等 IR-47 / IR-48 答复后做
+
+### 三、本文件的写法（两边共用）
+
+两边都可以往本文件**追加新节**，各自在节标题里写明日期与来源；**不改对方写的节**，
+只在其中注明处理结果与提交号。动笔前先 `git pull --rebase`，写完马上提交推送。
