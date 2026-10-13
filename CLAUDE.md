@@ -132,7 +132,7 @@ git grep -nIE "PASSWORD *=|password *=|BOOTSTRAP_ADMIN" -- . ':!*.docx' ':!*.xls
 
 ## 5  已经付过学费的坑（**读这一节，能省掉几天**）
 
-完整清单在 `infra/runbook/troubleshooting.md`（28 条，每条含现象/原因/处置/预防）。
+完整清单在 `infra/runbook/troubleshooting.md`（29 条，每条含现象/原因/处置/预防）。
 这里只列反复出现的四类**思维错误**：
 
 ### 一、开发环境验不到的东西，不会自己冒出来
@@ -248,12 +248,19 @@ LD-00 第 4 章另有六条偏权限与缓存的纪律，写代码前请读。�
 | 5 | 连接层：pgBouncer（6432，四个库名／两种池模式）→ HAProxy → 主库 | 完成 |
 | 6 | 容器：Keycloak 26.0 · SeaweedFS 3.80 · Prometheus v2.55.1（digest 钉死） | 完成 |
 | 7 | Python：Airflow 3.3.2 · dbt（两个 venv，离线安装） | 完成 |
+| 8 | 数据库结构：结构变更 0000–0003（`40-schema`）、五个权限角色、库登录用户 | 完成 |
+| — | 口令轮换（`runbook/91`）：pgbouncer · keycloak · airflow 三个库用户，探测用户改独立口令 | 完成 |
 
 **设计文档已成册**：HLD v0.3、LD-00 至 LD-10、四本登记册、59 个指标、
 50 张表的 DDL、四份 ICP 源契约。`check_refs.py` 全绿。
 
-**尚未开始**：业务代码。`ddl/*.sql` 还没真正建到开发库里；ICP 接入、dbt 模型、
-服务层、展现层都只有设计。
+**第 1 批（地基）已完成**：`ddl/*.sql` 以结构变更落到开发库，分区按月（DD-77）、
+时间列索引按写入模式（DD-78），库角色与授权经 66 项验证。
+
+**第 2 批起步**：ICP 话单从接口到 mart 打通一条链路。真实接口尚不可达，开发期以
+合成话单代替（假设登记见 HD-03）。CAD 数据视图的结构说明已到（`3rd API/`），
+29 项澄清问题已发出（`queries/CAD_Data_View_Clarification_Questions.xlsx`），
+答复前不动 CAD 接入与 intake / dispatch 两类事实表的模型。
 
 ---
 
