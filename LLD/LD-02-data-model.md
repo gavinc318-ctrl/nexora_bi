@@ -260,7 +260,7 @@ CREATE TABLE … PARTITION OF 要求调用者是父表的属主，而编排定�
 
 ### 13.4  写权限只授有依据的
 
-依据不明的写权限本次一律不授。代码写到时报错，届时以新增结构变更补授，并在提交说明里写明依据——宁可多一次报错，也不预先放出一条没人说得清为什么存在的写权限。当前未授的有：meta.clarification_queue、meta.reference_value 的新码入表、meta.field_availability 与 meta.metric_availability、audit.sla_probe 与 audit.sla_daily（探测执行者待 IR-21）。
+依据不明的写权限本次一律不授。代码写到时报错，届时以新增结构变更补授，并在提交说明里写明依据——宁可多一次报错，也不预先放出一条没人说得清为什么存在的写权限。当前未授的有：meta.reference_value 的新码入表、meta.field_availability 与 meta.metric_availability、audit.sla_probe 与 audit.sla_daily（探测执行者待 IR-21）。meta.clarification_queue 的写入依据已由 ICP 契约明确（接入的批次校验产生待澄清项），随结构变更 0004 授予 oss911_ingest INSERT。
 
 ## 14  交付物
 
