@@ -16,6 +16,10 @@
 
 - name: 连接层 pgBouncer 与 HAProxy
   hosts: all
+  # 本剧本不用任何 fact（2026-10-13 逐个核对：剧本、tasks/ 与模板中均无 ansible_* 引用，
+  # 也不用依赖 fact 的 package / service 模块）。以 root 收集 fact 会扫 LVM 与全部块设备，
+  # 在本机上有时要等几分钟——不需要的就不收。要用 fact 时删掉这一行并在此说明用的是哪个。
+  gather_facts: false
   become: true
 
   vars:
