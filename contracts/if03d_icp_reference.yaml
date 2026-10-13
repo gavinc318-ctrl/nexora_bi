@@ -65,10 +65,25 @@ raw_write:
   dedup_ignores_batches: [pending, discarded]   # 被扣下或丢弃批次中的行不挡后续观测
   bad_data: raw_then_quarantine    # 未通过校验的批次照常写入 raw，并登记 meta.quarantine_batch
 core_version:
-  from: observed_at                # 源端无行级变更时间，取观测时间。config_version 是源端给的数据集级版本号，是否改用它待定（NOTES.md）
+  from: config_version             # 源端给的数据集级版本号，按快照处理（DD-82 第四条）
+  rules:
+    greater: "应用该快照；快照中不再出现的实体置为非当前（SCD2，见 quality）"
+    equal:   "不动"
+    less:    "不应用、不静默丢弃：进待澄清队列并告警——可能是平台回滚，也可能读到滞后节点，须由人判断"
 
 quality:
   batch_checks:
     - "版本号变化但全量比对无差异的，记入运行日志并告警——说明版本号的含义与预期不符"
     - "坐席或技能队列消失时不删行，置为非当前（SCD2）。源端删除不等于历史不存在"
   change_log: "逐字段差异写 audit.reference_data_change_log，并在 M-10 可查（LD-01 9.3）"
+
+# 联调时必须用真实环境核实、不能按文档推断的事项。核实结论回写到本节并递增 contract_version
+integration_checks:
+  - id: config_version_monotonic
+    question: "config_version 是否单调递增？平台重启、升级或主备切换后是否归零或回退？"
+    why: >-
+      core 以它判断快照新旧（DD-82 第四条）。若重启后归零，此后每个快照都会被判为
+      「更小」而停在待澄清队列，参照数据就此冻结——且看上去像是平台在频繁回滚。
+      届时须改为以（平台启动标识, config_version）或观测时间作版本
+    status: open
+
