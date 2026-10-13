@@ -443,11 +443,23 @@
         # ========== 验证：验行为 ==========
         # 「装上了」太容易满足。这三条分别验：装的是不是离线装的、
         # 两个 venv 是不是真的分开、以及两者能不能连上各自要连的库。
+        # dbt 的版本以 lock 为准逐包比对。
+        # ★ 上一版取 `dbt --version | head -1`，而那一行是「Core:」，断言又只查输出里有没有
+        #   「dbt=」——echo 本身就会打出这几个字，dbt 装错版本甚至没装都照样通过。
+        #   一条永远通过的断言比没有断言更坏：它让人以为这件事验过了（2026-10-13 发现）。
         - name: 查询两个 venv 的版本
           ansible.builtin.shell:
             cmd: |
+              lock_core=$(sed -n 's/^dbt-core==//p' {{ dbt_lock }})
+              lock_pg=$(sed -n 's/^dbt-postgres==//p' {{ dbt_lock }})
+              have_core=$({{ dbt_venv }}/bin/python -c 'import importlib.metadata as m; print(m.version("dbt-core"))' 2>/dev/null)
+              have_pg=$({{ dbt_venv }}/bin/python -c 'import importlib.metadata as m; print(m.version("dbt-postgres"))' 2>/dev/null)
               echo "airflow=$({{ af_venv }}/bin/airflow version 2>/dev/null)"
-              echo "dbt=$({{ dbt_venv }}/bin/dbt --version 2>/dev/null | head -1)"
+              echo "dbt-core=${have_core:-未安装}（lock ${lock_core:-缺}）"
+              echo "dbt-postgres=${have_pg:-未安装}（lock ${lock_pg:-缺}）"
+              [ -n "$lock_core" ] && [ "$have_core" = "$lock_core" ] &&
+                [ -n "$lock_pg" ] && [ "$have_pg" = "$lock_pg" ] && echo "dbt-match"
+              true
           register: _vers
           changed_when: false
 
@@ -455,9 +467,12 @@
           ansible.builtin.assert:
             that:
               - "_vers.stdout is search('airflow=' ~ airflow_version)"
-              - "_vers.stdout is search('dbt=')"
-            fail_msg: "版本不符或命令不存在：{{ _vers.stdout }}"
-            success_msg: "{{ _vers.stdout | replace('\n', ' · ') }}"
+              - "'dbt-match' in _vers.stdout_lines"
+            fail_msg: |-
+              版本与钉死的不符，或命令不存在：
+              {{ _vers.stdout }}
+              airflow 应为 {{ airflow_version }}；dbt-core 与 dbt-postgres 应与 {{ dbt_lock }} 一致。
+            success_msg: "{{ _vers.stdout_lines | reject('equalto', 'dbt-match') | join(' · ') }}"
 
         # 两个 venv 必须互不可见。混在一起时最常见的症状不是报错，
         # 而是某一方被静默降级，到运行期才显形。

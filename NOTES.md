@@ -298,3 +298,41 @@ fact_intake、fact_dispatch_order 上无 BRIN；库中显式索引名集合与 D
 
 两边都可以往本文件**追加新节**，各自在节标题里写明日期与来源；**不改对方写的节**，
 只在其中注明处理结果与提交号。动笔前先 `git pull --rebase`，写完马上提交推送。
+
+---
+
+## 2026-10-13  开发机：执行轮换第 0 步时发现的三件事
+
+### 一、镜像 digest「钉死」从 10-07 到 10-13 只在纸面上成立
+
+第 0 步跑 22 时三个 Quadlet 单元被改写、三个组件重启。podman 的 journal 显示，10-07 以来
+容器一直按 **tag** 建（keycloak:26.0 共 763 次——早期崩溃循环反复重建；seaweedfs、
+prometheus 各 4 次），按 digest 建的只有 10-13 这一次。
+
+原因：`fad78c5`（10-07 18:46「三个镜像 digest 钉死并登记」）把 digest 填进了 inventory 与
+MANIFEST，但**此后没有重跑 22**，磁盘上的单元仍是 tag 写法。MANIFEST 登记的 digest 与
+实际运行的镜像在这六天里没有对应关系。现已一致，22 第二遍 `changed=0`。
+
+**这与 CLAUDE.md 第 5 节第四条同类，但方向相反**：那条是「换了做法，旧产物不会自己消失」；
+这条是「改了配置的记录，不等于改了运行中的东西」。建议补进 troubleshooting：改 inventory
+之后必须重跑用到它的剧本，且那一遍应当看到 changed——看不到，说明改的不是它用的那份。
+
+tag 与 digest 是否同一镜像（应是：digest 当初就从该 tag 解析而来），待 Gavin 用
+`podman image inspect` 比对两者的 Id 确认。
+
+### 二、30-python「断言两个 venv 各自装对了」的 dbt 一半永远通过（已修）
+
+原写法取 `dbt --version | head -1`（那一行是「Core:」），断言只查输出中有没有「dbt=」——
+`echo` 本身就会打出这几个字。dbt 装错版本甚至没装都照样通过。已改为以 lock 为准逐包
+比对 dbt-core 与 dbt-postgres 的实际安装版本，并在本机验过三种情况（一致 / 版本不符 /
+lock 缺失）。提交见下。
+
+### 三、待 Mac 侧判断：dbt 的 lock 有两份，没有任何东西保证一致
+
+`infra/dbt-requirements.lock`（仓库，进 MANIFEST，DD-69「冻结入库」）与
+`/var/cache/build/wheelhouse/dbt-requirements.lock`（30-python 用 `pip freeze` 生成，
+**安装实际按它**）。仓库那份靠人手复制提交（runbook/07），剧本从不读它。两份一旦不同，
+评审看到的与机器上装的就是两回事，且不报错。
+
+可选做法：一、剧本以仓库那份为权威，安装前复制进 wheelhouse；二、剧本断言两份一致，
+不一致即失败。本机未擅自定。
