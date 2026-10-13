@@ -49,9 +49,14 @@
 cd ~/src/nexora_bi && git pull && git status --short     # 工作区应为空
 cd infra
 for p in 21-connection 22-containers 30-python 40-schema; do
-  ansible-playbook playbooks/$p.yml -e ansible_connection=local -K
+  ansible-playbook playbooks/$p.yml -e ansible_connection=local -K --diff
 done
 ```
+
+`--diff` 让剧本把它改动的每个文件逐行打出差异。预期 `changed=0` 的这一遍一定要加：
+万一真有变化，不加 `--diff` 就只知道「改了」不知道「改了什么」，而旧内容已被覆盖、
+事后无从查起（2026-10-13 第一次执行时 22 的三个 Quadlet 单元就这样被改写，原因至今不明）。
+口令相关的任务都是 `no_log`，`--diff` 不会把口令打出来。
 
 四个剧本都应 **`changed=0`**：口令沿用文件里的、环境文件内容不变、服务不重启。
 这一步验证的是新写法没有破坏现状。21 的验证用户 `pgb_probe` 这时已经在用随机口令
