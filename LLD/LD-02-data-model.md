@@ -185,6 +185,8 @@ audit.access_log 的 sensitive_fields 列记录本次返回的敏感字段名清
 
 运行参数的热调另记于 audit.runtime_param_change_log，与 audit.reference_data_change_log、audit.permission_change_log 并列，只增不改。它不写入 meta.run_log：后者是接入运行的记录，source_id、contract_version 与 outcome 必填且 outcome 只取四个接入结果，热调记录在结构上写不进去；放宽约束则会同时放松对接入记录本身的约束（DD-75）。
 
+数据发布序号（DD-81）登记于 meta.data_publication，一次 mart 发布一行：publication_seq（单调递增，缓存键所用的那个数）、published_at、kind（nightly 夜间构建 · correction 封账后修正）、本次涉及的日期范围、本次产生的 close_version、对应的 run_id。该表随 mart 发布步骤一起建，不提前建——没有写入方的表无从验证。
+
 ## 12  索引与检索路径
 
 记录检索（DD-34）走业务字段索引，不走主键。meta.search_criteria 中每一条启用的条件都在 ddl/05 中有对应索引。时间范围一律先做分区裁剪，索引只负责分区内的选择性。

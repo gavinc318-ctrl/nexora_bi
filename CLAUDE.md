@@ -132,7 +132,7 @@ git grep -nIE "PASSWORD *=|password *=|BOOTSTRAP_ADMIN" -- . ':!*.docx' ':!*.xls
 
 ## 5  已经付过学费的坑（**读这一节，能省掉几天**）
 
-完整清单在 `infra/runbook/troubleshooting.md`（27 条，每条含现象/原因/处置/预防）。
+完整清单在 `infra/runbook/troubleshooting.md`（28 条，每条含现象/原因/处置/预防）。
 这里只列反复出现的四类**思维错误**：
 
 ### 一、开发环境验不到的东西，不会自己冒出来
@@ -160,7 +160,7 @@ git grep -nIE "PASSWORD *=|password *=|BOOTSTRAP_ADMIN" -- . ':!*.docx' ':!*.xls
 
 `when:` 写在注释块之后会静默挂到**上一个**任务上（YAML 注释不占结构），
 `--syntax-check` 照样通过。本项目出现过两处，其中一处让一条断言永远不在
-它该生效的情况下运行。定位手法见 `troubleshooting.md` 第 27 条。
+它该生效的情况下运行。定位手法见 `troubleshooting.md` 第 28 条。
 
 同类：**章节号引用**没人守——给 LD-07 插入新第 7 章后，追溯矩阵里 16 处仍指着
 旧章节号。现在 `check_refs.py` 查这个了。
