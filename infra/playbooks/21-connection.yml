@@ -158,7 +158,7 @@
             content: |
               "pgbouncer" "{{ _pgb_password }}"
           no_log: true
-          notify: restart pgbouncer         # 口令轮换后 pgBouncer 要重读 auth_file
+          notify: reload pgbouncer          # 口令轮换后重读 auth_file——reload 即可，不要 restart
 
         - name: 启用并启动 pgBouncer
           ansible.builtin.systemd_service:
@@ -290,7 +290,16 @@
       ansible.builtin.systemd_service:
         name: haproxy
         state: restarted
+    # ★ restart 会等 90 秒：发行版单元的 KillSignal=SIGINT 是 pgBouncer 的「安全关闭」，
+    #   要等所有客户端主动断开才退出；而 Airflow、Keycloak 走会话池，连接从不主动断开，
+    #   于是一直等到 TimeoutStopSec（90 秒）被 SIGKILL（2026-10-13 轮换口令时实测）。
+    #   只有 pgbouncer.ini 里 listen 一类须重启才生效的设置变了才用 restart；
+    #   auth_file（userlist）变化用 reload（SIGHUP），已建立的连接一条不断。
     - name: restart pgbouncer
       ansible.builtin.systemd_service:
         name: pgbouncer
         state: restarted
+    - name: reload pgbouncer
+      ansible.builtin.systemd_service:
+        name: pgbouncer
+        state: reloaded

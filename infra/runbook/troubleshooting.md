@@ -557,3 +557,14 @@ dbt/dbt_core_experimental_parser-2.0.5.tar.gz
 - **预防** —— 预期 `changed=0` 的那一遍一律加 `--diff`：万一真有变化，差异当场留在输出里，
   不必事后去 journal 里考古（旧内容一旦被覆盖就无从查起）。写口令的任务都是 `no_log`，
   `--diff` 不会把口令打出来
+
+### 现象：剧本停在 `RUNNING HANDLER [restart pgbouncer]` 一分半不动，之后自己继续
+
+- **原因** —— 发行版的 pgbouncer.service 以 `KillSignal=SIGINT` 停止，这是 pgBouncer 的
+  「安全关闭」：**等所有客户端主动断开**才退出。Airflow 与 Keycloak 走会话池，连接从不主动
+  断开，于是一直等到 `TimeoutStopSec`（90 秒）被 systemd 以 SIGKILL 杀掉再拉起。journal 里是
+  `State 'stop-sigterm' timed out. Killing.`。2026-10-13 轮换 pgbouncer 口令时遇到
+- **处置** —— 不需要处置，等它过去即可；数据库不受影响，客户端自动重连
+- **预防** —— 改 `userlist.txt`（口令）只需 **reload**（SIGHUP），pgBouncer 重读 auth_file，已建立
+  的连接一条不断。21-connection 已改为 userlist 变化走 reload；只有 pgbouncer.ini 里须重启才生效
+  的设置（如监听地址与端口）变化才 restart，那时等 90 秒是预期内的
