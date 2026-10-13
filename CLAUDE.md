@@ -193,7 +193,7 @@ git grep -nIE "PASSWORD *=|password *=|BOOTSTRAP_ADMIN" -- . ':!*.docx' ':!*.xls
 | dbt 的 profile 必须设 `role: oss911_transform` | 新表属主变成 dbt 的登录用户，默认权限不生效，服务层读不到 mart |
 | core 模型只能以增量方式写入既有表 | dbt 不是 core 的属主、不能 DROP；`--full-refresh` 会失败——这是期望的行为，不要为它去放权 |
 | raw 表只能由结构变更建，接入程序不得自建 | 属主天然拥有 DELETE 与 TRUNCATE，自建即成属主，raw 只追加（DD-02）失效 |
-| 按时间范围访问分区表的查询，必须同时带 `date_key` 条件（DD-78） | 分区按 `date_key` 切，只按时间列过滤裁不掉任何分区；归日时区规则与 LD-02 第 6 章不一致时**静默漏行** |
+| 分区条件按归日依据推导（DD-79）：发生日语义同时带 `date_key` 范围；**关闭日语义不得加 `date_key` 下界**，只可加 `date_key <= 结束日`，走 `closed_date_key` | 发生日语义不带 `date_key` 则裁不掉分区；关闭日语义套上 `date_key` 下界，跨期关闭的单据**静默漏掉**。归日时区规则须与 LD-02 第 6 章一致 |
 | 增量写入只写内容真正变了的行，先比哈希（DD-78） | 空 UPDATE 也生成新行版本：BRIN 被打散、表膨胀、备库复制量翻倍 |
 
 ### 用词：「结构变更」不叫「迁移」
