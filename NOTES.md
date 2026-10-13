@@ -320,6 +320,11 @@ MANIFEST，但**此后没有重跑 22**，磁盘上的单元仍是 tag 写法。
 tag 与 digest 是否同一镜像（应是：digest 当初就从该 tag 解析而来），待 Gavin 用
 `podman image inspect` 比对两者的 Id 确认。
 
+> 已确认（2026-10-13，Gavin 在开发机上比对）：三个镜像各只有一个本地镜像，按 tag 与按 digest
+> 指向同一 Id；三个运行中容器的镜像 Id 与之一致；digest 与 MANIFEST 逐字相同。
+> 即这六天里实际运行的就是登记的那个镜像——缺口在流程上（改了 inventory 没重跑），
+> 没有造成实际偏差。
+
 ### 二、30-python「断言两个 venv 各自装对了」的 dbt 一半永远通过（已修）
 
 原写法取 `dbt --version | head -1`（那一行是「Core:」），断言只查输出中有没有「dbt=」——
