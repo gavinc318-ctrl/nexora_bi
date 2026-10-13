@@ -7,6 +7,98 @@
 
 ---
 
+## 2026-10-13　第 1 批 · 收尾：落库实测、秘密处理与口令轮换、「只在纸面上钉死」三处
+
+**目标**：40-schema 在开发库上实际执行；处理 Mac 侧移交的秘密问题并轮换口令；落实
+DD-82 · DD-83。第 1 批至此完成。
+
+### 落库（40-schema 首次在开发库执行，10-12 晚）
+
+- 第一遍停在「ingest：断言登录与权限角色均生效」：实际 `ingest|true|true`，期望写的是
+  `|t|t`。登录、继承、SET ROLE 三项其实都成立——`pg_has_role()` 的布尔值经 `||` 拼进文本后
+  是 `true` 而非 psql 单独显示时的 `t`。修正期望值（9ac6b56）后重跑通过，第二遍 `changed=0`
+- 此后第四、五节的全部 SQL 均按渲染后的样子在临时实例上逐条执行过，输出与断言期望逐一吻合
+- 现状：结构变更 0000–0003 已执行并登记；`ingest`、`dbt` 两个登录用户与环境文件已建
+  （`/etc/oss911/{ingest,dbt}.env`，10-12 21:31 / 21:34）；dbt profile 的 `role:` 已生效
+
+### 秘密处理（Mac 侧移交第 1 至 3 项，7841bbb）
+
+- 新增 `tasks/role_password.yml`，21 / 22 / 30 / 40 建库用户、改口令一律经它：口令只走标准输入；
+  同一事务内 SET LOCAL 关掉 `log_min_error_statement`、`log_min_duration_statement`、
+  `log_statement`。临时实例实测：日志记录全部语句时，成功与出错两种情况日志中均无口令；
+  不加 SET LOCAL 的对照组两种情况口令均以原文入日志
+- `pgb_probe` 改为每次独立随机口令（原为 pgbouncer 口令前 12 位派生，且在命令行上）
+- 三个旧剧本补齐「删存放文件重跑即轮换」，并补两处重启缺口（环境文件变化时 Keycloak、
+  Airflow 原不重启）。Keycloak 引导管理员只在首次安装时生成，此后不再写回
+- 执行指南 `runbook/91-credential-rotation.md`
+
+### 口令轮换（Gavin 执行，10-13 下午）
+
+| 步 | 内容 | 结果 |
+| --- | --- | --- |
+| 0 | 四个剧本以新写法各跑一遍 | 21 / 40 无变化；30 改写 `profiles.yml`（第三步加的 `role:` 首次落地，预期内）；**22 改写了三个 Quadlet 单元**（见下「纸面钉死」一） |
+| 1 | 历史 PG 日志中是否有口令 | 据 Gavin 报告完成 |
+| 2 | Keycloak 控制台建正式管理员、删引导管理员、去掉环境文件四行 | 据 Gavin 报告完成；`keycloak.env` 现为 72 字节、只剩两行（开发机可见） |
+| 3 | 轮换 pgbouncer | `userlist.txt` 16:24 重写；剧本在 restart handler 停了 90 秒（见下） |
+| 4 | 轮换 keycloak 库口令 | `keycloak.env` 16:27 重写；健康检查 200 |
+| 5 | 轮换 airflow 库口令 | `airflow.env` 16:28 重写；四个组件 active |
+| 6 | `usr` 的 sudo 口令 | 据 Gavin 报告完成 |
+
+开发机侧核对（10-13 收尾时）：pgbouncer、haproxy、keycloak、seaweedfs、prometheus 与 Airflow
+四个组件共 9 个服务全部 active。
+
+### 「只在纸面上钉死」三处（troubleshooting 第 28 条 · DD-83）
+
+1. **镜像 digest**：10-07 把 digest 填进 inventory 与 MANIFEST 后没有重跑 22，容器一直按 tag 运行
+   （journal：keycloak:26.0 共 763 次，含早期崩溃循环；另两个各 4 次），10-13 第 0 步才第一次
+   按 digest 建。Mac 侧确认六天里 tag 与 digest 是同一镜像
+2. **dbt lock**：仓库一份、wheelhouse 一份，安装读 wheelhouse 那份。按 DD-83 改为只读仓库那份，
+   清掉 wheelhouse 副本；重新解析改由 `-e dbt_relock=true` 显式触发。落实前核对：仓库 lock 与 dbt
+   venv 实装 59 个包逐行一致
+3. **Airflow constraints 的 SHA-256**：剧本原先只打印、从不比对。改为 inventory 钉值、安装前断言。
+   落实前核对：上游文件与 MANIFEST 一致
+
+教训（第 28 条）：改了 inventory 必须重跑并看到 changed；改了值重跑却 `changed=0`，说明该值没被
+用上。**钉死一个值，必须有一个环节在它不符时失败。**
+
+### 其他发现与修正
+
+- **一条永远通过的断言**：30-python「两个 venv 各自装对了」的 dbt 一半取的是 `dbt --version` 的
+  第一行「Core:」，只查输出里有没有「dbt=」——echo 本身就打出这几个字。改为与 lock 逐包比对，
+  本机验过一致 / 不符 / lock 缺失三种情况（cf065c2）
+- **pgBouncer restart 等 90 秒**：发行版单元以 SIGINT 安全关闭，要等客户端全部断开，而会话池连接
+  从不主动断开，只能等超时被 SIGKILL。改口令只需 reload（5d64494，troubleshooting 第 29 条）
+- **Gathering Facts 有时卡几分钟**：以 root 收集要扫 LVM 与全部块设备（本机有虚拟光驱 sr0，疑似
+  卡点，未能复现确认）。逐个核对后，10 / 20 / 21 / 22 / 30 / 40 六个剧本不用任何 fact，已关掉
+  收集；只有 00-base 与 99-verify 保留（ce9c0c7）
+- **runbook 03–07 的「跑」一节**仍写着 rsync 到已退役的 `~/infra` 再执行，照做即回到两份 infra。
+  已统一改为从仓库执行
+- **预期 changed=0 的那一遍一律加 `--diff`**：22 那次「改了但不知道改了什么」，旧内容已被覆盖
+  无从查起。已核对写口令的任务均为 `no_log`，`--diff` 不会打出口令
+
+### DD-82 的契约落实
+
+if03a–d 删去「按幂等键覆盖写」「坏数据不进 raw」「允许回补重写」，各加 `raw_write` 与
+`core_version` 两段；if03d 的版本改用 `config_version`（更大应用、相同不动、更小进待澄清并告警），
+并新增 `integration_checks` 段登记「config_version 是否单调、重启后是否归零」。ingest 读
+`meta.quarantine_batch` 的权限已由 0002 的默认权限生效，未建空变更，改由权限验证加一条检查守住。
+
+### 没验到的
+
+- 第 1、2、6 步开发机看不到，以 Gavin 报告为准
+- Gathering Facts 卡顿的根因未确认（复现不出）；00-base / 99-verify 仍可能遇到，卡住时以
+  `ps -ef --forest | grep -A5 "[A]nsiballZ_setup"` 看停在哪个子命令
+- 传输加密（DD-68）在开发机上验不到（同机回环），须在跨虚机环境验证（NOTES 移交第 6 项）
+
+### 遗留与下一步
+
+- **第 1 批完成**。待 Mac 侧：CLAUDE.md 第 9 节进展表与第 5 节条数（troubleshooting 现为 29 条）
+- 移交第 5 项（userlist 存明文，评估改存 SCRAM，须实测）未处理
+- **第 2 批**：ICP 话单从头到尾打通一条链路（模拟接口 → 接入 → raw → staging → core → Airflow）。
+  开发机连不上真实 ICP、手上无真实话单样本，须先登记「开发期以合成话单代替真实接口」的假设
+
+---
+
 ## 2026-10-12　第 1 批 · 第三步：剧本 40-schema（待执行）· 按月分区 · 时间列索引
 
 **目标**：写出把 0000 至 0003 落到开发库的剧本与执行指南；并在落库前吸收 Mac 侧
