@@ -110,7 +110,7 @@ quality:
   batch_checks:
     - "同一 CALLID 必须恰有一行 CALLIDNUM = -1；缺失即该通呼叫尚未结束，留给回看窗口，不报错"
     - "同一 CALLID 内 CALLIDNUM 不得重复"
-    - "WAITBEGIN 不得为空；为空即整批拒绝（LD-01 7.1）"
+    - "WAITBEGIN 不得为空；为空即整批隔离：照常写入 raw 并登记 meta.quarantine_batch（LD-01 7.1 · DD-82）"
     - "WAITEND < WAITBEGIN、CALLEND < CALLBEGIN 等时序倒置：整批照常写入 raw，登记隔离（DD-76 · DD-82）"
     - "CALLTYPE 不在 enums.call_type 值表内的，进待澄清队列并计入 unknown 列数"
   recon: "按 LD-01 8.3 的滚动窗口校验；对账基准见 metrics/icp_source_map.yaml"

@@ -496,3 +496,23 @@ Mac 侧改）。
 > - 第三节第 19 条另需一道防线，不等答复：staging 中同一 `(CALLID, CALLIDNUM)` 出现
 >   WAITBEGIN 相差超过 24 小时的两次观测，即视为「键可能重复」，进待澄清队列，不当作同一张
 >   话单的新版本写入 core。否则若真会重复，不同的通话会被静默合并成一张
+
+---
+
+## 2026-10-13  开发机：接入程序的数据库驱动受 LD-09 4.2 约束，请 Mac 侧定（建议登记 DD）
+
+LD-09 4.2：「自研代码只 import 或链接宽松许可的库（MIT、BSD、Apache 2.0、ISC、PSF）」。接入程序是
+自研代码，要连 PostgreSQL：
+
+- **psycopg2 与 psycopg 3 都是 LGPL**，不在白名单内。dbt 用 psycopg2 不受影响——dbt 是第三方程序、
+  以独立进程使用（LD-09 4.3）；但接入程序 `import psycopg2` 按 4.2 字面不允许
+- **建议 pg8000**（BSD-3，纯 Python，不依赖 libpq；支持 SCRAM、可经 pgBouncer、咨询锁可用）。
+  被拒方案：psycopg2（LGPL，违反 4.2）；asyncpg（Apache 2.0，可用，但接入是串行取数，异步接口只增加复杂度）。
+  代价：接入与 dbt 用两个不同的驱动
+- 其余依赖：HTTP 用标准库（PSF），YAML 用 PyYAML（MIT）
+- **旁证一处不一致**：DD-52 接受 pymssql（LGPL）作迁移期驱动，写的理由是「符合 LD-09 4.2」，但 4.2 的
+  白名单里没有 LGPL。归档迁移工具若是自研代码 import pymssql，与本条同一问题
+
+开发机在此之前不冻结 venv-ingest 的 lock。
+
+另：契约 if03a「整批拒绝」已按 Mac 侧处理结果改为「整批隔离」（本次提交）。
