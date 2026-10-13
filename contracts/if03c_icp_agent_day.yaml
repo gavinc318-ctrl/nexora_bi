@@ -35,6 +35,15 @@ window:
 watermark: {type: timestamptz, column: date_key}
 idempotent_key: [agentId, date_key]
 
+# 写入语义（DD-82 · DD-76 · DD-02）：raw 只追加，不覆盖
+raw_write:
+  mode: append_if_changed          # 写入前查同一（幂等键, content_hash）是否已存在，已存在不写
+  content_hash: all_source_columns # 全部源列；接入元数据（run_id · batch_seq · 落地时间）不计入
+  dedup_ignores_batches: [pending, discarded]   # 被扣下或丢弃批次中的行不挡后续观测
+  bad_data: raw_then_quarantine    # 未通过校验的批次照常写入 raw，并登记 meta.quarantine_batch
+core_version:
+  from: observed_at                # 源端无行级变更时间（平台重算改写既有日的值），取观测时间
+
 columns:
   - {src: IDX_04_02_001, type: integer, target: fact_agent_day.signin_count,       state: verified, note: "签入次数。与 if03b 的区间段数对账"}
   - {src: IDX_04_02_002, type: integer, target: fact_agent_day.signin_seconds,     state: verified, note: "签入时长。M-R02 以 if03b 的区间合计为准，本列作对账"}

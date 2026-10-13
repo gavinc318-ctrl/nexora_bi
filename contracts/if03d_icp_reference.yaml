@@ -58,6 +58,15 @@ window:
 watermark: {type: sequence, column: config_version}
 idempotent_key: [dataset, src_natural_key]
 
+# 写入语义（DD-82 · DD-76 · DD-02）：raw 只追加，不覆盖
+raw_write:
+  mode: append_if_changed          # 写入前查同一（幂等键, content_hash）是否已存在，已存在不写
+  content_hash: all_source_columns # 全部源列；接入元数据（run_id · batch_seq · 落地时间）不计入
+  dedup_ignores_batches: [pending, discarded]   # 被扣下或丢弃批次中的行不挡后续观测
+  bad_data: raw_then_quarantine    # 未通过校验的批次照常写入 raw，并登记 meta.quarantine_batch
+core_version:
+  from: observed_at                # 源端无行级变更时间，取观测时间。config_version 是源端给的数据集级版本号，是否改用它待定（NOTES.md）
+
 quality:
   batch_checks:
     - "版本号变化但全量比对无差异的，记入运行日志并告警——说明版本号的含义与预期不符"

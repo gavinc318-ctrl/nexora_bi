@@ -109,6 +109,9 @@ SELECT pg_temp.expect_ok    ($$INSERT INTO meta.quarantine_batch (run_id, batch_
                                VALUES ('00000000-0000-0000-0000-0000000000c1', 1, 'zz')$$);
 SELECT pg_temp.expect_ok    ($$INSERT INTO meta.quarantine_batch (run_id, batch_seq, failure_reason)
                                VALUES ('00000000-0000-0000-0000-0000000000c1', 2, 'zz')$$);
+-- 去重判断须排除待处理与已丢弃批次中的行，接入必须能读隔离登记（DD-82 第二、六条）。
+-- 该权限来自 0002 对 meta 的默认权限，不另设结构变更；由这一条守着
+SELECT pg_temp.expect_ok    ($$SELECT run_id, batch_seq FROM meta.quarantine_batch WHERE state IN ('pending', 'discarded')$$);
 SELECT pg_temp.expect_denied($$UPDATE meta.quarantine_batch SET state = 'discarded' WHERE false$$);
 SELECT pg_temp.expect_denied($$DELETE FROM meta.quarantine_batch WHERE false$$);
 SELECT pg_temp.expect_denied($$INSERT INTO audit.runtime_param_change_log (source_id, param_name, changed_by, reason)

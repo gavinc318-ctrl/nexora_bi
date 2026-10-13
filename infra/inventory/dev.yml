@@ -154,6 +154,11 @@ all:
     # 官方 constraints 是 Airflow 能装出可运行环境的硬条件，不是建议。
     # URL 由版本与 Python 次版本决定，两者任一变化都要重新取。
     airflow_constraints_url: "https://raw.githubusercontent.com/apache/airflow/constraints-{{ airflow_version }}/constraints-3.12.txt"
+    # constraints 文件的 SHA-256，与 artifacts/MANIFEST.md 中的值为同一个值（DD-83）。
+    # 30-python 在安装前断言文件与之相同，不符即失败——钉死一个值，必须有一个环节在它
+    # 不符时失败，否则只是写在纸上。升级 Airflow 时：取料后剧本会报出新文件的实际值，
+    # 核对上游后同时改这里与 MANIFEST。
+    airflow_constraints_sha256: "821effd0f491975682f2774fca3427d7bc2f59ca6de68dcb413ad2c8f890e58c"
     airflow_api_port: 8081                  # 8080 已被 Keycloak 占用
 
     # dbt 没有官方 constraints。做法是解析一次、冻结成 lock 文件进仓库，
@@ -162,6 +167,10 @@ all:
     dbt_requirements:
       - "dbt-core"
       - "dbt-postgres"
+    # 重新解析 dbt 依赖（需要网络）。默认关：lock 在仓库里（infra/dbt-requirements.lock），
+    # 是唯一权威（DD-83）。升级 dbt 时 -e dbt_relock=true：解析结果直接写回仓库路径，
+    # 由人审 diff 后提交——解析结果是候选，提交才生效。
+    dbt_relock: false
 
     airflow_db: airflow
     pgb_pool_size_airflow: 10

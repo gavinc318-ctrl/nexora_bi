@@ -39,7 +39,7 @@ window:
   max_span_hours: 24                   # 接口硬上限，回补历史须按天切片
   min_span_seconds: 5                  # 接口硬下限
   concurrency: 1                       # 文档明确不支持并发下载。这是接口约束，不是调优参数
-  lookback_minutes: 15                 # 窗口收口：每批回看一段，按幂等键覆盖写（LD-01 4.4）
+  lookback_minutes: 15                 # 窗口收口：每批回看一段，重复取到的由去重吸收（DD-82）
   schedule: "*/5 * * * *"              # 5 分钟增量，另有每日回扫
 
 watermark:
@@ -51,8 +51,19 @@ watermark:
 
 idempotent_key: [CALLID, CALLIDNUM]
 idempotent_note: >-
-  两列合起来定位一张话单。回看区间内按此键覆盖写。
+  两列合起来定位一张话单。回看与每日回扫会把同一张话单取到四五次：raw 写入前按
+  （本键, 内容哈希）去重，只追加有变化的观测，已结束的话单通常只留一行；core 按本键
+  只接受版本更大且内容不同的观测（DD-82）。
   任一列为 NULL 时 core.nk() 直接报错而不是拼出一个看似正常的键（LD-01 2.2）。
+
+# 写入语义（DD-82 · DD-76 · DD-02）：raw 只追加，不覆盖
+raw_write:
+  mode: append_if_changed          # 写入前查同一（幂等键, content_hash）是否已存在，已存在不写
+  content_hash: all_source_columns # 全部源列；接入元数据（run_id · batch_seq · 落地时间）不计入
+  dedup_ignores_batches: [pending, discarded]   # 被扣下或丢弃批次中的行不挡后续观测
+  bad_data: raw_then_quarantine    # 未通过校验的批次照常写入 raw，并登记 meta.quarantine_batch
+core_version:
+  from: observed_at                # 源端无行级变更时间：话单结束后不再变化，取观测时间
 
 columns:
   - {src: CALLID,        type: text,        target: fact_call_leg.call_id,            state: verified,           note: "同一通呼叫的各腿共用"}
@@ -100,6 +111,6 @@ quality:
     - "同一 CALLID 必须恰有一行 CALLIDNUM = -1；缺失即该通呼叫尚未结束，留给回看窗口，不报错"
     - "同一 CALLID 内 CALLIDNUM 不得重复"
     - "WAITBEGIN 不得为空；为空即整批拒绝（LD-01 7.1）"
-    - "WAITEND < WAITBEGIN、CALLEND < CALLBEGIN 等时序倒置进隔离区，不进 raw"
+    - "WAITEND < WAITBEGIN、CALLEND < CALLBEGIN 等时序倒置：整批照常写入 raw，登记隔离（DD-76 · DD-82）"
     - "CALLTYPE 不在 enums.call_type 值表内的，进待澄清队列并计入 unknown 列数"
   recon: "按 LD-01 8.3 的滚动窗口校验；对账基准见 metrics/icp_source_map.yaml"

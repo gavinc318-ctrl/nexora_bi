@@ -64,11 +64,8 @@ pgBouncer 的后端就永远是 `127.0.0.1:5000`，主库易主与它无关。
 ## 跑
 
 ```bash
-# Mac 上
-rsync -av --delete infra/ nexora-bi:~/infra/
-
-# 开发机上
-cd ~/infra
+# 开发机上，一律从仓库执行（~/infra 是已退役的 rsync 副本，见 CLAUDE.md 第 1 节）
+cd ~/src/nexora_bi/infra
 ansible-playbook playbooks/21-connection.yml -e ansible_connection=local -K --check --diff
 ansible-playbook playbooks/21-connection.yml -e ansible_connection=local -K
 ansible-playbook playbooks/21-connection.yml -e ansible_connection=local -K   # changed 应为 0

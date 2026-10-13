@@ -531,3 +531,29 @@ dbt/dbt_core_experimental_parser-2.0.5.tar.gz
 - **预防** —— 条件写在任务的 `name` 之后、紧挨着它；说明文字放在任务**之前**，
   不要夹在任务的键之间。**凡是「语法正确但语义错位」的东西，都要用解析器复核，
   不能用肉眼复核。**
+
+### 现象：inventory 里钉了镜像 digest，实际运行的容器却不是按它拉的
+
+- **发现经过** —— 2026-10-13 执行轮换前的「应为 changed=0」那一遍，22-containers 却改写了
+  三个 Quadlet 单元并重启了三个组件。剧本、模板、inventory 逐项比对都无差异，旧内容已被
+  覆盖，从仓库推不出原因。最后从 podman 的 journal 查到：10-07 以来容器一直按 **tag**
+  建（`keycloak:26.0` 763 次——早期崩溃循环反复重建；另两个各 4 次），按 digest 建的只有
+  10-13 这一次：
+  ```bash
+  sudo journalctl -t podman --since 2026-10-07 --no-pager | grep -E "container create" \
+    | grep -oE "image=[^,)]+" | sort | uniq -c
+  ```
+- **原因** —— 10-07「三个镜像 digest 钉死并登记」把 digest 填进了 inventory 与 MANIFEST，
+  **此后没有重跑 22**。磁盘上的单元仍是 tag 写法。这六天里 MANIFEST 登记的 digest 与实际
+  运行的镜像之间没有任何对应关系，而没有任何东西报错
+- **教训，两句** ——
+  - **改了 inventory，就要重跑用到它的剧本，而且那一遍应该看到 changed**
+  - **改了值之后重跑却是 `changed=0`，说明这个值根本没被任何任务用上**——这本身就是要查
+    的信号，不是「一切正常」
+- **同类（「只在纸面上钉死」）** —— 同一天发现的另两处同属此类，已按 DD-83 修正：
+  dbt 的 lock 仓库一份、wheelhouse 一份，安装读的是 wheelhouse 那份，仓库那份没有任何环节
+  使用；Airflow constraints 的 SHA-256 记在 MANIFEST，剧本只打印、从不比对。
+  **钉死一个值，必须有一个环节在它不符时失败**；没有这个环节，钉死只是一句话
+- **预防** —— 预期 `changed=0` 的那一遍一律加 `--diff`：万一真有变化，差异当场留在输出里，
+  不必事后去 journal 里考古（旧内容一旦被覆盖就无从查起）。写口令的任务都是 `no_log`，
+  `--diff` 不会把口令打出来

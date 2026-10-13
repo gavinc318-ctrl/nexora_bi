@@ -29,7 +29,12 @@
     af_venv: "{{ venv_root }}/venv-airflow"
     dbt_venv: "{{ venv_root }}/venv-dbt"
     constraints_file: "{{ wheelhouse }}/constraints-airflow-{{ airflow_version }}-py312.txt"
-    dbt_lock: "{{ wheelhouse }}/dbt-requirements.lock"
+    # dbt 的 lock 以仓库那份为唯一权威，安装直接读它；wheelhouse 里不再存副本（DD-83）。
+    # 开发机上控制节点即目标机，playbook_dir 的路径在目标机上同样有效；离网时 infra/
+    # 随介质交付（DD-70），路径同样成立。将来若从别处远程驱动，须先把它复制到目标机。
+    dbt_lock: "{{ playbook_dir | dirname }}/dbt-requirements.lock"
+    # 旧做法的产物：DD-83 之前 lock 存在 wheelhouse 里。见下方「清掉 wheelhouse 里的旧 lock」
+    dbt_lock_legacy: "{{ wheelhouse }}/dbt-requirements.lock"
 
   tasks:
 
@@ -102,9 +107,10 @@
             patterns: "*.whl,*.tar.gz"
           register: _wh
 
+        # 重新解析 dbt 依赖意味着版本会变，轮子也要重取
         - name: 判定本次是否取料
           ansible.builtin.set_fact:
-            _do_fetch: "{{ (wheelhouse_refresh | bool) or (_wh.matched | int) == 0 }}"
+            _do_fetch: "{{ (wheelhouse_refresh | bool) or (dbt_relock | bool) or (_wh.matched | int) == 0 }}"
 
         - name: 报告取料决定
           ansible.builtin.debug:
@@ -126,13 +132,22 @@
             checksum_algorithm: sha256
           register: _constraints_stat
 
-        - name: 报告 constraints 的校验和
-          when: _do_fetch | bool
-          ansible.builtin.debug:
-            msg: >-
-              constraints-airflow-{{ airflow_version }}-py312.txt
-              sha256 = {{ _constraints_stat.stat.checksum }}
-              —— 填回 artifacts/MANIFEST.md
+        # ★ 上一版只打印校验和、让人「填回 MANIFEST」，从不比对——下载到的或介质带来的
+        #   文件与登记的不同也照样往下装。只在纸面上钉死（DD-83）。
+        - name: 断言 constraints 文件与钉死的校验和相同
+          ansible.builtin.assert:
+            that:
+              - _constraints_stat.stat.exists
+              - _constraints_stat.stat.checksum == airflow_constraints_sha256
+            fail_msg: |-
+              {{ constraints_file }} 与钉死的 SHA-256 不符（或文件不存在）：
+                钉死的（inventory · MANIFEST）：{{ airflow_constraints_sha256 }}
+                实际文件：                     {{ _constraints_stat.stat.checksum | default('（文件不存在）') }}
+              不要直接改 inventory 去迁就文件。先查清哪一个是对的：
+                有网时：curl -sSfL {{ airflow_constraints_url }} | sha256sum
+                离网时：核对介质随附的校验和清单
+              确属升级 Airflow 而换了文件，才同时改 inventory 的 airflow_constraints_sha256 与 MANIFEST。
+            success_msg: "constraints 文件校验和与钉死值相同：{{ airflow_constraints_sha256[:16] }}…"
 
         - name: 取 Airflow 及其全部传递依赖的轮子
           ansible.builtin.command:
@@ -145,26 +160,52 @@
           changed_when: "'Saved' in _dl_af.stdout or 'Created wheel' in _dl_af.stdout"
           when: _do_fetch | bool
 
-        # dbt 没有官方 constraints：先解析一次，冻结成 lock，此后按 lock 取料。
+        # dbt 没有官方 constraints：由本方解析一次、冻结成 lock 入库，此后按 lock 取料与安装。
+        # lock 在仓库里，只在显式 -e dbt_relock=true 时重新解析，结果写回仓库路径，
+        # 由人审 diff 后提交（DD-83）。以调用者身份（become: false）写，使文件仍归仓库属主——
+        # 以 root 写进仓库，下次 git 操作就会遇到 root 属主的文件。
+        - name: 重新解析 dbt 依赖并写回仓库的 lock（需要网络，仅 -e dbt_relock=true）
+          ansible.builtin.shell:
+            cmd: |
+              set -e
+              d=$(mktemp -d)
+              {{ python_bin }} -m venv "$d"
+              "$d"/bin/pip install --quiet --upgrade pip
+              "$d"/bin/pip install --quiet {{ dbt_requirements | join(' ') }}
+              "$d"/bin/pip freeze > {{ dbt_lock }}
+              rm -rf "$d"
+          become: false
+          when: dbt_relock | bool
 
-        - name: 检查是否已有 dbt 的 lock
+        - name: 提示审阅新的 lock
+          ansible.builtin.debug:
+            msg: >-
+              已重新解析并写入 {{ dbt_lock }}。它只是候选：在仓库里
+              git diff infra/dbt-requirements.lock 审阅版本变化，确认后提交，
+              并同步更新 artifacts/MANIFEST.md 的 dbt 一行。未提交前不要拿它去装生产。
+          when: dbt_relock | bool
+
+        - name: 检查仓库中的 dbt lock
           ansible.builtin.stat:
             path: "{{ dbt_lock }}"
           register: _dbtlock
 
-        - name: 首次解析 dbt 依赖并冻结为 lock（需要网络）
-          ansible.builtin.shell:
-            cmd: |
-              set -e
-              rm -rf /tmp/dbt-resolve
-              {{ python_bin }} -m venv /tmp/dbt-resolve
-              /tmp/dbt-resolve/bin/pip install --quiet --upgrade pip
-              /tmp/dbt-resolve/bin/pip install --quiet {{ dbt_requirements | join(' ') }}
-              /tmp/dbt-resolve/bin/pip freeze > {{ dbt_lock }}
-              rm -rf /tmp/dbt-resolve
-          when:
-            - not _dbtlock.stat.exists
-            - _do_fetch | bool
+        - name: 断言仓库中的 dbt lock 存在
+          ansible.builtin.assert:
+            that:
+              - _dbtlock.stat.exists
+            fail_msg: >-
+              {{ dbt_lock }} 不存在。它是 dbt 依赖的唯一权威（DD-83），应在仓库里；
+              缺失多半是仓库不完整。确需重新生成时：-e dbt_relock=true（需要网络），
+              生成后审阅并提交。
+            success_msg: "dbt lock：{{ dbt_lock }}"
+
+        # 换一种做法时，旧做法的产物不会自己消失（CLAUDE.md 第 5 节第四条）：
+        # DD-83 之前 lock 存在 wheelhouse 里。留着它，就会有人以为装的是它。
+        - name: 清掉 wheelhouse 里的旧 lock
+          ansible.builtin.file:
+            path: "{{ dbt_lock_legacy }}"
+            state: absent
 
         - name: 取 dbt 的轮子（按 lock）
           ansible.builtin.command:
@@ -246,8 +287,8 @@
             fail_msg: >-
               wheelhouse（{{ wheelhouse }}）里没有轮子，无法离线安装。
               有网时用 -e wheelhouse_refresh=true 取一次；
-              离网时把介质上的 wheelhouse 目录与 {{ constraints_file | basename }}、
-              {{ dbt_lock | basename }} 一并放到该路径下再跑。
+              离网时把介质上的 wheelhouse 目录与 {{ constraints_file | basename }}
+              一并放到该路径下再跑（dbt 的 lock 在 infra/ 里，随介质交付，不在 wheelhouse）。
               本次{{ '执行了取料但未取到任何轮子——先看上面取料那两步的输出' if _do_fetch else '未取料' }}。
             success_msg: "离线安装的前提具备：wheelhouse 中有 {{ _wh_final.matched }} 个轮子"
 

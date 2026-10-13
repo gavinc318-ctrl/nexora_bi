@@ -34,10 +34,19 @@ window:
 watermark:
   type: timestamptz
   column: date_key
-  note: "按业务日推进，不按行。平台重算会改写既有日的值，故必须允许回补重写"
+  note: "按业务日推进，不按行。平台重算会改写既有日的值：回补时重取，raw 只追加内容有变化的观测，core 取版本更大者（DD-82）"
 
 idempotent_key: [agentId, inTime]
 idempotent_note: "一名坐席一天可有多段区间。以工号加签入时刻定位一段。"
+
+# 写入语义（DD-82 · DD-76 · DD-02）：raw 只追加，不覆盖
+raw_write:
+  mode: append_if_changed          # 写入前查同一（幂等键, content_hash）是否已存在，已存在不写
+  content_hash: all_source_columns # 全部源列；接入元数据（run_id · batch_seq · 落地时间）不计入
+  dedup_ignores_batches: [pending, discarded]   # 被扣下或丢弃批次中的行不挡后续观测
+  bad_data: raw_then_quarantine    # 未通过校验的批次照常写入 raw，并登记 meta.quarantine_batch
+core_version:
+  from: observed_at                # 源端无行级变更时间（签出时回填 outTime），取观测时间
 
 columns:
   - {src: id,       type: text,        target: fact_agent_session.agent_sk,          state: verified,          note: "坐席工号，经 dim_agent 解析为代理键（AS-31）"}
@@ -47,7 +56,7 @@ columns:
 
 quality:
   batch_checks:
-    - "outTime 非空时必须不早于 inTime；倒置进隔离区"
+    - "outTime 非空时必须不早于 inTime；倒置的批次照常写入 raw，登记隔离（DD-76 · DD-82）"
     - "duration 与 outTime − inTime 的差超过阈值的，入对账差异但不拒绝——这是平台内部口径差，不由本方抹平"
     - "跨日区间按 inTime 归日，与班次求交时跨分区取数"
   recon: "区间时长合计 vs IDX_04_02_002 签入时长（见 if03c）。两者同源不同接口，差异即平台内部口径差"

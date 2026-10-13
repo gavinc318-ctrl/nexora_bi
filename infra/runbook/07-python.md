@@ -45,25 +45,26 @@ Airflow 用 `BashOperator` 调 dbt 的可执行文件，两边只共享项目目
 https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt
 ```
 
-**两者任一变化都要重新取。** 剧本会打印它的 sha256，当场填回 `artifacts/MANIFEST.md`。
+**两者任一变化都要重新取。** 文件的 SHA-256 钉在 inventory 的 `airflow_constraints_sha256`
+（与 MANIFEST 同一个值），剧本在安装前**断言**文件与之相同，不符即失败（DD-83）。
+早先的做法是剧本只打印校验和、由人填回 MANIFEST，从不比对——文件变了也照样往下装。
 
-**dbt 没有官方 constraints，所以我们自己冻结一份 lock。** 首次运行时解析一次依赖、
-`pip freeze` 成 `dbt-requirements.lock`，此后一律按 lock 取料与安装。
+**dbt 没有官方 constraints，所以我们自己冻结一份 lock。** 仓库里的
+`infra/dbt-requirements.lock` 是**唯一权威**：取料与安装都直接读它，wheelhouse 里不存副本
+（DD-83；早先在 wheelhouse 另存一份、两份无一致性保证，剧本会清掉那份旧副本）。
+升级 dbt 时 `-e dbt_relock=true` 重新解析（需要网络），结果直接写回仓库路径——
+它只是候选，`git diff` 审阅后提交才生效。
 自建 lock 与官方 constraints 作用相同，区别只是**维护责任在谁**——
 升级 dbt 时要自己重新解析并复核，没有上游替我们验证这个组合能跑（DD-69）。
 
 ## 跑
 
 ```bash
-# Mac 上
-rsync -av --delete infra/ nexora-bi:~/infra/
-
-# 开发机上
-cd ~/infra
+# 开发机上，一律从仓库执行（~/infra 是已退役的 rsync 副本，见 CLAUDE.md 第 1 节）
+cd ~/src/nexora_bi/infra
 ansible-playbook playbooks/21-connection.yml -e ansible_connection=local -K   # 新增 airflow 池
 ansible-playbook playbooks/30-python.yml     -e ansible_connection=local -K
-# 把打印出的 constraints sha256 填回 MANIFEST，并把 dbt lock 提交进仓库
-ansible-playbook playbooks/30-python.yml     -e ansible_connection=local -K   # changed 应为 0
+ansible-playbook playbooks/30-python.yml     -e ansible_connection=local -K --diff   # changed 应为 0
 ```
 
 第一遍会下载几百兆的 wheel，慢是正常的。**第二遍必须是 `changed=0`**——

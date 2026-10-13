@@ -33,11 +33,8 @@ digest 不会变。做法是：
 ## 跑
 
 ```bash
-# Mac 上
-rsync -av --delete infra/ nexora-bi:~/infra/
-
-# 开发机上
-cd ~/infra
+# 开发机上，一律从仓库执行（~/infra 是已退役的 rsync 副本，见 CLAUDE.md 第 1 节）
+cd ~/src/nexora_bi/infra
 ansible-playbook playbooks/20-database.yml  -e ansible_connection=local -K   # pg_hba 与监听地址有改动
 ansible-playbook playbooks/22-containers.yml -e ansible_connection=local -K
 # 把打印出来的三个 digest 填回 inventory 与 MANIFEST，然后：

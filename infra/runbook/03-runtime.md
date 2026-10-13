@@ -3,11 +3,8 @@
 ## 执行
 
 ```bash
-# Mac 上同步
-rsync -av --delete infra/ nexora-bi:~/infra/
-
-# 开发机上
-cd ~/infra
+# 开发机上，一律从仓库执行（~/infra 是已退役的 rsync 副本，见 CLAUDE.md 第 1 节）
+cd ~/src/nexora_bi/infra
 ansible-playbook playbooks/10-runtime.yml -e ansible_connection=local -K --check --diff
 ansible-playbook playbooks/10-runtime.yml -e ansible_connection=local -K
 ansible-playbook playbooks/10-runtime.yml -e ansible_connection=local -K   # changed 应为 0
