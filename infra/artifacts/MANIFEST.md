@@ -47,6 +47,7 @@
 | PY | Airflow 官方 constraints 文件 constraints-3.3.2/constraints-3.12.txt | 对应 Airflow 3.3.2 / Python 3.12 | raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt | 821effd0f491975682f2774fca3427d7bc2f59ca6de68dcb413ad2c8f890e58c | 2026-10-08 | 这一行是整个 Airflow 依赖树的冻结依据（DD-69）。上游为每个版本发布经 CI 验证的约束集；不用它就等于让 pip 在装机时自行解析数百个包，同一份剧本在不同时间装出的环境会不同。文件名中的 py 版本必须与目标机的 python3 次版本一致（本机 3.12），换 OS 时要同步换 | 在用 |
 | PY | apache-airflow（含 postgres / celery 等 extras） | 3.3.2 | PyPI，经 constraints 解析后下载至 wheelhouse | 由 constraints 文件（上一行）与 wheelhouse 内各 wheel 自身的哈希保证 | 2026-10-08 | 调度。3.2.0 起支持 Python 3.10–3.14，组件为 api-server / scheduler / dag-processor / triggerer（不再是 webserver），剧本与 systemd 单元按此编排。版本钉在 3.3.2 而非跟随最新：constraints 是按版本发布的，升级意味着换一整套约束并重新验证 | 在用 |
 | PY | dbt-core 与 dbt-postgres（连同 dbt-adapters / dbt-common / agate / psycopg2-binary 等 59 个包） | dbt-core 1.12.5 · dbt-postgres 1.11.0（全部 59 个包的钉死版本见 infra/dbt-requirements.lock） | PyPI，由本方解析一次后冻结 | 由 lock 文件内各包的钉死版本保证 | 2026-10-08 | 模型构建。dbt 没有上游 constraints，故由本方在有网环境解析一次、pip freeze 冻结入库（DD-69）。**这是一项长期运维义务**：升级 dbt 时要自己重新解析并复核组合可用，没有上游替我们验证 | 在用 |
+| PY | 接入程序 venv-ingest 的依赖（psycopg 3.3.6 · psycopg-binary 3.3.6 · PyYAML 6.0.3 · setuptools 84.0.0 · typing_extensions 4.16.0，共 5 个包） | 见 infra/ingest-requirements.lock | PyPI，由本方解析一次后冻结（30-python 的 -e ingest_relock=true） | 由 lock 文件内各包的钉死版本保证 | 2026-10-14 | 接入程序（DD-84）。驱动选 psycopg 3 而非 pg8000：上游健康度优先于许可（DD-86）；psycopg 为 LGPL-3，按修订后的 LD-09 4.2 只 import、不修改、不打成单文件可执行。setuptools 在 lock 里是因为离网构建本方的包要用它（--no-build-isolation）。与 dbt 的 psycopg2 并存于 wheelhouse，互不替代 | 在用 |
 ---
 
 ## 待补
@@ -185,8 +186,9 @@ find /var/cache/build/wheelhouse -name '*.tar.gz' -o -name '*.zip'   # 应为空
 同理，`build-essential` 与 `libpq-dev` 只为**取料侧**服务。生产机若由平台基线
 交付且不含编译器，这两项可以不装——届时取料必须在另一台有网的同版本机器上完成。
 
-离网重建时，把介质上的 `wheelhouse/` 整个目录连同 `constraints-airflow-3.3.2-py312.txt`
-与 `dbt-requirements.lock` 放到 `/var/cache/build/wheelhouse/` 下，直接跑安装那一条。
+离网重建时，把介质上的 `wheelhouse/` 整个目录（airflow、dbt、ingest 三个子目录）连同
+`constraints-airflow-3.3.2-py312.txt` 放到 `/var/cache/build/wheelhouse/` 下，直接跑安装那一条。
+dbt 与接入程序的 lock 在 `infra/` 里随介质交付，不放 wheelhouse（DD-83）。
 wheelhouse 为空而本次又没取料时，剧本会断言失败并把这段话打出来，不会让 pip 抛
 一句难读的 `no matching distribution found`。
 

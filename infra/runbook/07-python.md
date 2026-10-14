@@ -57,6 +57,34 @@ https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3
 自建 lock 与官方 constraints 作用相同，区别只是**维护责任在谁**——
 升级 dbt 时要自己重新解析并复核，没有上游替我们验证这个组合能跑（DD-69）。
 
+## 第三个 venv：接入程序（第 2 批起）
+
+```
+/opt/oss911/venv-ingest     oss911-ingest（仓库 ingest/）+ psycopg 3 · PyYAML（按 infra/ingest-requirements.lock）
+```
+
+接入程序是独立的命令行程序，Airflow 以 BashOperator 调用，与 dbt 相同（DD-84 · LD-01 2.5）。
+不装进 Airflow 的 venv：那边受 Airflow 官方 constraints 约束，两边各自冻结、各自升级。
+依赖做法与 dbt 完全相同：仓库里的 lock 是唯一权威，`-e ingest_relock=true` 重新解析（DD-83）。
+
+驱动是 psycopg 3（LGPL-3，DD-86），按 LD-09 4.2 只 import、不修改、**不得打成单文件可执行**。
+与 dbt 用的 psycopg2 并存于 wheelhouse，互不替代。
+
+本方的包从仓库的 `ingest/` 复制到 `/opt/oss911/ingest-src` 再构建（构建会写 `build/` 与
+`*.egg-info`，以 root 写进仓库会留下 root 属主的文件），只在源码变了或尚未安装时才重装。
+
+退出码是 DAG 依赖的约定：**0 成功（含批次被隔离）· 1 运行失败 · 2 用法或配置错误**，不得出现 99。
+
+## 全局 pool（DD-85）
+
+| pool | 槽位 | 为什么 |
+| --- | --- | --- |
+| `icp_cms` | 1 | ICP 话单接口不支持并发下载 |
+| `dbt_build` | 1 | 两台 ETL 同时跑 dbt，线程总数会超过 pgBouncer 会话池而卡住不报错 |
+
+由剧本按 inventory 的 `airflow_pools` 建立并校正，**不在界面上手工建**——手工建的不进版本管理，
+重建环境时会丢。pool 是元数据库里的一行，生产上 ETL-1、ETL-2 两台共用。
+
 ## 跑
 
 ```bash
@@ -84,6 +112,13 @@ ansible-playbook playbooks/30-python.yml     -e ansible_connection=local -K --di
 ## 人工核验
 
 ```bash
+# 三个 venv 的程序都能以 airflow 身份执行；接入程序的退出码约定
+sudo -u airflow /opt/oss911/venv-ingest/bin/oss911-ingest --version
+sudo -u airflow /opt/oss911/venv-ingest/bin/oss911-ingest; echo "rc=$?   # 应为 2（用法错误）"
+
+# pool
+sudo -u airflow bash -c 'set -a; . /etc/oss911/airflow.env; set +a; /opt/oss911/venv-airflow/bin/airflow pools list' 2>/dev/null
+
 # 四个组件的状态
 systemctl status airflow-api-server airflow-scheduler airflow-dag-processor airflow-triggerer \
   --no-pager | grep -E 'Active:|●'

@@ -1,0 +1,29 @@
+# 接入程序（DD-84 · LD-01 2.5）
+#
+# 装在独立的 /opt/oss911/venv-ingest，由 infra/playbooks/30-python.yml 离线安装：
+# 依赖按仓库中的 infra/ingest-requirements.lock，构建用 lock 里的 setuptools（--no-build-isolation，
+# 离网时没有 PyPI 可供构建隔离去取 setuptools）。
+#
+# 许可（DD-86 · LD-09 4.2）：只 import 宽松许可或 LGPL 的库；LGPL 库（psycopg）不修改、
+# 不静态链接、不得用 PyInstaller / Nuitka 之类打成单文件可执行。新增依赖须先确认许可，
+# 并同步 infra/artifacts/MANIFEST.md 与 compliance/components.csv。
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oss911-ingest"
+version = "0.1.0"
+description = "OSS911 BI 接入程序：按源契约取数、校验、写 raw、推进水位"
+requires-python = ">=3.12"
+dependencies = [
+    "psycopg[binary]",   # PostgreSQL 驱动，LGPL-3（DD-86）
+    "PyYAML",            # 读契约，MIT
+]
+
+[project.scripts]
+oss911-ingest = "oss911_ingest.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

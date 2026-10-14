@@ -22,3 +22,4 @@ FreeTDS,SQL Server 归档库连接驱动（迁移期）,L1,LGPL 2.0,是,社区,1
 unixODBC,ODBC 驱动管理器（迁移期 · 若采用 pyodbc 路线）,L1,LGPL 2.1 / GPL 2.0,是,社区,1999,独立驱动管理器 · 动态链接,LGPL 部分动态链接不传染 · GPL 部分为独立可执行,低风险 · 迁移期组件,待冻结,DD-52
 pyodbc,Python ODBC 客户端（迁移期 · 与 unixODBC 配套）,L1,MIT,是,社区,2004,Python 库 · 直接 import,宽松许可可 import,低风险 · 迁移期组件,待冻结,DD-52
 pymssql,Python SQL Server 客户端（迁移期 · 直连 FreeTDS 的备选路线）,L1,LGPL 2.1,是,社区,2003,Python 库 · 动态链接,LGPL 动态链接不传染,低风险 · 迁移期组件 · 与 pyodbc 二选一,待冻结,DD-52
+psycopg 3（含 psycopg-binary）,接入程序的 PostgreSQL 驱动（venv-ingest）,L1,LGPL-3.0,是,社区（psycopg 项目）,2021,Python 库 · 直接 import · 动态链接,LGPL 附条件可 import：不修改、不静态链接、不打成单文件可执行（LD-09 4.2）；psycopg-binary 轮子自带 libpq（PostgreSQL License）与 OpenSSL（Apache 2.0）,低风险,3.3.6,DD-84 · DD-86

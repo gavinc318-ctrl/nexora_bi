@@ -172,6 +172,26 @@ all:
     # 由人审 diff 后提交——解析结果是候选，提交才生效。
     dbt_relock: false
 
+    # 接入程序（DD-84 · LD-01 2.5）：独立的 venv-ingest，依赖冻结在仓库的
+    # infra/ingest-requirements.lock，做法与 dbt 相同（DD-83）。驱动 psycopg 3（DD-86）。
+    # setuptools 列在这里是因为离网构建本方的包要用它（--no-build-isolation）。
+    # 新增依赖须先确认许可（LD-09 4.2），并同步 MANIFEST 与 compliance/components.csv。
+    ingest_requirements:
+      - "psycopg[binary]"
+      - "PyYAML"
+      - "setuptools"
+    ingest_relock: false
+
+    # Airflow 的全局 pool（DD-85 · LD-08 3.3）。pool 是元数据库里的一行，整个集群共用，
+    # 不是每台机器各一个。由剧本建，不在界面上手工建——手工建的不进版本管理，重建环境时会丢。
+    airflow_pools:
+      - name: icp_cms
+        slots: 1
+        description: "ICP 话单下载：接口不支持并发（LD-01 4.2）"
+      - name: dbt_build
+        slots: 1
+        description: "dbt 构建：两台同时跑会使线程总数超过 pgBouncer 会话池（DD-67 · DD-85）"
+
     airflow_db: airflow
     pgb_pool_size_airflow: 10
 
