@@ -63,9 +63,9 @@ format: converted from docx, content unchanged
 
 ### 4.2  一条必须写进开发规范的纪律
 
-自研代码只 import 或链接宽松许可的库（MIT、BSD、Apache 2.0、ISC、PSF）；GPL 与 AGPL 组件一律以独立进程或网络服务的方式使用，不进入自研可执行文件的链接边界。
+自研代码只 import 或链接宽松许可的库（MIT、BSD、Apache 2.0、ISC、PSF）以及弱 copyleft 的 LGPL 库；GPL 与 AGPL 组件一律以独立进程或网络服务的方式使用，不进入自研可执行文件的链接边界。
 
-这条纪律的检查点在依赖管理：新增依赖时须在评审中确认其许可，并同步更新组件清单。当前自研代码直接 import 的第三方库只有 WeasyPrint（BSD）、python-docx（MIT）、React（MIT）与可选的 MCP SDK（MIT），全部合规。
+LGPL 的使用附三个条件（2026-10-14 修订，DD-86）：一、不修改该库的源码；二、只以 Python import 或动态链接的方式使用，不静态链接，也不以 PyInstaller、Nuitka 之类工具把它冻结进单文件可执行——LGPL 允许任何许可的程序与之组合，前提恰是用户能够替换这个库，而源码加 venv 的交付形态天然满足；三、组件清单上标明 LGPL，交付时随附许可文本。本次修订前，4.2 的白名单未列 LGPL，而 DD-52 的 FreeTDS 与 pymssql 已按 LGPL 直接链接或 import，两处自相矛盾；修订后以本节为准。这条纪律的检查点在依赖管理：新增依赖时须在评审中确认其许可，并同步更新组件清单。当前自研代码直接 import 的第三方库有 WeasyPrint（BSD）、python-docx（MIT）、React（MIT）、可选的 MCP SDK（MIT）、PyYAML（MIT），以及接入程序的 psycopg 3（LGPL-3，DD-86），全部合规。
 
 ### 4.3  逐类判定
 
@@ -75,6 +75,7 @@ format: converted from docx, content unchanged
 | 数据库扩展（经 SQL 使用） | PostGIS（GPLv2） | 与调用 GPL 命令行工具同性质，不构成衍生作品。RFP 2.7.3.1 要求的是开放许可与 MOI 的扩展自由，GPL 完全满足 |
 | 独立进程与命令行工具 | HAProxy（GPLv2）· Ansible（GPLv3）· dbt-core · Podman | 不链接，不构成衍生作品 |
 | 直接 import 的库 | WeasyPrint（BSD）· python-docx（MIT）· React（MIT）· MCP SDK（MIT） | 全部为宽松许可，符合 4.2 的纪律 |
+| 直接 import 的 LGPL 库 | psycopg 3（LGPL-3）· pymssql / FreeTDS（LGPL，迁移期，DD-52） | 弱 copyleft：不修改、动态使用、可替换，符合修订后 4.2 的三个条件。不得冻结进单文件可执行 |
 
 ### 4.4  关于 AGPL 的专门说明
 
