@@ -1,39 +1,41 @@
 ---
-# 20-database —— PostgreSQL 16 + PostGIS
+# 20-database -- PostgreSQL 16 + PostGIS
 #
-# 本步只做数据库本体。pgBouncer 与 HAProxy 在 21-connection.yml。
-# 分开的理由：集群创建是【一次性不可逆】的——locale 在 initdb 时确定，
-# 事后更改要重建整个集群。先把它验对，再往上叠连接层。
+# This step covers the database itself. pgBouncer and HAProxy are in 21-connection.yml.
+# Why separate: creating the cluster is ONE-WAY -- the locale is fixed at initdb, and changing it
+# later means rebuilding the whole cluster. Get it right first, then stack the connection layer on top.
 #
-# ★ 顺序不可颠倒：必须在 apt install 之前写好 createcluster.conf。
-#   Ubuntu 的 postgresql 包会在 postinst 里自动建一个 main 集群并沿用系统 locale
-#   （en_US.UTF-8），而 DD-63 要求集群默认 LC_COLLATE=C 以与 glibc 解耦。
+# * The order must not be reversed: createcluster.conf must be in place BEFORE apt install.
+#   Ubuntu's postgresql package creates a "main" cluster in its postinst using the system locale
+#   (en_US.UTF-8), while DD-63 requires the cluster default LC_COLLATE=C to decouple from glibc.
 #
-# ★ 关于 --check：本剧本的 check 模式只能验到「装包之前」。
-#   装包之后的任务依赖包自身创建的东西——postgres 系统用户、
-#   /etc/postgresql/<ver>/<cluster>/ 目录、postgresql@ 服务单元——而 check 模式下
-#   apt 并未真装，这些都不存在。硬让它们在 check 下跑只会得到一串假失败，
-#   而假失败会教人忽略 --check，那比没有 check 更糟。
-#   故装包之后的任务整块跳过 check 模式。check 能告诉你的是：
-#   配置文件内容对不对、包清单会装什么；不能告诉你集群会不会建成功。
+# * About --check: check mode can only verify this playbook up to "before the packages".
+#   Tasks after the install depend on things the packages create -- the postgres system user,
+#   /etc/postgresql/<ver>/<cluster>/, the postgresql@ service unit -- and in check mode apt has
+#   not really installed anything, so none of them exist. Forcing them to run under check only
+#   produces a row of false failures, and false failures teach people to ignore --check, which is
+#   worse than having no check. So everything after the install is skipped in check mode as a block.
+#   What check can tell you: whether the config file content is right and what the package list
+#   will install. It cannot tell you whether the cluster will be created successfully.
 
-- name: PostgreSQL 与 PostGIS
+- name: PostgreSQL and PostGIS
   hosts: all
-  # 本剧本不用任何 fact（2026-10-13 逐个核对：剧本、tasks/ 与模板中均无 ansible_* 引用，
-  # 也不用依赖 fact 的 package / service 模块）。以 root 收集 fact 会扫 LVM 与全部块设备，
-  # 在本机上有时要等几分钟——不需要的就不收。要用 fact 时删掉这一行并在此说明用的是哪个。
+  # This playbook uses no facts (checked one by one on 2026-10-13: no ansible_* references in the
+  # playbook, tasks/ or templates, and no fact-dependent package / service modules). Gathering facts
+  # as root scans LVM and every block device, which on this machine sometimes takes minutes -- so we
+  # do not gather what we do not need. To use a fact, delete this line and say here which fact is used.
   gather_facts: false
   become: true
 
   vars:
-    # 集群配置目录：Debian/Ubuntu 的固定布局，由 pg_createcluster 决定，不放 inventory
+    # Cluster config directory: fixed Debian/Ubuntu layout decided by pg_createcluster, not in inventory
     pg_confdir: "/etc/postgresql/{{ postgres_version }}/{{ pg_cluster_name }}"
 
   tasks:
 
-    # ================= 装包前：check 模式下可验 =================
+    # ================= Before the install: verifiable in check mode =================
 
-    - name: 建立 postgresql-common 配置目录
+    - name: Create the postgresql-common config directory
       ansible.builtin.file:
         path: /etc/postgresql-common
         state: directory
@@ -41,46 +43,46 @@
         group: root
         mode: "0755"
 
-    - name: 禁止安装时自动创建集群
+    - name: Prevent automatic cluster creation on install
       ansible.builtin.copy:
         dest: /etc/postgresql-common/createcluster.conf
         owner: root
         group: root
         mode: "0644"
         content: |
-          # 由 infra/playbooks/20-database.yml 管理，勿手改
+          # Managed by infra/playbooks/20-database.yml, do not edit by hand
           #
-          # 必须在安装 postgresql 之前就位。Ubuntu 的 postgresql 包会在 postinst 里
-          # 自动建一个 main 集群并沿用系统 locale（en_US.UTF-8），而 DD-63 要求
-          # 集群默认 LC_COLLATE=C 以与 glibc 解耦。让它自动建出来再删重建，
-          # 既浪费时间又容易留下残留。
+          # Must be in place before postgresql is installed. Ubuntu's postgresql package creates a
+          # "main" cluster in its postinst using the system locale (en_US.UTF-8), while DD-63 requires
+          # the cluster default LC_COLLATE=C to decouple from glibc. Letting it be created and then
+          # dropping and recreating it wastes time and easily leaves residue behind.
           create_main_cluster = false
 
-          # ★ 本文件是【全量覆盖】发行版自带的同名文件。发行版默认值里带
-          #   add_include_dir = 'conf.d'，写了这个文件就等于把它一起抹掉，
-          #   于是 pg_createcluster 生成的 postgresql.conf 里没有 include_dir，
-          #   conf.d/*.conf 写了也不加载。本项目实测踩过。
-          #   凡「覆盖发行版配置文件」，必须把原默认值里仍然需要的项一并写回。
+          # * This file REPLACES the distribution's file of the same name entirely. The distribution
+          #   default contains add_include_dir = 'conf.d'; writing this file wipes that out as well,
+          #   so the postgresql.conf generated by pg_createcluster has no include_dir and conf.d/*.conf
+          #   is never loaded. This project hit exactly that.
+          #   Whenever a distribution config file is replaced, write back every default still needed.
           add_include_dir = 'conf.d'
 
-    - name: 安装 PostgreSQL 与 PostGIS
+    - name: Install PostgreSQL and PostGIS
       ansible.builtin.apt:
         name: "{{ database_packages }}"
         state: present
         update_cache: true
         cache_valid_time: 3600
 
-    # ================= 装包后：依赖包创建的用户、目录与服务 =================
-    # 整块跳过 check 模式，理由见文件头。
+    # ================= After the install: users, directories and services created by the packages =================
+    # Skipped in check mode as a block; see the file header for why.
 
-    - name: 集群创建与配置
+    - name: Cluster creation and configuration
       when: not ansible_check_mode
       block:
 
-        # ---------- WAL 目录 ----------
-        # WAL 在独立卷上（00-base 已断言）。initdb 要求 waldir 为空且属主为 postgres。
-        # postgres 系统用户由 postgresql-common 的 postinst 创建，故必须在装包之后。
-        - name: 建立 WAL 目录
+        # ---------- WAL directory ----------
+        # WAL lives on its own volume (asserted in 00-base). initdb requires the waldir to be empty and
+        # owned by postgres. The postgres system user is created by postgresql-common's postinst, hence after the install.
+        - name: Create the WAL directory
           ansible.builtin.file:
             path: "{{ pg_waldir }}"
             state: directory
@@ -88,8 +90,8 @@
             group: postgres
             mode: "0700"
 
-        # ---------- 显式创建集群 ----------
-        - name: 查询已有集群
+        # ---------- Create the cluster explicitly ----------
+        - name: Query existing clusters
           ansible.builtin.command:
             cmd: pg_lsclusters --no-header
           register: _clusters
@@ -97,7 +99,7 @@
           check_mode: false
           failed_when: false
 
-        - name: 创建集群（locale=C，DD-63）
+        - name: Create the cluster (locale=C, DD-63)
           ansible.builtin.command:
             cmd: >-
               pg_createcluster {{ postgres_version }} {{ pg_cluster_name }}
@@ -110,16 +112,16 @@
             (postgres_version | string + ' ' + pg_cluster_name)
             not in (_clusters.stdout | default(''))
 
-        - name: 启动并自启集群
+        - name: Start the cluster and enable it at boot
           ansible.builtin.systemd_service:
             name: "postgresql@{{ postgres_version }}-{{ pg_cluster_name }}"
             enabled: true
             state: started
 
-        # ---------- 验证 locale 真的是 C ----------
-        # 本剧本的核心断言。集群一旦建错，后面所有工作都建在错误的地基上，
-        # 而症状要到 OS 大版本升级那天才显形。
-        - name: 查询集群 locale 与编码
+        # ---------- Verify the locale really is C ----------
+        # The core assertion of this playbook. If the cluster is created wrong, all later work sits on
+        # a wrong foundation, and the symptoms only show on the day of an OS major upgrade.
+        - name: Query the cluster locale and encoding
           ansible.builtin.command:
             cmd: >-
               psql -tAc "SELECT datcollate || '|' || datctype || '|' ||
@@ -129,25 +131,26 @@
           changed_when: false
           failed_when: false
 
-        - name: 断言集群 locale 为 C、编码为 UTF8
+        - name: Assert the cluster locale is C and the encoding UTF8
           ansible.builtin.assert:
             that:
               - _dblocale.stdout | trim == 'C|C|UTF8'
             fail_msg: >-
-              集群 locale 为「{{ _dblocale.stdout | trim }}」，应为 C|C|UTF8（DD-63）。
-              locale 在 initdb 时确定，无法在线更改——必须删除集群重建：
+              The cluster locale is "{{ _dblocale.stdout | trim }}", it should be C|C|UTF8 (DD-63).
+              The locale is fixed at initdb and cannot be changed online -- drop and recreate the cluster:
                 sudo pg_dropcluster {{ postgres_version }} {{ pg_cluster_name }} --stop
-                重跑本剧本
-              若集群中已有数据，先备份。
-            success_msg: "集群 locale：{{ _dblocale.stdout | trim }}（符合 DD-63）"
+                then rerun this playbook
+              If the cluster already holds data, back it up first.
+            success_msg: "Cluster locale: {{ _dblocale.stdout | trim }} (meets DD-63)"
 
-        # ---------- 参数 ----------
-        # conf.d 目录与 postgresql.conf 里的 include_dir，本该由 pg_createcluster
-        # 依据 createcluster.conf 的 add_include_dir 一起生成。本项目两样都没有，
-        # 根因是上面那个「禁止自动建集群」的文件整份覆盖了发行版默认值，
-        # 把 add_include_dir 一起抹掉了。默认值已补回，但对已建好的集群无效，
-        # 故这里补目录、补 include_dir，并在下发参数后实测它是否真的生效。
-        - name: 建立 conf.d 目录
+        # ---------- Parameters ----------
+        # The conf.d directory and the include_dir line in postgresql.conf should have been generated by
+        # pg_createcluster from add_include_dir in createcluster.conf. This project had neither, because
+        # the "no automatic cluster" file above replaced the distribution defaults wholesale and wiped out
+        # add_include_dir with them. The default has been written back, but that does not help an existing
+        # cluster, so the directory and include_dir are added here, and after deploying the parameters we
+        # test that they really take effect.
+        - name: Create the conf.d directory
           ansible.builtin.file:
             path: "{{ pg_confdir }}/conf.d"
             state: directory
@@ -155,9 +158,9 @@
             group: postgres
             mode: "0755"
 
-        # 已经建好的集群，postgresql.conf 已经生成，改 createcluster.conf 救不回来，
-        # 所以这里直接把 include_dir 补进去（幂等）。
-        - name: 确保 postgresql.conf 引入 conf.d
+        # For an existing cluster postgresql.conf has already been generated and changing
+        # createcluster.conf cannot fix it, so add include_dir here directly (idempotent).
+        - name: Make sure postgresql.conf includes conf.d
           ansible.builtin.lineinfile:
             path: "{{ pg_confdir }}/postgresql.conf"
             line: "include_dir = 'conf.d'"
@@ -167,7 +170,7 @@
             mode: "0644"
           notify: restart postgresql
 
-        - name: 下发 PostgreSQL 参数
+        - name: Deploy the PostgreSQL parameters
           ansible.builtin.template:
             src: ../files/postgresql-oss911.conf.j2
             dest: "{{ pg_confdir }}/conf.d/10-oss911.conf"
@@ -176,9 +179,10 @@
             mode: "0644"
           notify: restart postgresql
 
-        # 放行网段取自 inventory，开发机为空列表。生产上这里是 LB 节点所在网段——
-        # pg_hba 属数据库本体的配置，故归本步而不归需要它的那一步。
-        - name: 放行指定网段的数据库连接
+        # Allowed networks come from inventory; empty on the development machine. In production this is
+        # the network of the LB nodes -- pg_hba belongs to the database itself, so it lives in this step
+        # and not in the step that needs it.
+        - name: Allow database connections from the listed networks
           ansible.builtin.lineinfile:
             path: "{{ pg_confdir }}/pg_hba.conf"
             line: "host    all             all             {{ item.cidr }}        {{ item.method }}    # {{ item.comment | default('') }}"
@@ -190,37 +194,37 @@
           loop: "{{ pg_hba_allow }}"
           notify: restart postgresql
 
-        # 配置里写了什么，和地址是不是真的绑上了，是两回事——
-        # PG 对绑不上的监听地址是跳过并继续的（见 runbook/troubleshooting）。
-        - name: 查询实际监听的地址
+        # What the configuration says and whether the address is really bound are two different things --
+        # PG skips listen addresses it cannot bind and carries on (see runbook/troubleshooting).
+        - name: Query the addresses actually listened on
           ansible.builtin.command:
             cmd: ss -lntH "sport = :{{ pg_port }}"
           register: _pglisten
           changed_when: false
           check_mode: false
 
-        - name: 断言配置中的每个监听地址都真的绑上了
+        - name: Assert every configured listen address is really bound
           ansible.builtin.assert:
             that:
               - "_pglisten.stdout is search(item)"
             fail_msg: >-
-              配置要求监听「{{ item }}」，但 {{ pg_port }} 端口上没有它。
-              实际监听：{{ _pglisten.stdout | default('（无）') }}。
-              PostgreSQL 对绑不上的地址是跳过并继续的，所以服务照常 running、
-              pg_settings 也照常显示配置值——配置「已加载」不等于地址「已绑上」。
-              日志里应有 could not create listen socket for 这一行。
-              最常见的原因是该地址所属的接口此刻不存在。
-            success_msg: "监听地址 {{ item }} 已绑定"
+              The configuration requires listening on "{{ item }}", but port {{ pg_port }} has no such address.
+              Actually listening: {{ _pglisten.stdout | default('(none)') }}.
+              PostgreSQL skips addresses it cannot bind and carries on, so the service is running as usual
+              and pg_settings shows the configured value -- configuration "loaded" does not mean address "bound".
+              The log should contain a line "could not create listen socket for".
+              The most common cause is that the interface owning that address does not exist at the moment.
+            success_msg: "Listen address {{ item }} is bound"
           loop: >-
             {{ pg_listen_addresses.split(',')
                | map('trim') | reject('equalto','localhost') | list }}
           when: pg_listen_addresses != 'localhost'
 
-        # 参数要在建库之前真正加载，否则本次运行里的验证读到的是旧值
-        - name: 立即应用参数变更
+        # Parameters must really be loaded before the database is created, or the checks in this run read old values
+        - name: Apply parameter changes now
           ansible.builtin.meta: flush_handlers
 
-        - name: 查询关键参数实际值
+        - name: Query the actual value of a key parameter
           ansible.builtin.command:
             cmd: psql -tAc "SHOW shared_buffers"
           become_user: postgres
@@ -228,19 +232,18 @@
           changed_when: false
           failed_when: false
 
-        - name: 断言参数文件确实生效
+        - name: Assert the parameter file really takes effect
           ansible.builtin.assert:
             that:
               - _shb.stdout | trim == '8GB'
             fail_msg: >-
-              shared_buffers 实际为「{{ _shb.stdout | trim }}」，期望 8GB。
-              说明 conf.d/10-oss911.conf 没有被加载。用
+              shared_buffers is actually "{{ _shb.stdout | trim }}", expected 8GB.
+              conf.d/10-oss911.conf is not being loaded. Find the file actually in effect with
                 sudo -u postgres psql -tAc "SELECT sourcefile FROM pg_settings WHERE name='shared_buffers'"
-              查实际生效的文件是哪一个。
-            success_msg: "参数文件已生效（shared_buffers = {{ _shb.stdout | trim }}）"
+            success_msg: "Parameter file in effect (shared_buffers = {{ _shb.stdout | trim }})"
 
-        # ---------- 业务库与扩展 ----------
-        - name: 创建业务库
+        # ---------- Business database and extensions ----------
+        - name: Create the business database
           ansible.builtin.command:
             cmd: createdb --template=template0 --locale=C --encoding=UTF8 {{ pg_database }}
           become_user: postgres
@@ -248,24 +251,24 @@
           changed_when: _createdb.rc == 0
           failed_when: _createdb.rc != 0 and 'already exists' not in _createdb.stderr
 
-        # CREATE EXTENSION IF NOT EXISTS 即使什么都没做，也照样返回命令标签
-        # 「CREATE EXTENSION」，所以不能拿 stdout 判断改没改——要先查再建。
-        - name: 查询已启用的扩展
+        # CREATE EXTENSION IF NOT EXISTS returns the command tag "CREATE EXTENSION" even when it did
+        # nothing, so stdout cannot tell whether anything changed -- query first, then create.
+        - name: Query enabled extensions
           ansible.builtin.command:
             cmd: psql -d {{ pg_database }} -tAc "SELECT extname FROM pg_extension"
           become_user: postgres
           register: _ext_have
           changed_when: false
 
-        - name: 启用扩展
+        - name: Enable extensions
           ansible.builtin.command:
             cmd: psql -d {{ pg_database }} -c "CREATE EXTENSION {{ item }}"
           become_user: postgres
           loop: "{{ pg_extensions }}"
           when: item not in (_ext_have.stdout_lines | map('trim') | list)
 
-        # ---------- ICU 可用性：DD-63 的列级 collation 依赖它 ----------
-        - name: 查询 ICU 排序规则
+        # ---------- ICU availability: the column-level collations of DD-63 depend on it ----------
+        - name: Query ICU collations
           ansible.builtin.command:
             cmd: >-
               psql -d {{ pg_database }} -tAc
@@ -275,20 +278,20 @@
           changed_when: false
           failed_when: false
 
-        - name: 断言 ICU 排序规则可用
+        - name: Assert the ICU collations are available
           ansible.builtin.assert:
             that:
               - _icu.stdout | trim == '2'
             fail_msg: >-
-              ICU 排序规则 ar-x-icu / en-x-icu 不可用（找到 {{ _icu.stdout | trim }} 个）。
-              DD-63 的列级 collation 依赖它们，缺失则 ddl/02_core_dimensions.sql 无法执行。
-            success_msg: "ICU 排序规则可用：ar-x-icu · en-x-icu"
+              ICU collations ar-x-icu / en-x-icu are not available (found {{ _icu.stdout | trim }}).
+              The column-level collations of DD-63 depend on them; without them ddl/02_core_dimensions.sql cannot run.
+            success_msg: "ICU collations available: ar-x-icu, en-x-icu"
 
-        # ---------- ICU 是否真的在起作用 ----------
-        # 「可用」不等于「生效」。与网段那次同一性质：断言全过，功能可以是空的。
-        # 故用真实会分叉的阿语数据比一次——ICU ar 把 همزة 变体归到一起，
-        # 字节序把同一名字的两种拼法拆到列表两端。
-        - name: 实测 ICU 排序与字节序确实不同
+        # ---------- Does ICU really take effect ----------
+        # "Available" is not "in effect". Same nature as the network segments: every assert can pass while
+        # the function is empty. So compare once with Arabic data that really diverges -- ICU ar groups the
+        # hamza variants together, byte order splits two spellings of the same name to both ends of the list.
+        - name: Test that ICU ordering really differs from byte order
           ansible.builtin.command:
             cmd: >-
               psql -d {{ pg_database }} -tAc
@@ -302,15 +305,16 @@
           changed_when: false
           failed_when: false
 
-        - name: 断言 ICU 排序确实改变了结果
+        - name: Assert ICU ordering really changes the result
           ansible.builtin.assert:
             that:
               - _collcheck.stdout | trim == 'differs'
             fail_msg: >-
-              ICU 阿语排序与字节序结果相同（「{{ _collcheck.stdout | trim }}」），
-              说明列级 collation 未真正生效。与网段隔离那次同一性质：断言存在很容易，
-              验证生效才是要点。往下做没有意义，先查 PostgreSQL 的 ICU 编译支持。
-            success_msg: "ICU 阿语排序已生效（与字节序结果不同）"
+              ICU Arabic ordering gives the same result as byte order ("{{ _collcheck.stdout | trim }}"),
+              so the column-level collation does not really take effect. Same nature as network isolation:
+              asserting existence is easy, verifying effect is the point. There is no point going further;
+              check PostgreSQL's ICU build support first.
+            success_msg: "ICU Arabic ordering in effect (differs from byte order)"
 
   handlers:
     - name: restart postgresql

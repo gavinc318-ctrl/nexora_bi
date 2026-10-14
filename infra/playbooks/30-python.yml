@@ -1,30 +1,33 @@
-# 30-python —— Python 侧：Airflow 与 dbt
+# 30-python -- the Python side: Airflow, dbt and the ingestion program
 #
-# 两个 venv，不是一个。Airflow 与 dbt 的依赖长期相互冲突，合在一起要么装不上，
-# 要么装上之后某一方被静默降级——后者更坏，因为它要到运行期才显形。
-# Airflow 用 BashOperator 调 dbt 的可执行文件，两边只共享项目目录。
+# Separate venvs, not one. Airflow's and dbt's dependencies have conflicted for a long time; put together
+# they either fail to install, or install with one side silently downgraded -- the latter is worse,
+# because it only shows at run time. Airflow calls the dbt executable with BashOperator; the two share
+# only the project directory. The ingestion program gets a third venv for the same reason (DD-84).
 #
-# ★ 一律按离网方式安装，即使开发机此刻有网。
-#   流程分两段：取料（需要网）与安装（不需要网）。安装一段永远走
-#   --no-index --find-links，从本机 wheelhouse 装。
-#   这样做的理由是：开发机能上网这件事，会让所有离网问题推迟到最糟的时刻才暴露。
-#   多一步取料的代价，换这条链路从第一天起就是真的。
+# * Always install the offline way, even though the development machine has internet access right now.
+#   Two stages: fetch (needs network) and install (no network). The install stage always uses
+#   --no-index --find-links and installs from the local wheelhouse.
+#   Why: a development machine with internet access postpones every offline problem to the worst possible
+#   moment. One extra fetch step buys a path that is real from day one.
 #
-# ★ 取料用 pip wheel，不用 pip download。两者的区别只在一处，但那一处是关键：
-#   少数包（如 dbt-core-experimental-parser）上游只发源码包。pip download 会把
-#   .tar.gz 原样存下，装机时现场编译——那等于把编译器、头文件和一次可能失败的
-#   构建搬进了生产网。pip wheel 在**取料这台有网的机器上**就把源码包构建成 .whl，
-#   装机侧因此只会遇到轮子。取料之后有一条断言守着这件事。
+# * Fetch with pip wheel, not pip download. They differ in one place, and that place is the point:
+#   a few packages (e.g. dbt-core-experimental-parser) are published upstream as source only. pip download
+#   stores the .tar.gz as is, to be compiled at install time -- which carries a compiler, headers and a
+#   build that may fail into the production network. pip wheel builds the source into a .whl ON THE
+#   NETWORKED FETCH MACHINE, so the install side only ever meets wheels. An assert after the fetch guards this.
 #
-# ★ Airflow 的 constraints 是硬条件不是建议。不带它解出来的依赖组合
-#   大概率装不出一个能跑的环境。URL 由 Airflow 版本与 Python 次版本共同决定。
-#   dbt 没有官方 constraints，故自己冻结 lock（DD-69）。
+# * Airflow's constraints are a hard requirement, not a suggestion. A dependency set resolved without them
+#   will very likely not produce a working environment. The URL depends on the Airflow version and the
+#   Python minor version. dbt and the ingestion program have no official constraints, so we freeze our own
+#   lock (DD-69 · DD-83).
 
-- name: Python 侧 Airflow、dbt 与接入程序
+- name: Python side -- Airflow, dbt and the ingestion program
   hosts: all
-  # 本剧本不用任何 fact（2026-10-13 逐个核对：剧本、tasks/ 与模板中均无 ansible_* 引用，
-  # 也不用依赖 fact 的 package / service 模块）。以 root 收集 fact 会扫 LVM 与全部块设备，
-  # 在本机上有时要等几分钟——不需要的就不收。要用 fact 时删掉这一行并在此说明用的是哪个。
+  # This playbook uses no facts (checked one by one on 2026-10-13: no ansible_* references in the
+  # playbook, tasks/ or templates, and no fact-dependent package / service modules). Gathering facts
+  # as root scans LVM and every block device, which on this machine sometimes takes minutes -- so we
+  # do not gather what we do not need. To use a fact, delete this line and say here which fact is used.
   gather_facts: false
   become: true
 
@@ -33,45 +36,46 @@
     af_venv: "{{ venv_root }}/venv-airflow"
     dbt_venv: "{{ venv_root }}/venv-dbt"
     constraints_file: "{{ wheelhouse }}/constraints-airflow-{{ airflow_version }}-py312.txt"
-    # dbt 的 lock 以仓库那份为唯一权威，安装直接读它；wheelhouse 里不再存副本（DD-83）。
-    # 开发机上控制节点即目标机，playbook_dir 的路径在目标机上同样有效；离网时 infra/
-    # 随介质交付（DD-70），路径同样成立。将来若从别处远程驱动，须先把它复制到目标机。
+    # The dbt lock in the repository is the single authority and installation reads it directly; the
+    # wheelhouse no longer keeps a copy (DD-83). On the development machine the control node is the target,
+    # so the playbook_dir path is valid on the target too; offline, infra/ ships with the media (DD-70) and
+    # the path still holds. If this is ever driven remotely, copy it to the target first.
     dbt_lock: "{{ playbook_dir | dirname }}/dbt-requirements.lock"
-    # 旧做法的产物：DD-83 之前 lock 存在 wheelhouse 里。见下方「清掉 wheelhouse 里的旧 lock」
+    # Leftover of the old approach: before DD-83 the lock lived in the wheelhouse. See "Remove the old lock from the wheelhouse" below
     dbt_lock_legacy: "{{ wheelhouse }}/dbt-requirements.lock"
-    # 接入程序（DD-84）：第三个 venv。lock 同样以仓库那份为唯一权威（DD-83）
+    # The ingestion program (DD-84): the third venv. Its lock is likewise the repository copy (DD-83)
     ingest_venv: "{{ venv_root }}/venv-ingest"
     ingest_lock: "{{ playbook_dir | dirname }}/ingest-requirements.lock"
     ingest_src_repo: "{{ playbook_dir | dirname | dirname }}/ingest"
-    # 构建本方的包时 pip 会在源码目录里写 build/ 与 *.egg-info——以 root 写进仓库，下次 git
-    # 操作就会遇到 root 属主的文件。故先复制到这里，在这里构建
+    # Building our package makes pip write build/ and *.egg-info into the source directory -- written into the
+    # repository as root, the next git operation runs into root-owned files. So copy it here and build here.
     ingest_src_dir: "{{ venv_root }}/ingest-src"
 
   tasks:
 
-    - name: 断言 dbt 并发不超过会话池
+    - name: Assert dbt concurrency does not exceed the session pool
       ansible.builtin.assert:
         that:
           - pgb_pool_size_session >= 1
-        fail_msg: "会话池大小即 dbt 的 threads 上限，不能为零"
-        success_msg: "dbt threads 上限 = 会话池大小 {{ pgb_pool_size_session }}"
+        fail_msg: "The session pool size is the upper limit for dbt threads and cannot be zero"
+        success_msg: "dbt threads limit = session pool size {{ pgb_pool_size_session }}"
 
-    - name: 安装构建依赖
+    - name: Install build dependencies
       ansible.builtin.apt:
         name:
           - python3-venv
           - python3-pip
-          # 下面两项只为**取料**服务：pip wheel 要把少数只发源码包的依赖构建成轮子。
-          # 安装侧不需要它们（wheelhouse 里只有轮子，见取料后的断言）。
-          # 生产机若由平台基线交付且不含编译器，这两项可以不装——届时取料必须
-          # 在另一台有网的同版本机器上完成。
+          # The next two serve the FETCH only: pip wheel has to build the few source-only dependencies into wheels.
+          # The install side does not need them (the wheelhouse holds wheels only, see the assert after the fetch).
+          # If production machines come from a platform baseline without a compiler, these two can be left out --
+          # the fetch must then be done on another networked machine of the same version.
           - build-essential
           - libpq-dev
         state: present
         update_cache: true
         cache_valid_time: 3600
 
-    - name: 建立服务账号与目录
+    - name: Create the service account and its directories
       ansible.builtin.user:
         name: airflow
         system: true
@@ -79,13 +83,13 @@
         home: "{{ airflow_home }}"
         create_home: true
 
-    # 权限按「谁要用」给，不按「越紧越好」给。
-    #   venv_root  0755：airflow 服务账号要能进去执行里面的二进制。
-    #              venv 里没有秘密——口令都在 /etc/oss911 下，0600。
-    #              给 0750 root:root 的话 airflow 连目录都进不去，
-    #              症状是执行二进制报 Permission denied，看着像程序坏了。
-    #   wheelhouse 0750：只有 root 装包，服务账号不需要
-    - name: 建立目录
+    # Permissions follow "who needs to use it", not "the tighter the better".
+    #   venv_root  0755: the airflow service account must be able to enter it and run the binaries.
+    #              There are no secrets in a venv -- passwords live under /etc/oss911 at 0600.
+    #              With 0750 root:root airflow cannot even enter the directory, and the symptom is
+    #              "Permission denied" when running a binary, which looks like a broken program.
+    #   wheelhouse 0750: only root installs packages; the service account does not need it
+    - name: Create directories
       ansible.builtin.file:
         path: "{{ item.path }}"
         state: directory
@@ -102,44 +106,46 @@
         - { path: "{{ airflow_home }}/dags",    owner: airflow, mode: "0750" }
         - { path: "{{ airflow_home }}/logs",    owner: airflow, mode: "0750" }
 
-    - name: 配置与安装
+    - name: Configuration and installation
       when: not ansible_check_mode
       block:
 
-        # ========== 取料：唯一需要网络的一段，默认不跑 ==========
-        # 为什么要有开关：pip download 即使不重传字节，也仍然要连 PyPI 重新解析依赖。
-        # 没有开关的话，这个「为离网写的」剧本在真正离网的机器上第一步就失败。
-        # 规则：wheelhouse 已就绪就跳过；空的时候自动取一次；要更新时显式
-        # -e wheelhouse_refresh=true。
-        # 逐个子目录检查，不看总数：新加一个子目录（如 ingest）时，其余子目录早已有轮子，
-        # 按总数判断会得出「已就绪、不取料」，新目录永远是空的，要到离线安装时才失败
-        - name: 检查 wheelhouse 各子目录是否已就绪
+        # ========== Fetch: the only stage that needs the network; off by default ==========
+        # Why a switch: even when no bytes are transferred again, pip still contacts PyPI to resolve the
+        # dependency tree. Without a switch this playbook, "written for offline", fails at step one on a
+        # really offline machine.
+        # Rule: skip when the wheelhouse is ready; fetch once automatically when it is empty; to refresh,
+        # pass -e wheelhouse_refresh=true explicitly.
+        # Check each subdirectory, not the total: when a subdirectory is added (such as ingest), the others
+        # already hold wheels, a total would conclude "ready, no fetch", and the new directory would stay
+        # empty until the offline install fails.
+        - name: Check whether each wheelhouse subdirectory is ready
           ansible.builtin.find:
             paths: "{{ wheelhouse }}/{{ item }}"
             patterns: "*.whl,*.tar.gz"
           loop: [airflow, dbt, ingest]
           register: _wh_each
 
-        - name: 汇总 wheelhouse 现状
+        - name: Summarise the wheelhouse state
           ansible.builtin.set_fact:
             _wh:
               matched: "{{ _wh_each.results | map(attribute='matched') | sum }}"
             _wh_empty: "{{ _wh_each.results | selectattr('matched', 'equalto', 0) | map(attribute='item') | list }}"
 
-        # 重新解析 dbt 或接入的依赖意味着版本会变，轮子也要重取
-        - name: 判定本次是否取料
+        # Re-resolving the dbt or ingestion dependencies means versions change, so the wheels must be fetched again too
+        - name: Decide whether to fetch in this run
           ansible.builtin.set_fact:
             _do_fetch: >-
               {{ (wheelhouse_refresh | bool) or (dbt_relock | bool) or (ingest_relock | bool)
                  or (_wh_empty | length) > 0 }}
 
-        - name: 报告取料决定
+        - name: Report the fetch decision
           ansible.builtin.debug:
             msg: >-
-              wheelhouse 现有 {{ _wh.matched }} 个包{{ '（空的子目录：' ~ (_wh_empty | join('、')) ~ '）' if _wh_empty else '' }}；本次{{ '取料（需要网络）' if _do_fetch | bool else '不取料，直接离线安装' }}。
-              要更新 wheelhouse：-e wheelhouse_refresh=true
+              The wheelhouse holds {{ _wh.matched }} packages{{ ' (empty subdirectories: ' ~ (_wh_empty | join(', ')) ~ ')' if _wh_empty else '' }}; this run will {{ 'fetch (network needed)' if _do_fetch | bool else 'not fetch and install offline directly' }}.
+              To refresh the wheelhouse: -e wheelhouse_refresh=true
 
-        - name: 取 Airflow 的 constraints 文件
+        - name: Fetch Airflow's constraints file
           when: _do_fetch | bool
           ansible.builtin.get_url:
             url: "{{ airflow_constraints_url }}"
@@ -147,30 +153,32 @@
             mode: "0644"
           register: _constraints
 
-        - name: 记录 constraints 的校验和
+        - name: Record the checksum of the constraints file
           ansible.builtin.stat:
             path: "{{ constraints_file }}"
             checksum_algorithm: sha256
           register: _constraints_stat
 
-        # ★ 上一版只打印校验和、让人「填回 MANIFEST」，从不比对——下载到的或介质带来的
-        #   文件与登记的不同也照样往下装。只在纸面上钉死（DD-83）。
-        - name: 断言 constraints 文件与钉死的校验和相同
+        # * The previous version only printed the checksum for someone to "fill into MANIFEST" and never compared
+        #   it -- a downloaded or media-supplied file different from the registered one was installed anyway.
+        #   Pinned on paper only (DD-83).
+        - name: Assert the constraints file matches the pinned checksum
           ansible.builtin.assert:
             that:
               - _constraints_stat.stat.exists
               - _constraints_stat.stat.checksum == airflow_constraints_sha256
             fail_msg: |-
-              {{ constraints_file }} 与钉死的 SHA-256 不符（或文件不存在）：
-                钉死的（inventory · MANIFEST）：{{ airflow_constraints_sha256 }}
-                实际文件：                     {{ _constraints_stat.stat.checksum | default('（文件不存在）') }}
-              不要直接改 inventory 去迁就文件。先查清哪一个是对的：
-                有网时：curl -sSfL {{ airflow_constraints_url }} | sha256sum
-                离网时：核对介质随附的校验和清单
-              确属升级 Airflow 而换了文件，才同时改 inventory 的 airflow_constraints_sha256 与 MANIFEST。
-            success_msg: "constraints 文件校验和与钉死值相同：{{ airflow_constraints_sha256[:16] }}…"
+              {{ constraints_file }} does not match the pinned SHA-256 (or does not exist):
+                pinned (inventory, MANIFEST): {{ airflow_constraints_sha256 }}
+                actual file:                  {{ _constraints_stat.stat.checksum | default('(file does not exist)') }}
+              Do not edit inventory to match the file. First find out which one is right:
+                online:  curl -sSfL {{ airflow_constraints_url }} | sha256sum
+                offline: check against the checksum list shipped with the media
+              Only when the file changed because Airflow is being upgraded, change both
+              airflow_constraints_sha256 in inventory and MANIFEST.
+            success_msg: "constraints file matches the pinned checksum: {{ airflow_constraints_sha256[:16] }}..."
 
-        - name: 取 Airflow 及其全部传递依赖的轮子
+        - name: Fetch wheels for Airflow and all its transitive dependencies
           ansible.builtin.command:
             cmd: >-
               {{ python_bin }} -m pip wheel
@@ -181,11 +189,12 @@
           changed_when: "'Saved' in _dl_af.stdout or 'Created wheel' in _dl_af.stdout"
           when: _do_fetch | bool
 
-        # dbt 没有官方 constraints：由本方解析一次、冻结成 lock 入库，此后按 lock 取料与安装。
-        # lock 在仓库里，只在显式 -e dbt_relock=true 时重新解析，结果写回仓库路径，
-        # 由人审 diff 后提交（DD-83）。以调用者身份（become: false）写，使文件仍归仓库属主——
-        # 以 root 写进仓库，下次 git 操作就会遇到 root 属主的文件。
-        - name: 重新解析 dbt 依赖并写回仓库的 lock（需要网络，仅 -e dbt_relock=true）
+        # dbt has no official constraints: we resolve once, freeze the result into a lock in the repository, and
+        # fetch and install by that lock. The lock is re-resolved only with an explicit -e dbt_relock=true; the
+        # result is written back to the repository path and reviewed as a diff before committing (DD-83). It is
+        # written as the caller (become: false) so the file stays owned by the repository owner -- written as root,
+        # the next git operation runs into root-owned files.
+        - name: Re-resolve dbt dependencies and write the repository lock (network needed, only with -e dbt_relock=true)
           ansible.builtin.shell:
             cmd: |
               set -e
@@ -198,37 +207,37 @@
           become: false
           when: dbt_relock | bool
 
-        - name: 提示审阅新的 lock
+        - name: Ask for a review of the new dbt lock
           ansible.builtin.debug:
             msg: >-
-              已重新解析并写入 {{ dbt_lock }}。它只是候选：在仓库里
-              git diff infra/dbt-requirements.lock 审阅版本变化，确认后提交，
-              并同步更新 artifacts/MANIFEST.md 的 dbt 一行。未提交前不要拿它去装生产。
+              Re-resolved and wrote {{ dbt_lock }}. It is only a candidate: review the version changes with
+              git diff infra/dbt-requirements.lock in the repository, commit once confirmed, and update the dbt
+              row of artifacts/MANIFEST.md accordingly. Do not install production from it before it is committed.
           when: dbt_relock | bool
 
-        - name: 检查仓库中的 dbt lock
+        - name: Check the dbt lock in the repository
           ansible.builtin.stat:
             path: "{{ dbt_lock }}"
           register: _dbtlock
 
-        - name: 断言仓库中的 dbt lock 存在
+        - name: Assert the dbt lock exists in the repository
           ansible.builtin.assert:
             that:
               - _dbtlock.stat.exists
             fail_msg: >-
-              {{ dbt_lock }} 不存在。它是 dbt 依赖的唯一权威（DD-83），应在仓库里；
-              缺失多半是仓库不完整。确需重新生成时：-e dbt_relock=true（需要网络），
-              生成后审阅并提交。
-            success_msg: "dbt lock：{{ dbt_lock }}"
+              {{ dbt_lock }} does not exist. It is the single authority for dbt dependencies (DD-83) and belongs in
+              the repository; missing most likely means an incomplete checkout. If it really must be regenerated:
+              -e dbt_relock=true (network needed), then review and commit.
+            success_msg: "dbt lock: {{ dbt_lock }}"
 
-        # 换一种做法时，旧做法的产物不会自己消失（CLAUDE.md 第 5 节第四条）：
-        # DD-83 之前 lock 存在 wheelhouse 里。留着它，就会有人以为装的是它。
-        - name: 清掉 wheelhouse 里的旧 lock
+        # When the approach changes, the old approach's leftovers do not disappear by themselves (CLAUDE.md
+        # section 5, item four): before DD-83 the lock lived in the wheelhouse. Left there, someone will think it is what gets installed.
+        - name: Remove the old lock from the wheelhouse
           ansible.builtin.file:
             path: "{{ dbt_lock_legacy }}"
             state: absent
 
-        - name: 取 dbt 的轮子（按 lock）
+        - name: Fetch dbt wheels (by the lock)
           ansible.builtin.command:
             cmd: >-
               {{ python_bin }} -m pip wheel
@@ -238,9 +247,9 @@
           changed_when: "'Saved' in _dl_dbt.stdout or 'Created wheel' in _dl_dbt.stdout"
           when: _do_fetch | bool
 
-        # 接入程序的依赖：做法与 dbt 完全相同（DD-83 · DD-84）。
-        # pip freeze 默认不列 setuptools，而离网构建本方的包要用它，故 --all 再去掉 pip 自身
-        - name: 重新解析接入程序的依赖并写回仓库的 lock（需要网络，仅 -e ingest_relock=true）
+        # Ingestion program dependencies: exactly the same approach as dbt (DD-83 · DD-84).
+        # pip freeze leaves out setuptools by default, but building our package offline needs it, hence --all minus pip itself
+        - name: Re-resolve ingestion dependencies and write the repository lock (network needed, only with -e ingest_relock=true)
           ansible.builtin.shell:
             cmd: |
               set -e
@@ -253,28 +262,30 @@
           become: false
           when: ingest_relock | bool
 
-        - name: 提示审阅接入程序的新 lock
+        - name: Ask for a review of the new ingestion lock
           ansible.builtin.debug:
             msg: >-
-              已重新解析并写入 {{ ingest_lock }}。它只是候选：git diff infra/ingest-requirements.lock
-              审阅，新出现的包须先确认许可（LD-09 4.2），再同步 MANIFEST 与 compliance/components.csv 后提交。
+              Re-resolved and wrote {{ ingest_lock }}. It is only a candidate: review it with
+              git diff infra/ingest-requirements.lock; any new package must have its licence confirmed first (LD-09 4.2),
+              then update MANIFEST and compliance/components.csv and commit.
           when: ingest_relock | bool
 
-        - name: 检查仓库中的接入程序 lock
+        - name: Check the ingestion lock in the repository
           ansible.builtin.stat:
             path: "{{ ingest_lock }}"
           register: _inglock
 
-        - name: 断言仓库中的接入程序 lock 存在
+        - name: Assert the ingestion lock exists in the repository
           ansible.builtin.assert:
             that:
               - _inglock.stat.exists
             fail_msg: >-
-              {{ ingest_lock }} 不存在。它是接入程序依赖的唯一权威（DD-83 · DD-84），应在仓库里。
-              确需重新生成时：-e ingest_relock=true（需要网络），生成后审阅并提交。
-            success_msg: "接入程序 lock：{{ ingest_lock }}"
+              {{ ingest_lock }} does not exist. It is the single authority for the ingestion program's dependencies
+              (DD-83 · DD-84) and belongs in the repository. If it really must be regenerated: -e ingest_relock=true
+              (network needed), then review and commit.
+            success_msg: "Ingestion lock: {{ ingest_lock }}"
 
-        - name: 取接入程序的轮子（按 lock）
+        - name: Fetch ingestion wheels (by the lock)
           ansible.builtin.command:
             cmd: >-
               {{ python_bin }} -m pip wheel
@@ -284,12 +295,12 @@
           changed_when: "'Saved' in _dl_ing.stdout or 'Created wheel' in _dl_ing.stdout"
           when: _do_fetch | bool
 
-        # 取料是**增量**的：pip wheel 往同一个目录里加东西，不会清理历史。
-        # 所以换取料方式之后，上一轮 pip download 留下的源码包还会躺在那里
-        # （2026-10-08 实测，dbt_core_experimental_parser-2.0.5.tar.gz）。
-        # 只在取料时清理：离网从介质安装时一个文件都不该删——那种情况下
-        # 断言失败就该让它失败，因为问题在介质，不在本机。
-        - name: 找出取料遗留的源码包
+        # Fetching is INCREMENTAL: pip wheel adds to the same directory and never cleans history.
+        # So after switching the fetch method, source packages left by the last pip download are still lying there
+        # (observed 2026-10-08: dbt_core_experimental_parser-2.0.5.tar.gz).
+        # Clean up only when fetching: when installing offline from media not a single file should be deleted --
+        # in that case the assert should fail, because the problem is in the media, not on this machine.
+        - name: Find source packages left over by fetching
           ansible.builtin.find:
             paths:
               - "{{ wheelhouse }}/airflow"
@@ -299,7 +310,7 @@
           register: _sdist_stale
           when: _do_fetch | bool
 
-        - name: 清掉取料遗留的源码包
+        - name: Remove source packages left over by fetching
           ansible.builtin.file:
             path: "{{ item }}"
             state: absent
@@ -308,15 +319,15 @@
             label: "{{ item | basename }}"
           when: _do_fetch | bool
 
-        # 删掉源码包之后，对应的轮子必须在场。这里不逐个核对包名——
-        # 真正的兜底在安装一段：--no-index 的 pip 装不到就当场失败，
-        # 不会默默上网取来。那个失败比在这里做名字匹配更可靠，也更好读。
+        # Once the source packages are deleted, the corresponding wheels must be present. Package names are not
+        # checked one by one here -- the real safety net is the install stage: pip with --no-index fails on the
+        # spot instead of quietly going online. That failure is more reliable and easier to read than name matching here.
 
-        # 下面这一条是「构建能力不进墙内」这条原则的执行者。
-        # 2026-10-08 实测：pip download 取下来的 190 个包里混着一个源码包
-        # （dbt_core_experimental_parser-2.0.5.tar.gz）——上游没发轮子。
-        # 改用 pip wheel 之后不应再有源码包；这条断言保证以后也不会悄悄混进来。
-        - name: 断言 wheelhouse 中没有源码包
+        # The next one enforces the principle "no build capability inside the wall".
+        # Observed 2026-10-08: among the 190 packages fetched by pip download was one source package
+        # (dbt_core_experimental_parser-2.0.5.tar.gz) -- upstream publishes no wheel.
+        # With pip wheel there should be no source packages any more; this assert keeps it that way.
+        - name: Assert the wheelhouse contains no source packages
           ansible.builtin.find:
             paths:
               - "{{ wheelhouse }}/airflow"
@@ -325,23 +336,22 @@
             patterns: "*.tar.gz,*.zip"
           register: _sdist
 
-        - name: 断言 wheelhouse 中没有源码包（判定）
+        - name: Assert the wheelhouse contains no source packages (verdict)
           ansible.builtin.assert:
             that:
               - "(_sdist.matched | int) == 0"
             fail_msg: >-
-              wheelhouse 里有 {{ _sdist.matched }} 个源码包：
-              {{ _sdist.files | map(attribute='path') | map('basename') | join('、') }}。
-              源码包要在装机时现场编译，等于把编译器与一次可能失败的构建带进生产网。
-              处置：在有网的机器上 -e wheelhouse_refresh=true 重新取料
-              （pip wheel 会把它们构建成轮子），构建失败的包要单独查上游。
-            success_msg: "wheelhouse 中只有轮子，装机侧不需要编译器"
+              The wheelhouse contains {{ _sdist.matched }} source package(s):
+              {{ _sdist.files | map(attribute='path') | map('basename') | join(', ') }}.
+              Source packages are compiled at install time, which brings a compiler and a build that may fail into the
+              production network. Remedy: on a networked machine refetch with -e wheelhouse_refresh=true
+              (pip wheel builds them into wheels); packages that fail to build must be looked into upstream.
+            success_msg: "The wheelhouse holds wheels only; the install side needs no compiler"
 
-        # 这里要重新数一遍，不能用取料前那次 _wh 的结果：
-        # 前一次的数字只说明「要不要取料」，这一次才说明「现在装得了吗」。
-        # 取料开着却一个包都没取到（源地址不通、constraints 解析失败），
-        # 以及离网时介质没放对位置，都只有在这一次计数里才看得见。
-        - name: 复数 wheelhouse 中的轮子
+        # Count again here; the _wh result from before the fetch will not do: that number only said "fetch or not",
+        # this one says "can we install now". Fetching enabled but nothing fetched (source unreachable, constraints
+        # resolution failed), and offline media placed in the wrong location, only show up in this count.
+        - name: Count the wheels in the wheelhouse again
           ansible.builtin.find:
             paths:
               - "{{ wheelhouse }}/airflow"
@@ -350,29 +360,29 @@
             patterns: "*.whl"
           register: _wh_final
 
-        - name: 断言离线安装的前提已具备
+        - name: Assert the prerequisites for offline installation are met
           ansible.builtin.assert:
             that:
               - "(_wh_final.matched | int) > 0"
             fail_msg: >-
-              wheelhouse（{{ wheelhouse }}）里没有轮子，无法离线安装。
-              有网时用 -e wheelhouse_refresh=true 取一次；
-              离网时把介质上的 wheelhouse 目录与 {{ constraints_file | basename }}
-              一并放到该路径下再跑（dbt 的 lock 在 infra/ 里，随介质交付，不在 wheelhouse）。
-              本次{{ '执行了取料但未取到任何轮子——先看上面取料那两步的输出' if _do_fetch | bool else '未取料' }}。
-            success_msg: "离线安装的前提具备：wheelhouse 中有 {{ _wh_final.matched }} 个轮子"
+              The wheelhouse ({{ wheelhouse }}) contains no wheels; offline installation is impossible.
+              Online: fetch once with -e wheelhouse_refresh=true;
+              offline: put the wheelhouse directory from the media together with {{ constraints_file | basename }}
+              into that path and run again (the dbt and ingestion locks are in infra/ and ship with the media, not in the wheelhouse).
+              This run {{ 'fetched but got no wheels at all -- look at the output of the fetch steps above first' if _do_fetch | bool else 'did not fetch' }}.
+            success_msg: "Prerequisites for offline installation met: {{ _wh_final.matched }} wheels in the wheelhouse"
 
-        # ========== 安装：不走网络 ==========
-        # --no-index 是这一段的关键：它让 pip 完全不去问 PyPI。
-        # 若 wheelhouse 里缺东西，这里会当场失败——而不是默默上网取来，
-        # 把一个离网环境里必然出现的问题藏到交付之后。
+        # ========== Install: no network ==========
+        # --no-index is the point of this stage: pip does not ask PyPI at all.
+        # If something is missing from the wheelhouse this fails on the spot -- instead of quietly fetching it online
+        # and hiding a problem that is certain to appear offline until after delivery.
 
-        - name: 建立 Airflow 的 venv
+        - name: Create the Airflow venv
           ansible.builtin.command:
             cmd: "{{ python_bin }} -m venv {{ af_venv }}"
             creates: "{{ af_venv }}/bin/python"
 
-        - name: 离线安装 Airflow
+        - name: Install Airflow offline
           ansible.builtin.command:
             cmd: >-
               {{ af_venv }}/bin/pip install
@@ -382,12 +392,12 @@
           register: _inst_af
           changed_when: "'Successfully installed' in _inst_af.stdout"
 
-        - name: 建立 dbt 的 venv
+        - name: Create the dbt venv
           ansible.builtin.command:
             cmd: "{{ python_bin }} -m venv {{ dbt_venv }}"
             creates: "{{ dbt_venv }}/bin/python"
 
-        - name: 离线安装 dbt
+        - name: Install dbt offline
           ansible.builtin.command:
             cmd: >-
               {{ dbt_venv }}/bin/pip install
@@ -396,13 +406,13 @@
           register: _inst_dbt
           changed_when: "'Successfully installed' in _inst_dbt.stdout"
 
-        # ---------- 接入程序（DD-84）----------
-        - name: 建立接入程序的 venv
+        # ---------- Ingestion program (DD-84) ----------
+        - name: Create the ingestion venv
           ansible.builtin.command:
             cmd: "{{ python_bin }} -m venv {{ ingest_venv }}"
             creates: "{{ ingest_venv }}/bin/python"
 
-        - name: 离线安装接入程序的依赖
+        - name: Install the ingestion dependencies offline
           ansible.builtin.command:
             cmd: >-
               {{ ingest_venv }}/bin/pip install
@@ -411,7 +421,7 @@
           register: _inst_ingdeps
           changed_when: "'Successfully installed' in _inst_ingdeps.stdout"
 
-        - name: 复制接入程序源码到构建目录
+        - name: Copy the ingestion source to the build directory
           ansible.builtin.copy:
             src: "{{ ingest_src_repo }}/"
             dest: "{{ ingest_src_dir }}/"
@@ -421,7 +431,7 @@
             directory_mode: "0755"
           register: _ingsrc
 
-        - name: 查询接入程序是否已安装
+        - name: Query whether the ingestion program is installed
           ansible.builtin.command:
             cmd: "{{ ingest_venv }}/bin/pip show oss911-ingest"
           register: _ingshow
@@ -429,10 +439,11 @@
           failed_when: false
           check_mode: false
 
-        # pip install 一个本地目录，每次都会重新构建、重新安装，changed 永远为真。
-        # 故只在源码变了或尚未安装时才装。--no-build-isolation：构建隔离要从 PyPI 取 setuptools，
-        # 离网时没有，改用 lock 里已装进 venv 的那份。--no-deps：依赖已按 lock 装好，不让它再解析
-        - name: 离线安装接入程序
+        # pip install of a local directory rebuilds and reinstalls every time, so changed would always be true.
+        # Hence install only when the source changed or it is not installed yet. --no-build-isolation: build
+        # isolation would fetch setuptools from PyPI, which does not exist offline, so use the copy already
+        # installed into the venv from the lock. --no-deps: dependencies are installed by the lock; do not let it resolve again.
+        - name: Install the ingestion program offline
           ansible.builtin.command:
             cmd: >-
               {{ ingest_venv }}/bin/pip install
@@ -440,12 +451,11 @@
               {{ ingest_src_dir }}
           when: _ingsrc.changed or _ingshow.rc != 0
 
-        # 以真正要用它的身份验一次——不是以 root。
-        # 上一版的版本检查是 root 跑的，而 root 进得去任何目录，
-        # 于是「airflow 用户能不能执行这个二进制」从来没被验过，
-        # 直到 db migrate 报 Permission denied 才显形。
-        # 与 auth_query 那次同一条教训：用于验证的身份不能是实际使用身份的例外。
-        - name: 以服务账号验证三个 venv 可执行
+        # Verify once as the identity that really uses it -- not as root.
+        # The previous version check ran as root, and root can enter any directory, so "can the airflow user run
+        # this binary" was never verified until db migrate reported Permission denied.
+        # The same lesson as auth_query: the identity used for verification must not be an exception to the real user's identity.
+        - name: Verify the service account can run the three venvs
           ansible.builtin.command:
             cmd: "{{ item }}"
           become_user: airflow
@@ -457,22 +467,22 @@
             - "{{ dbt_venv }}/bin/dbt --version"
             - "{{ ingest_venv }}/bin/oss911-ingest --version"
 
-        - name: 断言服务账号能执行三个 venv 里的程序
+        - name: Assert the service account can run the programs in the three venvs
           ansible.builtin.assert:
             that:
               - "item.rc == 0"
             fail_msg: >-
-              airflow 用户执行「{{ item.item }}」失败：{{ item.stderr | default(item.stdout) | truncate(200) }}。
-              最常见的原因是 {{ venv_root }} 的权限不允许该用户进入目录——
-              venv 里没有秘密，应为 0755；口令在 /etc/oss911 下另行保护。
-              核对：namei -l {{ af_venv }}/bin/airflow
-            success_msg: "服务账号可执行：{{ item.item }}"
+              The airflow user failed to run "{{ item.item }}": {{ item.stderr | default(item.stdout) | truncate(200) }}.
+              The most common cause is that the permissions of {{ venv_root }} do not let that user enter the directory --
+              a venv holds no secrets and should be 0755; passwords are protected separately under /etc/oss911.
+              Check: namei -l {{ af_venv }}/bin/airflow
+            success_msg: "The service account can run: {{ item.item }}"
           loop: "{{ _asuser.results }}"
           loop_control:
             label: "{{ item.item }}"
 
-        # ========== 元数据库 ==========
-        - name: 查询 Airflow 的库用户是否存在
+        # ========== Metadata database ==========
+        - name: Query whether the Airflow database user exists
           ansible.builtin.command:
             cmd: psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = '{{ airflow_db }}'"
           become_user: postgres
@@ -480,29 +490,29 @@
           changed_when: false
           check_mode: false
 
-        # 库口令的唯一存放处是 airflow.env（连接串里）。四种状态与 40-schema 的
-        # db_login 相同；轮换的做法是删掉 airflow.env 重跑本剧本（runbook/07）。
-        # 该文件其余内容都由模板生成，删掉不丢任何东西。
-        - name: 读回已有的 Airflow 环境文件
+        # The only place the database password is stored is airflow.env (inside the connection string). The four
+        # states are the same as in 40-schema's db_login; rotation means deleting airflow.env and rerunning this
+        # playbook (runbook/91). Everything else in that file is generated from the template; deleting it loses nothing.
+        - name: Read back the existing Airflow env file
           ansible.builtin.slurp:
             src: "{{ oss911_etc }}/airflow.env"
           register: _afenv
           failed_when: false
           no_log: true
 
-        - name: 取回 Airflow 的库口令
+        - name: Get the Airflow database password back
           ansible.builtin.set_fact:
             _af_db_password: "{{ (_afenv.content | b64decode) | regex_search('SQL_ALCHEMY_CONN=postgresql\\+psycopg2://[^:]+:([^@]+)@', '\\1') | first }}"
           when: _afenv.content is defined
           no_log: true
 
-        - name: 生成 Airflow 的库口令（环境文件不存在时）
+        - name: Generate the Airflow database password (when the env file does not exist)
           ansible.builtin.set_fact:
             _af_db_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters','digits']) }}"
           when: _afenv.content is not defined
           no_log: true
 
-        - name: 建立 Airflow 的库用户，或为它设新口令
+        - name: Create the Airflow database user, or set a new password for it
           ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/role_password.yml"
           vars:
             rp_role: "{{ airflow_db }}"
@@ -510,13 +520,13 @@
             rp_create: "{{ _afrole.stdout | trim != '1' }}"
           when: _afrole.stdout | trim != '1' or _afenv.content is not defined
 
-        - name: 建立 Airflow 的数据库
+        - name: Create the Airflow database
           ansible.builtin.command:
             cmd: createdb --owner={{ airflow_db }} --template=template0 --locale=C --encoding=UTF8 {{ airflow_db }}
           become_user: postgres
           when: _afrole.stdout | trim != '1'
 
-        - name: 下发 Airflow 环境文件
+        - name: Deploy the Airflow env file
           ansible.builtin.template:
             src: ../files/airflow.env.j2
             dest: "{{ oss911_etc }}/airflow.env"
@@ -526,13 +536,14 @@
           register: _afenv_w
           no_log: true
 
-        # 口令不进命令行也不进 Ansible 的环境变量——从 0600 的环境文件里现读。
-        # 这样就不需要 no_log，失败时能看到真实错误；输出再对连接串做一次掩码。
+        # The password goes neither on the command line nor into Ansible's environment -- it is read on the spot
+        # from the 0600 env file. Then no_log is not needed and a failure shows the real error; the output also
+        # masks the connection string.
         #
-        # ★ 上一版在这里加了 no_log: true，结果把失败原因一起藏掉了。
-        #   no_log 挡的是「本不该出现在日志里的东西」，不是「失败时必须读到的东西」；
-        #   加在前者上是对的，加在后者上等于把排障通道关掉。
-        - name: 初始化元数据库
+        # * The previous version had no_log: true here, which hid the failure reason as well.
+        #   no_log is for "what must not appear in the log", not for "what you must be able to read when it fails";
+        #   on the former it is right, on the latter it shuts the troubleshooting channel.
+        - name: Initialise the metadata database
           ansible.builtin.shell:
             cmd: |
               set -a; . {{ oss911_etc }}/airflow.env; set +a
@@ -545,26 +556,26 @@
           changed_when: "'Running upgrade' in _afmigrate.stdout"
           failed_when: false
 
-        - name: 断言元数据库初始化成功
+        - name: Assert the metadata database was initialised
           ansible.builtin.assert:
             that:
               - "_afmigrate.stdout is not search('(?i)error|traceback|fatal')"
             fail_msg: |-
-              airflow db migrate 失败（口令已掩码）：
+              airflow db migrate failed (password masked):
 
-              {{ _afmigrate.stdout | default('（无输出）') }}
+              {{ _afmigrate.stdout | default('(no output)') }}
 
-              排查顺序：
-                一、pgBouncer 里有没有 {{ airflow_db }} 这个池：
+              Check in this order:
+                1. Does pgBouncer have the {{ airflow_db }} pool:
                     sudo grep '^{{ airflow_db }}' /etc/pgbouncer/pgbouncer.ini
-                二、该用户能否经池连上：
+                2. Can that user connect through the pool:
                     sudo -u postgres psql -h 127.0.0.1 -p {{ pgb_listen_port }} -U {{ airflow_db }} -d {{ airflow_db }} -c 'select 1'
-                三、venv 里有没有 PostgreSQL 驱动：
+                3. Does the venv have a PostgreSQL driver:
                     {{ af_venv }}/bin/python -c 'import psycopg2; print(psycopg2.__version__)'
-            success_msg: "元数据库已初始化"
+            success_msg: "Metadata database initialised"
 
-        # ========== dbt 的 profiles ==========
-        - name: 下发 dbt profiles
+        # ========== dbt profiles ==========
+        - name: Deploy the dbt profiles
           ansible.builtin.template:
             src: ../files/dbt_profiles.yml.j2
             dest: "{{ airflow_home }}/profiles.yml"
@@ -573,7 +584,7 @@
             mode: "0640"
 
         # ========== systemd ==========
-        - name: 下发 Airflow 的 systemd 单元
+        - name: Deploy the Airflow systemd units
           ansible.builtin.template:
             src: "../files/systemd/airflow-{{ item }}.service.j2"
             dest: "/etc/systemd/system/airflow-{{ item }}.service"
@@ -583,27 +594,28 @@
           loop: [api-server, scheduler, dag-processor, triggerer]
           register: _afunits
 
-        - name: 重载 systemd
+        - name: Reload systemd
           ansible.builtin.systemd_service:
             daemon_reload: true
           when: _afunits.changed
 
-        - name: 启用并启动 Airflow 的四个组件
+        - name: Enable and start the four Airflow components
           ansible.builtin.systemd_service:
             name: "airflow-{{ item }}.service"
             enabled: true
-            # 环境文件变了（如库口令轮换）也要重启，否则四个组件仍拿旧口令连库
+            # A changed env file (e.g. a rotated database password) also needs a restart, or the four components keep the old password
             state: "{{ 'restarted' if (_afunits.changed or _afenv_w.changed) else 'started' }}"
           loop: [api-server, scheduler, dag-processor, triggerer]
 
-        # ========== 验证：验行为 ==========
-        # 「装上了」太容易满足。这三条分别验：装的是不是离线装的、
-        # 两个 venv 是不是真的分开、以及两者能不能连上各自要连的库。
-        # dbt 的版本以 lock 为准逐包比对。
-        # ★ 上一版取 `dbt --version | head -1`，而那一行是「Core:」，断言又只查输出里有没有
-        #   「dbt=」——echo 本身就会打出这几个字，dbt 装错版本甚至没装都照样通过。
-        #   一条永远通过的断言比没有断言更坏：它让人以为这件事验过了（2026-10-13 发现）。
-        - name: 查询三个 venv 的版本
+        # ========== Verification: check behaviour ==========
+        # "Installed" is too easy to satisfy. These checks verify, in turn: that the versions are the pinned ones,
+        # that the venvs really are separate, and that each can reach the database it needs.
+        # dbt versions are compared package by package against the lock.
+        # * The previous version took `dbt --version | head -1`, and that line is "Core:", while the assert only checked
+        #   that the output contained "dbt=" -- which echo prints by itself, so a wrong dbt version or no dbt at all
+        #   passed anyway. An assert that always passes is worse than none: it makes people think it was verified
+        #   (found 2026-10-13).
+        - name: Query the versions in the three venvs
           ansible.builtin.shell:
             cmd: |
               lock_core=$(sed -n 's/^dbt-core==//p' {{ dbt_lock }})
@@ -611,40 +623,40 @@
               have_core=$({{ dbt_venv }}/bin/python -c 'import importlib.metadata as m; print(m.version("dbt-core"))' 2>/dev/null)
               have_pg=$({{ dbt_venv }}/bin/python -c 'import importlib.metadata as m; print(m.version("dbt-postgres"))' 2>/dev/null)
               echo "airflow=$({{ af_venv }}/bin/airflow version 2>/dev/null)"
-              echo "dbt-core=${have_core:-未安装}（lock ${lock_core:-缺}）"
-              echo "dbt-postgres=${have_pg:-未安装}（lock ${lock_pg:-缺}）"
+              echo "dbt-core=${have_core:-not installed} (lock ${lock_core:-missing})"
+              echo "dbt-postgres=${have_pg:-not installed} (lock ${lock_pg:-missing})"
               [ -n "$lock_core" ] && [ "$have_core" = "$lock_core" ] &&
                 [ -n "$lock_pg" ] && [ "$have_pg" = "$lock_pg" ] && echo "dbt-match"
-              # 接入程序：lock 中每个包都与 venv 实装逐行一致（不只比一两个主包）
+              # Ingestion program: every package in the lock matches what is installed in the venv, line by line (not just one or two main packages)
               if diff <(grep -vE '^\s*(#|$)' {{ ingest_lock }} | sort) \
                       <({{ ingest_venv }}/bin/pip freeze --all 2>/dev/null | grep -vE '^(pip|oss911-ingest)( |==|@)' | sort) >/dev/null; then
-                echo "ingest-deps=与 lock 一致（$(grep -cvE '^\s*(#|$)' {{ ingest_lock }}) 个包）"
+                echo "ingest-deps=matches the lock ($(grep -cvE '^\s*(#|$)' {{ ingest_lock }}) packages)"
                 echo "ingest-match"
               else
-                echo "ingest-deps=与 lock 不一致"
+                echo "ingest-deps=does not match the lock"
               fi
               true
           args:
-            executable: /bin/bash          # diff <(…) 是 bash 的进程替换，/bin/sh 不认
+            executable: /bin/bash          # diff <(...) is bash process substitution; /bin/sh does not know it
           register: _vers
           changed_when: false
 
-        - name: 断言三个 venv 各自装对了
+        - name: Assert each of the three venvs is installed correctly
           ansible.builtin.assert:
             that:
               - "_vers.stdout is search('airflow=' ~ airflow_version)"
               - "'dbt-match' in _vers.stdout_lines"
               - "'ingest-match' in _vers.stdout_lines"
             fail_msg: |-
-              版本与钉死的不符，或命令不存在：
+              Versions differ from the pinned ones, or a command does not exist:
               {{ _vers.stdout }}
-              airflow 应为 {{ airflow_version }}；dbt-core 与 dbt-postgres 应与 {{ dbt_lock }} 一致；
-              接入程序的依赖应与 {{ ingest_lock }} 逐行一致。
-            success_msg: "{{ _vers.stdout_lines | reject('in', ['dbt-match', 'ingest-match']) | join(' · ') }}"
+              airflow should be {{ airflow_version }}; dbt-core and dbt-postgres should match {{ dbt_lock }};
+              the ingestion dependencies should match {{ ingest_lock }} line by line.
+            success_msg: "{{ _vers.stdout_lines | reject('in', ['dbt-match', 'ingest-match']) | join(' | ') }}"
 
-        # 两个 venv 必须互不可见。混在一起时最常见的症状不是报错，
-        # 而是某一方被静默降级，到运行期才显形。
-        - name: 断言三个 venv 确实是分开的
+        # The venvs must not see each other. When they are mixed, the most common symptom is not an error but
+        # a silent downgrade on one side that only shows at run time.
+        - name: Assert the three venvs really are separate
           ansible.builtin.shell:
             cmd: |
               test ! -x {{ af_venv }}/bin/dbt && test ! -x {{ dbt_venv }}/bin/airflow &&
@@ -655,7 +667,7 @@
           changed_when: false
           failed_when: "'separated' not in _sep.stdout"
 
-        - name: Airflow 能连上元数据库
+        - name: Airflow can reach the metadata database
           ansible.builtin.shell:
             cmd: |
               set -a; . {{ oss911_etc }}/airflow.env; set +a
@@ -668,21 +680,22 @@
           changed_when: false
           failed_when: false
 
-        - name: 断言 Airflow 的元数据库可达
+        - name: Assert the Airflow metadata database is reachable
           ansible.builtin.assert:
             that: ["_afcheck.rc == 0"]
             fail_msg: |-
-              airflow db check 失败（口令已掩码）：
+              airflow db check failed (password masked):
 
-              {{ _afcheck.stdout | default('（无输出）') }}
+              {{ _afcheck.stdout | default('(no output)') }}
 
-              元数据库经 pgBouncer 的 {{ airflow_db }} 库（会话级池）；
-              先确认 pgbouncer.ini 里有这一条且 auth_query 可用（21-connection 有对应断言）。
-            success_msg: "Airflow 元数据库可达（经 pgBouncer 会话池）"
+              The metadata database is reached through pgBouncer's {{ airflow_db }} database (session pool);
+              first make sure pgbouncer.ini has that entry and auth_query works (21-connection asserts both).
+            success_msg: "Airflow metadata database reachable (through the pgBouncer session pool)"
 
-        # ========== 全局 pool（DD-85 · LD-08 3.3）==========
-        # 输出逐行「名称|槽位|说明」，先比对再设置：pools set 每次都会写，直接设 changed 永远为真
-        - name: 查询现有的 Airflow pool
+        # ========== Global pools (DD-85 · LD-08 3.3) ==========
+        # Output one "name|slots|description" per line and compare before setting: pools set writes every time,
+        # so setting unconditionally would always report changed
+        - name: Query the existing Airflow pools
           ansible.builtin.shell:
             cmd: |
               set -a; . {{ oss911_etc }}/airflow.env; set +a
@@ -696,7 +709,7 @@
           changed_when: false
           check_mode: false
 
-        - name: 建立或校正 pool
+        - name: Create or correct the pools
           ansible.builtin.shell:
             cmd: |
               set -a; . {{ oss911_etc }}/airflow.env; set +a
@@ -709,7 +722,7 @@
             label: "{{ item.name }} = {{ item.slots }}"
           when: (item.name ~ '|' ~ item.slots ~ '|' ~ item.description) not in _pools_have.stdout_lines
 
-        - name: 复查 pool
+        - name: Query the pools again
           ansible.builtin.shell:
             cmd: |
               set -a; . {{ oss911_etc }}/airflow.env; set +a
@@ -723,15 +736,15 @@
           changed_when: false
           check_mode: false
 
-        - name: 断言 pool 与 inventory 一致
+        - name: Assert the pools match inventory
           ansible.builtin.assert:
             that:
               - (item.name ~ '|' ~ item.slots ~ '|' ~ item.description) in _pools_after.stdout_lines
             fail_msg: |-
-              pool {{ item.name }} 与 inventory 不符。期望：{{ item.name }}|{{ item.slots }}|{{ item.description }}
-              现有：
+              Pool {{ item.name }} does not match inventory. Expected: {{ item.name }}|{{ item.slots }}|{{ item.description }}
+              Present:
               {{ _pools_after.stdout }}
-            success_msg: "pool {{ item.name }}：{{ item.slots }} 槽"
+            success_msg: "Pool {{ item.name }}: {{ item.slots }} slot(s)"
           loop: "{{ airflow_pools }}"
           loop_control:
             label: "{{ item.name }}"

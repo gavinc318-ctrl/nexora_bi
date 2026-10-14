@@ -84,8 +84,9 @@ sudo rm /etc/pgbouncer/userlist.txt
 ansible-playbook playbooks/21-connection.yml -e ansible_connection=local -K
 ```
 
-预期：`pgbouncer：口令已更新`，`建立 userlist` 为 changed，pgBouncer 重启；
-「两个池的池模式确实不同」用的就是新口令；「auth_query 可用」也通过。
+预期：`pgbouncer: password updated`，`Write the userlist` 为 changed，pgBouncer **reload**（重读口令文件，不断已有连接；
+2026-10-13 之前的剧本在这里 restart、要等 90 秒，见 troubleshooting 第 29 条）；
+`Assert the two pools really have different pool modes` 用的就是新口令；`Assert auth_query works` 也通过。
 
 pgbouncer 是 auth_user，**其他所有用户经 pgBouncer 登录都要靠它去库里查口令**。
 所以紧接着确认其他服务能重新连上：
@@ -111,8 +112,8 @@ sudo rm /etc/oss911/keycloak.env
 ansible-playbook playbooks/22-containers.yml -e ansible_connection=local -K
 ```
 
-预期：`keycloak：口令已更新`，环境文件重写，**只有 Keycloak 重启**（SeaweedFS、Prometheus
-不动）；「Keycloak 就绪」与「Keycloak 真的用了 PostgreSQL」两条断言通过。
+预期：`keycloak: password updated`，环境文件重写，**只有 Keycloak 重启**（SeaweedFS、Prometheus
+不动）；`Assert Keycloak is ready` 与 `Assert Keycloak really uses PostgreSQL` 两条断言通过。
 新的 `keycloak.env` 里只有 `KC_DB_PASSWORD` 与 `KC_DB_USERNAME` 两行：引导管理员已在
 第 2 步去掉，剧本不会再加回来。
 
@@ -129,7 +130,7 @@ sudo rm /etc/oss911/airflow.env
 ansible-playbook playbooks/30-python.yml -e ansible_connection=local -K
 ```
 
-预期：`airflow：口令已更新`，环境文件重写，Airflow 四个组件全部重启；「元数据库已初始化」
+预期：`airflow: password updated`，环境文件重写，Airflow 四个组件全部重启；`Metadata database initialised`
 （`airflow db migrate` 用的是新口令）通过。`airflow.env` 的其余内容都由模板生成，
 删掉不会丢任何东西。
 

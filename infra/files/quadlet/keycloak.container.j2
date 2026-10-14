@@ -1,8 +1,8 @@
-# 由 infra/playbooks/22-containers.yml 管理，勿手改
+# Managed by infra/playbooks/22-containers.yml, do not edit by hand
 #
-# Quadlet：容器以 systemd 单元的形式管理（podman 4.4 起的受支持做法）。
-# 不用 podman run 起容器，也不用已废弃的 podman generate systemd——
-# 开机自启、依赖顺序、重启策略都交给 systemd，离网重建时少一套自制脚本。
+# Quadlet: the container is managed as a systemd unit (the supported way since podman 4.4).
+# Not started with podman run, and not with the deprecated podman generate systemd --
+# start at boot, dependency order and restart policy are left to systemd: one less home-made script in an offline rebuild.
 [Unit]
 Description=Keycloak (OSS911 dev)
 After=network-online.target postgresql@{{ postgres_version }}-{{ pg_cluster_name }}.service pgbouncer.service haproxy.service
@@ -12,30 +12,30 @@ Wants=network-online.target
 Image={{ _kc_image }}
 ContainerName=keycloak
 Network=internal
-# 只绑回环：开发机上没有反向代理，不该让它出现在网络上
+# Loopback only: there is no reverse proxy on the development machine, so it must not appear on the network
 PublishPort=127.0.0.1:{{ keycloak_http_port }}:8080
 PublishPort=127.0.0.1:{{ keycloak_mgmt_port }}:9000
 EnvironmentFile=/etc/oss911/keycloak.env
 Environment=KC_DB=postgres
-# 连的是宿主机的 pgBouncer，不是 PostgreSQL 本身（DD-67）。
-# 池模式由库名决定：keycloak 这条在 pgbouncer.ini 中配为 session——
-# Keycloak 用 JDBC 连接池与预处理语句，事务级池化下这些不保证落在同一后端连接上。
+# Connects to the host's pgBouncer, not to PostgreSQL itself (DD-67).
+# The pool mode is decided by the database name: the keycloak entry in pgbouncer.ini is session --
+# Keycloak uses a JDBC pool and prepared statements, which transaction pooling does not keep on the same backend connection.
 Environment=KC_DB_URL=jdbc:postgresql://{{ podman_internal_gateway }}:{{ pgb_listen_port }}/{{ keycloak_db }}
 Environment=KC_HEALTH_ENABLED=true
 Environment=KC_HOSTNAME_STRICT=false
-# start-dev 是开发机的形态：免 TLS、免 hostname 严格校验。
-# 生产用 start --optimized 并配证书与 hostname，属 LD-08 的范畴。
+# start-dev is the development form: no TLS, no strict hostname check.
+# Production uses start --optimized with certificates and hostname; that is LD-08's territory.
 Exec=start-dev
-# 不设容器内健康检查：该镜像基于 UBI micro，没有 curl，而 /dev/tcp 是 bash 特性
-# 不是 sh 特性——写一个本身就跑不起来的健康检查，只会让状态更难读。
-# 真正的验证在剧本侧（22-containers 的三条断言）。
+# No in-container health check: the image is based on UBI micro without curl, and /dev/tcp is a bash feature,
+# not an sh feature -- a health check that cannot run by itself only makes the status harder to read.
+# The real verification is on the playbook side (the three asserts in 22-containers).
 
 [Service]
 Restart=on-failure
-# 退避：Keycloak 连不上库时会反复崩溃，每轮启动要烧掉一分多钟 CPU。
-# 不加退避就是无限重启，既掩盖问题又占满一个核。
-# 五分钟内失败三次即放弃，让 systemctl status 直接显示 failed——
-# 一个明确的 failed 比一个「正在重启」的假活状态有用得多。
+# Back-off: when Keycloak cannot reach the database it crashes repeatedly, and each start burns over a minute of CPU.
+# Without back-off it restarts forever, hiding the problem while occupying a whole core.
+# Give up after three failures within five minutes so systemctl status shows failed directly --
+# a clear "failed" is far more useful than a fake-alive "restarting".
 RestartSec=20
 StartLimitIntervalSec=300
 StartLimitBurst=3

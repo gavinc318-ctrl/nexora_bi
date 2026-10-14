@@ -1,14 +1,14 @@
-;; 由 infra/playbooks/21-connection.yml 管理，勿手改
+;; Managed by infra/playbooks/21-connection.yml, do not edit by hand
 ;;
-;; 池模式按库名选择——本实例只有一个监听端口，客户端连哪个库名就用哪种池模式。
-;; 分工见 DD-67：
-;;   oss911       事务级，门户查询 / Superset / 服务层接口
-;;   oss911_etl   会话级，Airflow / dbt / 人工运维
-;;   keycloak     会话级，Keycloak 的 JDBC 池（预处理语句要求同一后端连接）
-;;   airflow      会话级，Airflow 的元数据库
+;; Pool mode is chosen by database name -- this instance has one listen port, and the database name a client connects to decides the pool mode.
+;; Division of work, see DD-67:
+;;   oss911       transaction, portal queries / Superset / service layer APIs
+;;   oss911_etl   session, Airflow / dbt / manual operations
+;;   keycloak     session, Keycloak's JDBC pool (prepared statements need the same backend connection)
+;;   airflow      session, Airflow's metadata database
 ;;
-;; 后端一律指向本机 HAProxy，不直接指向 PostgreSQL。
-;; pgBouncer 自己没有选主能力，知道谁是主库的是 Patroni，HAProxy 读它的健康检查。
+;; Backends always point to the local HAProxy, never directly to PostgreSQL.
+;; pgBouncer cannot elect a primary; Patroni knows which node is primary, and HAProxy reads its health check.
 
 [databases]
 {{ pg_database }}     = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ pg_database }} pool_mode=transaction pool_size={{ pgb_pool_size_txn }} reserve_pool={{ pgb_reserve_pool }}
@@ -20,34 +20,34 @@
 listen_addr = 0.0.0.0
 listen_port = {{ pgb_listen_port }}
 auth_type = scram-sha-256
-;; userlist 里只有 pgbouncer 自己。其余所有用户都靠 auth_query 现查——
-;; 否则每加一个库用户都要往 userlist 里抄一份口令散列，那是另一处会失同步的副本。
+;; userlist holds only pgbouncer itself. Every other user is looked up via auth_query --
+;; otherwise each new database user would need a password hash copied into userlist, one more copy to drift out of sync.
 auth_file = /etc/pgbouncer/userlist.txt
 auth_user = pgbouncer
 auth_query = SELECT * FROM public.pgbouncer_get_auth($1)
-;; auth_query 默认在客户端要连的那个库里执行，那样函数得在每个库里各建一份。
-;; 指定 auth_dbname 后只在这一个库里执行，函数也只需建一处。
+;; By default auth_query runs in the database the client connects to, which would need the function in every database.
+;; With auth_dbname it runs in this one database only, and the function exists in one place.
 auth_dbname = {{ pg_database }}
 admin_users = pgbouncer
 stats_users = pgbouncer, monitoring
 
-;; 默认事务级。单个库上的 pool_mode 覆盖本项。
+;; Transaction mode by default. A per-database pool_mode overrides this.
 pool_mode = transaction
 
-;; max_client_conn 是客户端侧，可以大；真正稀缺的是后端。
+;; max_client_conn is the client side and can be large; the scarce resource is the backend.
 max_client_conn = {{ pgb_max_client_conn }}
 default_pool_size = {{ pgb_pool_size_txn }}
 reserve_pool_size = {{ pgb_reserve_pool }}
 reserve_pool_timeout = 3
 
-;; ★ 这一条是全局硬闸。default_pool_size 是「每个 (用户, 数据库) 组合」的大小，
-;;   不是全局上限——三个用户连同一个库就是三个池。没有这一行，池数一多会悄悄超过
-;;   PostgreSQL 的 max_connections，表现为库侧随机拒连。
+;; * This is the global hard cap. default_pool_size is the size per (user, database) pair,
+;;   not a global limit -- three users on one database means three pools. Without this line, many pools silently exceed
+;;   PostgreSQL's max_connections, which shows up as random connection refusals on the database side.
 max_db_connections = {{ pgb_max_db_connections }}
 max_user_connections = {{ pgb_max_db_connections }}
 
-;; 切换后的回收：主库易主时，指向旧主的服务端连接必须尽快报废重建。
-;; 按日考核每天只有 0.86 秒容差，连接悬挂几十秒会直接吃光当天预算。
+;; Recovery after failover: when the primary changes, server connections to the old primary must be discarded and rebuilt quickly.
+;; The daily SLA allows only 0.86 seconds a day; connections hanging for tens of seconds use up the whole day's budget.
 server_check_query = select 1
 server_check_delay = 10
 server_lifetime = 600
@@ -55,7 +55,7 @@ server_idle_timeout = 180
 server_connect_timeout = 5
 server_login_retry = 2
 
-;; 事务级池化下不要让客户端以为自己持有会话状态
+;; Under transaction pooling, do not let clients believe they hold session state
 ignore_startup_parameters = extra_float_digits,options
 
 log_connections = 0

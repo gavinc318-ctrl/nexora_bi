@@ -1,21 +1,22 @@
-# 由 40-schema.yml 按 db_logins 逐个引入，变量 login 为其中一项。
+# Included by 40-schema.yml once per entry of db_logins; the variable "login" is that entry.
 #
-# 一个库登录用户的完整流程：口令 → 用户 → 环境文件 → 加入权限角色 → 以使用方身份验证。
+# The full life cycle of one database login user: password -> user -> env file -> membership in the
+# privilege role -> verification as the real consumer.
 #
-# 口令的唯一存放处是 /etc/oss911/<env_file>（0600，属主为使用方）。四种状态：
-#   环境文件有、用户有    → 沿用；口令是否一致由最后一步的真实登录来验
-#   环境文件有、用户无    → 以文件中的口令建用户（库重建过的情形）
-#   环境文件无、用户无    → 生成口令、建用户、写文件
-#   环境文件无、用户有    → 口令已无处可查，生成新口令并 ALTER ROLE（即一次轮换）
+# The only place the password is stored is /etc/oss911/<env_file> (0600, owned by the consumer). Four states:
+#   env file present, user present -> keep it; whether the passwords match is verified by the real login at the end
+#   env file present, user missing -> create the user with the file's password (the database was rebuilt)
+#   env file missing, user missing -> generate a password, create the user, write the file
+#   env file missing, user present -> the password can no longer be found; generate a new one and ALTER ROLE (= a rotation)
 
-- name: "{{ login.name }}：读回已有的环境文件"
+- name: "{{ login.name }}: read back the existing env file"
   ansible.builtin.slurp:
     src: "{{ oss911_etc }}/{{ login.env_file }}"
   register: _envf
   failed_when: false
   no_log: true
 
-- name: "{{ login.name }}：取口令（沿用文件中的，或新生成）"
+- name: "{{ login.name }}: get the password (keep the one in the file, or generate one)"
   ansible.builtin.set_fact:
     _pw: >-
       {{ ((_envf.content | b64decode) | regex_search('(?m)^' ~ login.env_prefix ~ '_PASSWORD=(.+)$', '\1') | first)
@@ -24,7 +25,7 @@
     _pw_is_new: "{{ _envf.content is not defined }}"
   no_log: true
 
-- name: "{{ login.name }}：查询库用户的现状"
+- name: "{{ login.name }}: query the current state of the database user"
   ansible.builtin.command:
     cmd: >-
       psql -X -tA -d {{ pg_database }} -c
@@ -36,21 +37,21 @@
   changed_when: false
   check_mode: false
 
-# 同名用户若已存在却不能登录或带特权，说明它不是本剧本建的——停下来让人看，
-# 而不是把口令改掉接着用。
-- name: "{{ login.name }}：断言已有用户的属性"
+# A user of that name that exists but cannot log in or holds privileges was not created by this playbook --
+# stop and let a human look, rather than changing its password and carrying on.
+- name: "{{ login.name }}: assert the attributes of an existing user"
   ansible.builtin.assert:
     that:
       - _role.stdout | trim in ['', 'true|false']
     fail_msg: >-
-      库用户 {{ login.name }} 已存在但属性不符（可登录|有特权 = {{ _role.stdout | trim }}），
-      应为 true|false。它可能不是本剧本建的。核对：
+      Database user {{ login.name }} exists but its attributes do not match (can login|has privileges = {{ _role.stdout | trim }});
+      expected true|false. It may not have been created by this playbook. Check:
       sudo -u postgres psql -c '\du {{ login.name }}'
-    success_msg: "{{ login.name }}：{{ '尚不存在，将新建' if _role.stdout | trim == '' else '已存在，属性正确' }}"
+    success_msg: "{{ login.name }}: {{ 'does not exist yet, will be created' if _role.stdout | trim == '' else 'exists, attributes correct' }}"
 
-# 口令只走标准输入，并在同一事务内关掉会把语句原文写进服务端日志的设置——
-# 细节在共用的 role_password.yml，21 / 22 / 30 也用它。
-- name: "{{ login.name }}：建立库用户，或为它设新口令"
+# The password goes over stdin only, and the settings that would write the statement text into the server log
+# are switched off inside the same transaction -- the details are in the shared role_password.yml, which 21 / 22 / 30 use too.
+- name: "{{ login.name }}: create the database user, or set a new password for it"
   ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/role_password.yml"
   vars:
     rp_role: "{{ login.name }}"
@@ -58,20 +59,20 @@
     rp_create: "{{ _role.stdout | trim == '' }}"
   when: _role.stdout | trim == '' or (_pw_is_new | bool)
 
-- name: "{{ login.name }}：写环境文件"
+- name: "{{ login.name }}: write the env file"
   ansible.builtin.copy:
     dest: "{{ oss911_etc }}/{{ login.env_file }}"
     owner: "{{ login.file_owner }}"
     group: "{{ login.file_owner }}"
     mode: "0600"
     content: |
-      # 由 infra/playbooks/40-schema.yml 管理，勿手改
-      # 库登录用户 {{ login.name }}，权限全部来自权限角色 {{ login.role }}
+      # Managed by infra/playbooks/40-schema.yml, do not edit by hand
+      # Database login user {{ login.name }}; all of its privileges come from the privilege role {{ login.role }}
       {{ login.env_prefix }}_USER={{ login.name }}
       {{ login.env_prefix }}_PASSWORD={{ _pw }}
   no_log: true
 
-- name: "{{ login.name }}：查询是否已在权限角色 {{ login.role }} 中"
+- name: "{{ login.name }}: query whether it is a member of the privilege role {{ login.role }}"
   ansible.builtin.command:
     cmd: >-
       psql -X -tA -d {{ pg_database }} -c
@@ -82,19 +83,19 @@
   changed_when: false
   check_mode: false
 
-- name: "{{ login.name }}：加入权限角色 {{ login.role }}"
+- name: "{{ login.name }}: add it to the privilege role {{ login.role }}"
   ansible.builtin.command:
     cmd: psql -X -q -v ON_ERROR_STOP=1 -d {{ pg_database }} -c "GRANT {{ login.role }} TO {{ login.name }}"
   become_user: postgres
   when: _member.stdout | trim == '0'
 
-# 以真正的使用方（airflow 账号）读它自己的环境文件、经 pgBouncer 登录。
-# 不用 postgres 代验：postgres 走本地 socket 的 peer 认证，验不到口令，
-# 也验不到 auth_query（CLAUDE.md 第 5 节第二条）。
-# 结果三列：当前用户 | 是否继承到权限角色的权限 | 能否 SET ROLE 到它（dbt 的 role: 要用）
-# 布尔值经 || 拼进文本后是 true / false，不是 psql 单独显示布尔列时的 t / f——
-# 期望值按拼接后的文本写（首次执行时在这里踩过）。
-- name: "{{ login.name }}：以使用方身份经 pgBouncer 登录验证"
+# The real consumer (the airflow account) reads its own env file and logs in through pgBouncer.
+# Do not verify as postgres instead: postgres uses peer authentication on the local socket, which verifies
+# neither the password nor auth_query (CLAUDE.md section 5, item two).
+# Three result columns: current user | inherits the privilege role's rights | can SET ROLE to it (needed by dbt's role:)
+# A boolean concatenated into text with || becomes true / false, not the t / f psql shows for a bare boolean column --
+# the expected value is written as the concatenated text (this tripped the first real run).
+- name: "{{ login.name }}: verify the login through pgBouncer as the consumer"
   ansible.builtin.shell:
     cmd: |
       set -a; . {{ oss911_etc }}/{{ login.env_file }}; set +a
@@ -110,19 +111,19 @@
   failed_when: false
   check_mode: false
 
-- name: "{{ login.name }}：断言登录与权限角色均生效"
+- name: "{{ login.name }}: assert the login and the privilege role both work"
   ansible.builtin.assert:
     that:
       - _login_check.stdout | trim == login.name ~ '|true|true'
     fail_msg: |-
-      {{ login.file_owner }} 以 {{ login.name }} 经 pgBouncer 登录的结果不对：
-        期望：{{ login.name }}|true|true
-        实际：{{ _login_check.stdout | trim }}
+      {{ login.file_owner }} logging in as {{ login.name }} through pgBouncer gave the wrong result:
+        expected: {{ login.name }}|true|true
+        actual:   {{ _login_check.stdout | trim }}
 
-      排查顺序：
-        一、口令不符（password authentication failed）：环境文件与库中口令不一致。
-            删掉 {{ oss911_etc }}/{{ login.env_file }} 后重跑本剧本，即生成新口令并轮换
-        二、pgBouncer 认证失败：auth_query 是否可用（runbook/05）
-        三、第二、三列为 false：未加入 {{ login.role }}，或加入时被设了 INHERIT FALSE / SET FALSE
-            sudo -u postgres psql -d {{ pg_database }} -c '\drg {{ login.name }}'
-    success_msg: "{{ login.name }}：经 pgBouncer 登录成功，继承 {{ login.role }}，可 SET ROLE"
+      Check in this order:
+        1. Password mismatch (password authentication failed): the env file and the database disagree.
+           Delete {{ oss911_etc }}/{{ login.env_file }} and rerun this playbook; that generates a new password and rotates it
+        2. pgBouncer authentication failed: is auth_query working (runbook/05)
+        3. Second or third column is false: not a member of {{ login.role }}, or granted with INHERIT FALSE / SET FALSE
+           sudo -u postgres psql -d {{ pg_database }} -c '\drg {{ login.name }}'
+    success_msg: "{{ login.name }}: logged in through pgBouncer, inherits {{ login.role }}, can SET ROLE"

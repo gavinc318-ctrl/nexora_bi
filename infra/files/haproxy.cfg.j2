@@ -1,12 +1,12 @@
-# 由 infra/playbooks/21-connection.yml 管理，勿手改
+# Managed by infra/playbooks/21-connection.yml, do not edit by hand
 #
-# 本机 pgBouncer 的后端。职责只有一个：把连接送到【当前的主库】。
+# Backend of the local pgBouncer. One job only: deliver connections to the CURRENT primary.
 #
-# ★ 生产上健康检查必须走 Patroni 的 REST /primary，不能用 TCP 端口探活。
-#   备库的 5432 一样是通的，TCP 探活会把写流量送到只读备库，症状是应用随机报
-#   cannot execute INSERT in a read-only transaction——看着像应用的 bug，
-#   实际是健康检查选错了方式。
-#   开发机没有 Patroni，故退化为 {{ haproxy_health_check }}；这一段不等于生产。
+# * In production the health check must use Patroni's REST /primary, never a TCP port probe.
+#   A replica's 5432 is open just the same; a TCP probe sends write traffic to a read-only replica, and the symptom is the application
+#   randomly reporting "cannot execute INSERT in a read-only transaction" -- it looks like an application bug,
+#   but the health check method is wrong.
+#   The development machine has no Patroni, so it falls back to {{ haproxy_health_check }}; this part is not production.
 
 global
     log /dev/log local0
@@ -20,7 +20,7 @@ defaults
     mode    tcp
     option  tcplog
     timeout connect 5s
-    timeout client  30m          # 会话级池的连接可以长时间空闲，不能按 HTTP 的尺度掐
+    timeout client  30m          # session pool connections may idle for a long time; do not cut them on an HTTP time scale
     timeout server  30m
     retries 2
 
@@ -34,8 +34,8 @@ listen stats
 listen pg_primary
     bind 127.0.0.1:{{ haproxy_listen_port }}
     option {{ haproxy_health_check }} user {{ haproxy_check_user | default('postgres') }}
-    # on-marked-down shutdown-sessions：节点被判定为 down 时立刻断开指向它的连接，
-    # 而不是让它们挂在那里等 TCP 超时。切换时这一项决定恢复是秒级还是分钟级。
+    # on-marked-down shutdown-sessions: when a node is marked down, its connections are cut immediately
+    # instead of hanging until the TCP timeout. During failover this decides between recovery in seconds or minutes.
 {% for h in haproxy_backends %}
     server {{ h.name }} {{ h.addr }} check inter 2s fall 2 rise 2 on-marked-down shutdown-sessions
 {% endfor %}

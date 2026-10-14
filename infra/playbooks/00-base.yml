@@ -1,115 +1,117 @@
 ---
-# 00-base —— 系统基线
+# 00-base -- system baseline
 #
-# 纪律：只用 ansible.builtin，不引入额外 collection。
-# 每个 collection 都是一条新的离线供给链，而供给链越多断供点越多（LD-09 第 7 章）。
+# Discipline: use ansible.builtin only, no extra collections.
+# Every collection is one more offline supply chain, and every supply chain is one more
+# point where supply can break (LD-09 chapter 7).
 #
-# 幂等：跑第二遍不应报错，也不应改变任何东西。离网重建时没人能临场调试。
+# Idempotence: a second run must not fail and must not change anything. Nobody can debug
+# on the spot during an offline rebuild.
 
-- name: 系统基线
+- name: System baseline
   hosts: all
   become: true
 
   tasks:
 
-    # ---------- 1. 先确认这台机器是我们以为的那台 ----------
-    - name: 断言 OS 版本符合基线
+    # ---------- 1. First make sure this is the machine we think it is ----------
+    - name: Assert the OS version matches the baseline
       ansible.builtin.assert:
         that:
           - ansible_facts['distribution'] == os_distribution
           - ansible_facts['distribution_release'] == os_release
         fail_msg: >-
-          OS 不符基线：期望 {{ os_distribution }} {{ os_release }}，
-          实际 {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_release'] }}。
-          剧本按基线版本编写，在别的版本上跑出来的结果不可信。
-        success_msg: "OS 基线符合：{{ os_distribution }} {{ os_release }}"
+          OS does not match the baseline: expected {{ os_distribution }} {{ os_release }},
+          found {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_release'] }}.
+          The playbooks are written for the baseline version; results on any other version are not trustworthy.
+        success_msg: "OS baseline OK: {{ os_distribution }} {{ os_release }}"
 
-    - name: 断言内存与 CPU 不低于设计值
+    - name: Assert memory and CPU are not below the design values
       ansible.builtin.assert:
         that:
           - ansible_facts['memtotal_mb'] | int >= 60000
           - ansible_facts['processor_vcpus'] | int >= 16
         fail_msg: >-
-          规格不足：内存 {{ ansible_facts['memtotal_mb'] }} MB、
-          vCPU {{ ansible_facts['processor_vcpus'] }}。设计值为 64 GB / 16 核。
+          Insufficient capacity: memory {{ ansible_facts['memtotal_mb'] }} MB,
+          vCPU {{ ansible_facts['processor_vcpus'] }}. Design values are 64 GB / 16 cores.
 
-    # ---------- 2. 卷校验：只发现漂移，不动手改 ----------
-    - name: 读取挂载点信息
+    # ---------- 2. Volume checks: detect drift only, never fix it ----------
+    - name: Read mount point information
       ansible.builtin.set_fact:
         _mount_map: >-
           {{ dict(ansible_facts['mounts'] | map(attribute='mount') | list
                   | zip(ansible_facts['mounts'] | map(attribute='size_total') | list)) }}
 
-    - name: 断言各卷已挂载且容量达标
+    - name: Assert every volume is mounted and large enough
       ansible.builtin.assert:
         that:
           - item.path in _mount_map
           - (_mount_map[item.path] | int) >= (item.min_gb | int * 1024 * 1024 * 1024 * 0.95)
         fail_msg: >-
-          卷 {{ item.path }} 缺失或过小（要求 ≥ {{ item.min_gb }} GB）。
-          扩容：lvextend -L <新尺寸> -r /dev/{{ vg_name }}/<lv 名>
+          Volume {{ item.path }} is missing or too small (required >= {{ item.min_gb }} GB).
+          To extend: lvextend -L <new size> -r /dev/{{ vg_name }}/<lv name>
       loop: "{{ required_mounts }}"
       loop_control:
-        label: "{{ item.path }} ≥ {{ item.min_gb }}GB"
+        label: "{{ item.path }} >= {{ item.min_gb }}GB"
 
-    - name: 检查卷组剩余空间
+    - name: Check free space in the volume group
       ansible.builtin.command:
         cmd: vgs --noheadings --units g -o vg_free {{ vg_name }}
       register: _vgfree
       changed_when: false
-      check_mode: false          # 只读查询，check 模式下也要真跑，否则下面的断言拿到空串
+      check_mode: false          # read-only query; must really run in check mode too, or the assert below gets an empty string
 
-    - name: 提醒卷组预留不足
+    - name: Warn when the volume group reserve is too low
       ansible.builtin.assert:
         that:
           - (_vgfree.stdout | trim | regex_replace('[<>g]', '') | float) >= (vg_free_min_gb | float)
         fail_msg: >-
-          卷组剩余 {{ _vgfree.stdout | trim }}，低于预留下限 {{ vg_free_min_gb }} GB。
-          预留空间是 LVM 在线扩容的唯一依靠——用光了就只能停机加盘。
+          Volume group has {{ _vgfree.stdout | trim }} free, below the reserve of {{ vg_free_min_gb }} GB.
+          The reserve is the only thing online LVM extension can draw on -- once it is gone, adding disk means downtime.
 
-    # ---------- 3. 本地化 ----------
-    # 比时区名，不比 UTC 偏移：+03 是莫斯科、巴格达、内罗毕共用的偏移，
-    # 比偏移会让一个设错了时区的机器悄悄通过。
-    - name: 查询当前时区
+    # ---------- 3. Localisation ----------
+    # Compare the zone name, not the UTC offset: +03 is shared by Moscow, Baghdad and Nairobi,
+    # and comparing offsets would let a machine with the wrong zone pass silently.
+    - name: Query the current timezone
       ansible.builtin.command:
         cmd: timedatectl show -p Timezone --value
       register: _tz_now
       changed_when: false
       check_mode: false
 
-    - name: 设置时区
+    - name: Set the timezone
       ansible.builtin.command:
         cmd: timedatectl set-timezone {{ system_timezone }}
       when: _tz_now.stdout | trim != system_timezone
       changed_when: true
 
-    - name: 安装基线包
+    - name: Install the baseline packages
       ansible.builtin.apt:
         name: "{{ base_packages }}"
         state: present
         update_cache: true
         cache_valid_time: 3600
 
-    # 两步都必要：第一步管「声明」（/etc/locale.gen 决定系统重建时生成哪些），
-    # 第二步管「实际状态」（locale -a 是唯一可信的事实）。
-    # 只做第一步，则文件已有而 locale 未生成时不会补；
-    # 只做第二步，则 dpkg-reconfigure 或升级后可能被清掉。
-    - name: 在 /etc/locale.gen 中声明所需 locale
+    # Both steps are needed: the first manages the declaration (/etc/locale.gen decides what
+    # gets generated when the system is rebuilt), the second the actual state (locale -a is the
+    # only trustworthy fact). With only the first, a locale already listed but never generated
+    # is not fixed; with only the second, dpkg-reconfigure or an upgrade may remove it.
+    - name: Declare the required locale in /etc/locale.gen
       ansible.builtin.lineinfile:
         path: /etc/locale.gen
         regexp: '^#?\s*{{ system_locale | regex_escape }} UTF-8\s*$'
         line: "{{ system_locale }} UTF-8"
 
-    - name: 查询已生成的 locale
+    - name: Query the generated locales
       ansible.builtin.command:
         cmd: locale -a
       register: _locales
       changed_when: false
       check_mode: false
 
-    # locale -a 输出形如 en_US.utf8，与 en_US.UTF-8 写法不同，
-    # 故两侧统一去掉连字符并转小写后再比。
-    - name: 生成 locale
+    # locale -a prints e.g. en_US.utf8, spelled differently from en_US.UTF-8,
+    # so both sides drop hyphens and are lower-cased before comparing.
+    - name: Generate the locale
       ansible.builtin.command:
         cmd: locale-gen {{ system_locale }}
       when: >-
@@ -117,7 +119,7 @@
         not in (_locales.stdout_lines | map('replace', '-', '') | map('lower') | list)
       changed_when: true
 
-    - name: 固化默认 locale
+    - name: Pin the default locale
       ansible.builtin.copy:
         dest: /etc/default/locale
         content: |
@@ -126,75 +128,76 @@
         group: root
         mode: "0644"
 
-    # ---------- 4. sysstat：装了还要启用，否则 sar 没有历史数据 ----------
-    - name: 启用 sysstat 采集
+    # ---------- 4. sysstat: installing is not enough, it must be enabled or sar has no history ----------
+    - name: Enable sysstat collection
       ansible.builtin.lineinfile:
         path: /etc/default/sysstat
         regexp: '^ENABLED='
         line: 'ENABLED="true"'
       notify: restart sysstat
 
-    - name: sysstat 开机自启
+    - name: Start sysstat at boot
       ansible.builtin.systemd_service:
         name: sysstat
         enabled: true
         state: started
 
-    # ---------- 5. 内核参数 ----------
-    - name: 下发内核参数
+    # ---------- 5. Kernel parameters ----------
+    - name: Deploy kernel parameters
       ansible.builtin.copy:
         dest: /etc/sysctl.d/90-oss911-dev.conf
         owner: root
         group: root
         mode: "0644"
         content: |
-          # OSS911 开发环境内核参数 —— 由 infra/playbooks/00-base.yml 管理，勿手改
+          # OSS911 development kernel parameters -- managed by infra/playbooks/00-base.yml, do not edit by hand
           #
-          # 注意：这是【开发环境】的取值。生产的数据库虚机另有一套（RS-01：
-          # 禁用超分、内存 100% 预留、禁用气球与交换），不要把这份复制过去。
+          # Note: these are DEVELOPMENT values. The production database VMs use a different set
+          # (RS-01: no overcommit, 100% memory reservation, no ballooning, no swap). Do not copy this file there.
 
-          # 交换：留 8G 作兜底，但不让它成为常规内存层。
-          # 数据库机器上一旦开始换页，延迟会以数量级恶化。
+          # Swap: keep 8G as a safety net, but never let it become a regular memory tier.
+          # Once a database machine starts paging, latency degrades by orders of magnitude.
           vm.swappiness = 10
 
-          # 脏页：默认比例在 62GB 机器上意味着可以攒下数 GB 才回写，
-          # 一次刷盘会造成可观的停顿。按字节设死，与内存大小解耦。
+          # Dirty pages: the default ratios on a 62GB machine allow several GB to pile up before
+          # writeback, and one flush then causes a noticeable stall. Fix them in bytes, independent of memory size.
           vm.dirty_background_bytes = 67108864
           vm.dirty_bytes = 536870912
 
-          # overcommit 保持默认 0。
-          # PostgreSQL 官方建议专用库机设 2，但这台机器同时跑 Superset、
-          # Airflow 与前端构建，它们都按需大额申请——设 2 会造成大量伪失败。
-          # 生产的专用库虚机再按官方建议处理。
+          # Keep overcommit at the default 0.
+          # PostgreSQL recommends 2 for dedicated database hosts, but this machine also runs Superset,
+          # Airflow and front-end builds, which all request large amounts on demand -- 2 would cause many
+          # spurious failures. The dedicated production database VMs follow the official advice.
           vm.overcommit_memory = 0
 
-          # 文件句柄：PG + 容器 + 前端构建同时跑很容易撞默认上限
+          # File handles: PG + containers + front-end builds together easily hit the default limits
           fs.file-max = 2097152
           fs.inotify.max_user_watches = 524288
           fs.inotify.max_user_instances = 1024
 
-          # 网络：容器网络与本地回环上的连接数
+          # Network: connection counts on the container network and local loopback
           net.core.somaxconn = 4096
           net.ipv4.tcp_max_syn_backlog = 4096
       notify: reload sysctl
 
-    # ---------- 6. 关闭自动升级 ----------
-    # 版本基线要可重建，而 unattended-upgrades 会在无人知晓的情况下改变包版本，
-    # 使机器与 MANIFEST 悄悄分叉。补丁改为受控动作：按 runbook 执行并留痕。
-    - name: 停用 unattended-upgrades
+    # ---------- 6. Disable automatic upgrades ----------
+    # The version baseline must be reproducible; unattended-upgrades changes package versions
+    # without anyone knowing and silently drifts the machine away from MANIFEST. Patching is a
+    # controlled action instead: follow the runbook and leave a record.
+    - name: Disable unattended-upgrades
       ansible.builtin.copy:
         dest: /etc/apt/apt.conf.d/99-oss911-no-auto-upgrade
         owner: root
         group: root
         mode: "0644"
         content: |
-          // 由 infra/playbooks/00-base.yml 管理，勿手改
-          // 停用自动升级的理由见 runbook/02-patching.md：
-          // 版本基线须可重建，自动升级会使机器与 MANIFEST 悄悄分叉。
+          // Managed by infra/playbooks/00-base.yml, do not edit by hand
+          // Why automatic upgrades are disabled: see runbook/02-patching.md --
+          // the version baseline must be reproducible, and automatic upgrades silently drift the machine away from MANIFEST.
           APT::Periodic::Update-Package-Lists "0";
           APT::Periodic::Unattended-Upgrade "0";
 
-    - name: 停用自动升级定时器
+    - name: Disable the automatic upgrade timers
       ansible.builtin.systemd_service:
         name: "{{ item }}"
         enabled: false

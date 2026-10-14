@@ -1,38 +1,41 @@
 ---
-# 10-runtime —— 容器运行时与网络
+# 10-runtime -- container runtime and networks
 #
-# 这一步不起任何业务容器，只把「地基的地基」铺好：运行时、两个网段、
-# 镜像源配置。业务容器从 20-database.yml 起逐层加。
+# This step starts no business containers. It only lays the foundation of the foundation:
+# the runtime, two network segments and the registry configuration. Business containers are
+# added layer by layer from 20-database.yml onwards.
 #
-# 分开的理由：运行时出问题与容器出问题是两类故障，混在一个剧本里
-# 排障时分不清是哪一层。
+# Why a separate playbook: runtime problems and container problems are two kinds of failure;
+# mixed into one playbook, troubleshooting cannot tell which layer is at fault.
 
-- name: 容器运行时
+- name: Container runtime
   hosts: all
-  # 本剧本不用任何 fact（2026-10-13 逐个核对：剧本、tasks/ 与模板中均无 ansible_* 引用，
-  # 也不用依赖 fact 的 package / service 模块）。以 root 收集 fact 会扫 LVM 与全部块设备，
-  # 在本机上有时要等几分钟——不需要的就不收。要用 fact 时删掉这一行并在此说明用的是哪个。
+  # This playbook uses no facts (checked one by one on 2026-10-13: no ansible_* references in the
+  # playbook, tasks/ or templates, and no fact-dependent package / service modules). Gathering facts
+  # as root scans LVM and every block device, which on this machine sometimes takes minutes -- so we
+  # do not gather what we do not need. To use a fact, delete this line and say here which fact is used.
   gather_facts: false
   become: true
 
   tasks:
 
-    # ---------- 1. 运行时包 ----------
-    # netavark 与 aardvark-dns 必须显式装。
-    # 它们在 Ubuntu 是 Recommends 而非 Depends，一旦有人用
-    # --no-install-recommends 装 podman，容器之间就无法按名字互相解析——
-    # 而报出来的错是「连接被拒绝」，看不出是 DNS 的问题。
-    - name: 安装容器运行时
+    # ---------- 1. Runtime packages ----------
+    # netavark and aardvark-dns must be installed explicitly.
+    # On Ubuntu they are Recommends, not Depends: as soon as someone installs podman with
+    # --no-install-recommends, containers can no longer resolve each other by name --
+    # and the error reported is "connection refused", which does not look like DNS at all.
+    - name: Install the container runtime
       ansible.builtin.apt:
         name: "{{ container_packages }}"
         state: present
         update_cache: true
         cache_valid_time: 3600
 
-    # 只读查询一律加 check_mode: false —— command 任务在 --check 下默认被跳过，
-    # 跳过之后 register 的变量是空的，后面的断言会拿空串去比而误报失败。
-    # 同时加 failed_when: false：check 模式下 apt 并未真装，命令本身会失败。
-    - name: 记录 podman 版本
+    # Read-only queries always get check_mode: false -- command tasks are skipped under --check by
+    # default, the registered variable is then empty, and the following assert compares an empty
+    # string and reports a false failure. failed_when: false as well: in check mode apt has not
+    # really installed anything, so the command itself fails.
+    - name: Record the podman version
       ansible.builtin.command:
         cmd: podman --version
       register: _podman_ver
@@ -40,14 +43,14 @@
       check_mode: false
       failed_when: false
 
-    - name: 显示 podman 版本
+    - name: Show the podman version
       ansible.builtin.debug:
-        msg: "{{ _podman_ver.stdout | default('（check 模式，podman 尚未安装）') }}（填入 artifacts/MANIFEST.md）"
+        msg: "{{ _podman_ver.stdout | default('(check mode, podman not installed yet)') }} (record it in artifacts/MANIFEST.md)"
 
-    # ---------- 2. 存储位置确认 ----------
-    # podman 默认 graphroot 是 /var/lib/containers/storage，
-    # 而该路径正好是独立卷（00-base 已断言）。确认一次，别假定。
-    - name: 查询 podman 存储路径
+    # ---------- 2. Confirm the storage location ----------
+    # podman's default graphroot is /var/lib/containers/storage, which is exactly the dedicated
+    # volume (asserted in 00-base). Confirm it once rather than assume it.
+    - name: Query the podman storage path
       ansible.builtin.command:
         cmd: podman info --format '{{ '{{' }} .Store.GraphRoot {{ '}}' }}'
       register: _graphroot
@@ -55,23 +58,23 @@
       check_mode: false
       failed_when: false
 
-    # check 模式下 podman 可能还没装，此时跳过断言而不是误报失败。
-    - name: 断言镜像存储落在独立卷上
+    # In check mode podman may not be installed yet; skip the assert instead of reporting a false failure.
+    - name: Assert image storage is on the dedicated volume
       ansible.builtin.assert:
         that:
           - _graphroot.stdout | trim is match('^/var/lib/containers')
         fail_msg: >-
-          podman 存储在「{{ _graphroot.stdout | trim }}」，不在 /var/lib/containers 卷上。
-          镜像会写进根卷，根卷满了整台机器都会出问题。
-        success_msg: "镜像存储：{{ _graphroot.stdout | trim }}"
+          podman storage is at "{{ _graphroot.stdout | trim }}", not on the /var/lib/containers volume.
+          Images would be written to the root volume, and a full root volume breaks the whole machine.
+        success_msg: "Image storage: {{ _graphroot.stdout | trim }}"
       when: not ansible_check_mode and _graphroot.rc == 0
 
-    # ---------- 3. 两个网段 ----------
-    # 单机上模拟生产的网络边界：服务层只在 internal，
-    # 反向代理在 dmz。移动端（IF-40）的请求必须真的穿过代理进来，
-    # 这样 LD-04 第 9 章与 LD-07 的移动端约束在开发环境就是真的在起作用，
-    # 而不是「代码里写了但没走过那条路」。
-    - name: 查询已有网络
+    # ---------- 3. Two network segments ----------
+    # Simulates the production network boundary on one machine: the service layer lives only in
+    # internal, the reverse proxy in dmz. Mobile requests (IF-40) must really pass through the proxy,
+    # so the mobile constraints of LD-04 chapter 9 and LD-07 are actually in force in development --
+    # not "written in the code but the path never exercised".
+    - name: Query existing networks
       ansible.builtin.command:
         cmd: podman network ls --format '{{ '{{' }} .Name {{ '}}' }}'
       register: _networks
@@ -79,14 +82,14 @@
       check_mode: false
       failed_when: false
 
-    # --opt isolate=true 是这一步的关键，不是可选优化。
-    # podman 的桥接网段默认【不隔离】：两个网桥都在同一台宿主机上，
-    # 宿主机会在它们之间路由，dmz 里的容器能直接 ping 通 internal 的 IP。
-    # 本项目实测确认过这一点。
+    # --opt isolate=true is the point of this step, not an optional optimisation.
+    # podman bridge networks are NOT isolated by default: both bridges live on the same host, the
+    # host routes between them, and a container in dmz can ping internal IPs directly. This project
+    # has confirmed it in practice.
     #
-    # 容易被骗的地方：跨网段按【名字】访问会失败（aardvark-dns 按网段划分
-    # 解析范围），看起来像隔离生效了，其实只是名字查不到。必须按 IP 验证。
-    - name: 创建网段
+    # The trap: cross-segment access by NAME fails (aardvark-dns scopes resolution per network),
+    # which looks like isolation is working, when in fact only the name lookup fails. Verify by IP.
+    - name: Create the network segments
       ansible.builtin.command:
         cmd: >-
           podman network create
@@ -100,9 +103,10 @@
       loop_control:
         label: "{{ item.name }} {{ item.subnet }}"
 
-    # 已存在的网段要校验 isolate 是否为真。
-    # 不自动重建——重建会断掉挂在上面的容器，那种事必须由人决定。
-    - name: 查询已有网段的 isolate 设置
+    # For existing segments, verify isolate is true.
+    # Never rebuild automatically -- rebuilding disconnects the containers attached to it, and that
+    # is a decision for a human.
+    - name: Query the isolate setting of existing segments
       ansible.builtin.command:
         cmd: podman network inspect {{ item.name }} --format '{{ '{{' }} .Options.isolate {{ '}}' }}'
       register: _isolate
@@ -114,17 +118,17 @@
         label: "{{ item.name }}"
       when: not ansible_check_mode
 
-    - name: 断言网段隔离已启用
+    - name: Assert network isolation is enabled
       ansible.builtin.assert:
         that:
           - item.stdout | trim == 'true'
         fail_msg: >-
-          网段 {{ item.item.name }} 的 isolate 不为 true（实际「{{ item.stdout | trim }}」）。
-          未隔离时 dmz 的容器可直接按 IP 访问 internal，DMZ 边界形同虚设。
-          须手工重建该网段（会断开挂在其上的容器，故不由剧本自动执行）：
+          isolate is not true for segment {{ item.item.name }} (found "{{ item.stdout | trim }}").
+          Without isolation, containers in dmz can reach internal by IP and the DMZ boundary is meaningless.
+          Rebuild the segment by hand (this disconnects the containers attached to it, so the playbook does not do it):
             sudo podman network rm -f {{ item.item.name }}
-            重跑本剧本
-        success_msg: "{{ item.item.name }} 隔离已启用"
+            then rerun this playbook
+        success_msg: "{{ item.item.name }} isolation enabled"
       loop: "{{ _isolate.results | default([]) }}"
       loop_control:
         label: "{{ item.item.name | default('') }}"
@@ -132,24 +136,26 @@
         - not ansible_check_mode
         - _isolate.results is defined
 
-    # ---------- 4. 镜像源：现在有外网，将来只有内网镜像 ----------
-    # 现在不改默认源，但把文件建出来并写明将来怎么切，
-    # 免得到了离网那天才开始研究 registries.conf 的写法。
-    - name: 下发镜像源配置
+    # ---------- 4. Registries: external today, internal mirror only later ----------
+    # The default registries are not changed now, but the file is created with instructions on how
+    # to switch, so nobody has to start studying registries.conf on the day the network goes offline.
+    - name: Deploy the registry configuration
       ansible.builtin.copy:
         dest: /etc/containers/registries.conf.d/10-oss911.conf
         owner: root
         group: root
         mode: "0644"
         content: |
-          # OSS911 —— 由 infra/playbooks/10-runtime.yml 管理，勿手改
+          # OSS911 -- managed by infra/playbooks/10-runtime.yml, do not edit by hand
           #
-          # 现阶段（开发机有外网）：使用上游默认源，仅限定搜索范围，
-          # 避免 podman 在多个源之间猜测导致拉到非预期的镜像。
+          # Current stage (the development machine has internet access): upstream default registries,
+          # only the search scope is restricted, so podman does not guess between registries and pull
+          # an unexpected image.
           unqualified-search-registries = ["docker.io", "quay.io"]
 
-          # 离网部署时改为内网镜像仓库：把下面三行取消注释并填入实际地址，
-          # 全部镜像拉取即改道内网。业务容器的镜像引用不需要改动。
+          # For offline deployment switch to the internal registry: uncomment the lines below and fill
+          # in the real address; every image pull is then redirected to the internal network. Image
+          # references of the business containers do not change.
           #
           # [[registry]]
           # prefix = "docker.io"
@@ -159,10 +165,10 @@
           # prefix = "quay.io"
           # location = "registry.internal.oss911/quay"
 
-    # ---------- 5. 不开自动更新 ----------
-    # 与 00-base 停用 unattended-upgrades 同理：镜像版本要可重建，
-    # 后台自动更新会让运行中的镜像与 MANIFEST 悄悄分叉。
-    - name: 停用 podman 自动更新
+    # ---------- 5. No automatic updates ----------
+    # Same reason as disabling unattended-upgrades in 00-base: image versions must be reproducible,
+    # and background updates silently drift the running images away from MANIFEST.
+    - name: Disable podman auto-update
       ansible.builtin.systemd_service:
         name: podman-auto-update.timer
         enabled: false

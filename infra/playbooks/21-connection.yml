@@ -1,24 +1,27 @@
-# 21-connection —— 连接层：pgBouncer + HAProxy
+# 21-connection -- connection layer: pgBouncer + HAProxy
 #
-# 顺序是 应用 → pgBouncer → HAProxy → 当前主库，不能颠倒（DD-67）。
-# pgBouncer 自己没有选主能力，它的 [databases] 里只能写一个固定地址；
-# 把 HAProxy 放在它后面，选主的事交给读 Patroni 健康检查的 HAProxy。
-# 若反过来（HAProxy 在前），每个 pgBouncer 只能绑死一台库，池就跟着库走了。
+# The order is application -> pgBouncer -> HAProxy -> current primary, and it must not be reversed (DD-67).
+# pgBouncer cannot elect a primary; its [databases] section can only hold one fixed address.
+# Putting HAProxy behind it hands primary selection to HAProxy, which reads the Patroni health check.
+# The other way round (HAProxy in front), each pgBouncer would be pinned to one database and the pool
+# would follow the database.
 #
-# ★ 开发机与生产的差异，就两处，都在 inventory 里：
-#     haproxy_backends      开发机一个后端，生产三个
-#     haproxy_health_check  开发机 pgsql-check，生产 Patroni REST /primary
-#   剧本与模板两边完全一样。选主与切换演练在开发机上验不了（LD-08 的范畴），
-#   能验的是拓扑、两个池的行为与连接数上限。
+# * Development differs from production in exactly two places, both in inventory:
+#     haproxy_backends      one backend on the development machine, three in production
+#     haproxy_health_check  pgsql-check on the development machine, Patroni REST /primary in production
+#   Playbook and templates are identical on both sides. Leader election and failover drills cannot be
+#   verified on the development machine (that is LD-08's territory); what can be verified is the topology,
+#   the behaviour of the two pools and the connection limits.
 #
-# ★ 关于 --check：同 20-database，装包之后的任务依赖包自身创建的用户与目录，
-#   故整块跳过 check 模式。
+# * About --check: as in 20-database, tasks after the install depend on users and directories the
+#   packages create, so they are skipped in check mode as a block.
 
-- name: 连接层 pgBouncer 与 HAProxy
+- name: Connection layer pgBouncer and HAProxy
   hosts: all
-  # 本剧本不用任何 fact（2026-10-13 逐个核对：剧本、tasks/ 与模板中均无 ansible_* 引用，
-  # 也不用依赖 fact 的 package / service 模块）。以 root 收集 fact 会扫 LVM 与全部块设备，
-  # 在本机上有时要等几分钟——不需要的就不收。要用 fact 时删掉这一行并在此说明用的是哪个。
+  # This playbook uses no facts (checked one by one on 2026-10-13: no ansible_* references in the
+  # playbook, tasks/ or templates, and no fact-dependent package / service modules). Gathering facts
+  # as root scans LVM and every block device, which on this machine sometimes takes minutes -- so we
+  # do not gather what we do not need. To use a fact, delete this line and say here which fact is used.
   gather_facts: false
   become: true
 
@@ -27,41 +30,41 @@
 
   tasks:
 
-    # ================= 装包前：check 模式下可验 =================
+    # ================= Before the install: verifiable in check mode =================
 
-    - name: 断言连接数预算不超过 PostgreSQL 的上限
+    - name: Assert the connection budget does not exceed the PostgreSQL limit
       ansible.builtin.assert:
         that:
           - (pgb_pool_size_txn + pgb_pool_size_session + pgb_pool_size_keycloak
              + pgb_pool_size_airflow + pgb_reserve_pool) <= pgb_max_db_connections
           - (pgb_max_db_connections + 10) <= 100
         fail_msg: >-
-          连接数预算超限。事务池 {{ pgb_pool_size_txn }} + 会话池 {{ pgb_pool_size_session }}
-          + 预留池 {{ pgb_reserve_pool }} 必须不超过全局闸 {{ pgb_max_db_connections }}；
-          再加 10 个保留名额（superuser 3 · 监控 2 · 人工维护 5）不得超过本机 max_connections。
-          生产两台 LB 均按 active/passive 部署，常态仍是一份池，但切换瞬间会短时叠加——
-          生产的 max_connections 因此定为 200（LD-08 第 8 章）。
+          Connection budget exceeded. Transaction pool {{ pgb_pool_size_txn }} + session pool {{ pgb_pool_size_session }}
+          + reserve pool {{ pgb_reserve_pool }} must not exceed the global cap {{ pgb_max_db_connections }};
+          adding 10 reserved slots (superuser 3, monitoring 2, manual maintenance 5) must not exceed max_connections here.
+          Both production LBs run active/passive, so normally there is still one set of pools, but during a switchover
+          they briefly overlap -- production max_connections is therefore 200 (LD-08 chapter 8).
         success_msg: >-
-          连接预算：事务 {{ pgb_pool_size_txn }} + 会话 {{ pgb_pool_size_session }}
+          Connection budget: transaction {{ pgb_pool_size_txn }} + session {{ pgb_pool_size_session }}
           + Keycloak {{ pgb_pool_size_keycloak }} + Airflow {{ pgb_pool_size_airflow }}
-          + 预留 {{ pgb_reserve_pool }}
-          ≤ 闸 {{ pgb_max_db_connections }}，另留 10 个名额
+          + reserve {{ pgb_reserve_pool }}
+          <= cap {{ pgb_max_db_connections }}, plus 10 reserved slots
 
-    - name: 安装 pgBouncer 与 HAProxy
+    - name: Install pgBouncer and HAProxy
       ansible.builtin.apt:
         name: "{{ connection_packages }}"
         state: present
         update_cache: true
         cache_valid_time: 3600
 
-    # ================= 装包后 =================
+    # ================= After the install =================
 
-    - name: 连接层配置
+    - name: Connection layer configuration
       when: not ansible_check_mode
       block:
 
-        # ---------- 数据库侧的池用户 ----------
-        - name: 查询池用户是否已存在
+        # ---------- Pool user on the database side ----------
+        - name: Query whether the pool user exists
           ansible.builtin.command:
             cmd: psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'pgbouncer'"
           become_user: postgres
@@ -69,18 +72,19 @@
           changed_when: false
           check_mode: false
 
-        # 池用户口令的唯一存放处是 userlist.txt。四种状态与 40-schema 的 db_login 相同：
-        #   userlist 有、用户有 → 沿用          userlist 有、用户无 → 以文件中的口令建用户
-        #   userlist 无、用户无 → 生成并建用户  userlist 无、用户有 → 生成新口令并 ALTER（即轮换）
-        # 轮换的做法因此是：删掉 userlist.txt 重跑本剧本（runbook/05）。
-        - name: 读取已有的 userlist
+        # The only place the pool user's password is stored is userlist.txt. The four states are the same
+        # as in 40-schema's db_login:
+        #   userlist present, user present -> keep it        userlist present, user missing -> create the user with the file's password
+        #   userlist missing, user missing -> generate, create  userlist missing, user present -> new password + ALTER (= rotation)
+        # So rotation means: delete userlist.txt and rerun this playbook (runbook/91).
+        - name: Read the existing userlist
           ansible.builtin.slurp:
             src: "{{ pgb_conf_dir }}/userlist.txt"
           register: _userlist
           failed_when: false
           no_log: true
 
-        - name: 取池用户口令（沿用 userlist 中的，或新生成）
+        - name: Get the pool user password (keep the one in userlist, or generate one)
           ansible.builtin.set_fact:
             _pgb_password: >-
               {{ (_userlist.content | b64decode).split('"')[3]
@@ -89,7 +93,7 @@
             _pgb_password_is_new: "{{ _userlist.content is not defined }}"
           no_log: true
 
-        - name: 建立池用户，或为它设新口令
+        - name: Create the pool user, or set a new password for it
           ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/role_password.yml"
           vars:
             rp_role: pgbouncer
@@ -97,8 +101,8 @@
             rp_create: "{{ _pgbrole.stdout | trim != '1' }}"
           when: _pgbrole.stdout | trim != '1' or (_pgb_password_is_new | bool)
 
-        # pgBouncer 要能查 pg_shadow 才能做 SCRAM 透传；给一个只读函数而不是超级用户权限
-        - name: 查询 auth_query 函数是否已存在
+        # pgBouncer must be able to read pg_shadow to pass SCRAM through; give it a read-only function, not superuser
+        - name: Query whether the auth_query function exists
           ansible.builtin.command:
             cmd: >-
               psql -d {{ pg_database }} -tAc
@@ -109,7 +113,7 @@
           changed_when: false
           check_mode: false
 
-        - name: 建立 auth_query 函数
+        - name: Create the auth_query function
           ansible.builtin.command:
             cmd: >-
               psql -d {{ pg_database }} -v ON_ERROR_STOP=1 -c
@@ -123,24 +127,24 @@
           when: _authfn_have.stdout | trim != '1'
 
         # ---------- HAProxy ----------
-        - name: 下发 HAProxy 配置
+        - name: Deploy the HAProxy configuration
           ansible.builtin.template:
             src: ../files/haproxy.cfg.j2
             dest: /etc/haproxy/haproxy.cfg
             owner: root
             group: root
             mode: "0644"
-            validate: haproxy -c -f %s        # 配置写错时拒绝落盘，而不是等重启才发现
+            validate: haproxy -c -f %s        # refuse to write a broken config instead of finding out at restart
           notify: restart haproxy
 
-        - name: 启用并启动 HAProxy
+        - name: Enable and start HAProxy
           ansible.builtin.systemd_service:
             name: haproxy
             enabled: true
             state: started
 
         # ---------- pgBouncer ----------
-        - name: 下发 pgBouncer 配置
+        - name: Deploy the pgBouncer configuration
           ansible.builtin.template:
             src: ../files/pgbouncer.ini.j2
             dest: "{{ pgb_conf_dir }}/pgbouncer.ini"
@@ -149,7 +153,7 @@
             mode: "0640"
           notify: restart pgbouncer
 
-        - name: 建立 userlist
+        - name: Write the userlist
           ansible.builtin.copy:
             dest: "{{ pgb_conf_dir }}/userlist.txt"
             owner: postgres
@@ -158,24 +162,23 @@
             content: |
               "pgbouncer" "{{ _pgb_password }}"
           no_log: true
-          notify: reload pgbouncer          # 口令轮换后重读 auth_file——reload 即可，不要 restart
+          notify: reload pgbouncer          # after password rotation re-read auth_file -- reload is enough, do not restart
 
-        - name: 启用并启动 pgBouncer
+        - name: Enable and start pgBouncer
           ansible.builtin.systemd_service:
             name: pgbouncer
             enabled: true
             state: started
 
-        - name: 立即应用配置变更
+        - name: Apply configuration changes now
           ansible.builtin.meta: flush_handlers
 
-        # ---------- 验证：链路真的通，而且走的是这条链路 ----------
-        # ---------- 验证：链路真的通，而且走的是这条链路 ----------
-        # 用 pg_isready 而不是 psql：这一步要验的是「HAProxy 这一跳能把 TCP 送到库」，
-        # 而 psql 还要过 pg_hba 的身份认证——认证失败会被误读成链路不通，
-        # 本项目实测踩过一次。一个会因为「它声称要测的事情之外的原因」而失败的检查，
-        # 比没有检查更费时间。
-        - name: 经 HAProxy 探活
+        # ---------- Verification: the path really works, and it is this path ----------
+        # pg_isready rather than psql: this step verifies that "the HAProxy hop delivers TCP to the database",
+        # while psql would also have to pass pg_hba authentication -- an authentication failure would be
+        # misread as a broken path, which this project actually hit once. A check that can fail for reasons
+        # other than the thing it claims to test costs more time than no check.
+        - name: Probe through HAProxy
           ansible.builtin.command:
             cmd: pg_isready -h 127.0.0.1 -p {{ haproxy_listen_port }} -t 5
           register: _viahap
@@ -183,20 +186,20 @@
           failed_when: false
           check_mode: false
 
-        - name: 断言 HAProxy 这一跳可用
+        - name: Assert the HAProxy hop works
           ansible.builtin.assert:
             that: ["_viahap.rc == 0"]
             fail_msg: >-
-              经 HAProxy（127.0.0.1:{{ haproxy_listen_port }}）探活失败。
-              实际输出：{{ _viahap.stdout | default('') }} {{ _viahap.stderr | default('') }}（rc={{ _viahap.rc }}）。
-              排查顺序：systemctl status haproxy → journalctl -u haproxy -n 50
-              （本机 HAProxy 日志进 journal，不在 /var/log/haproxy.log）→
-              curl -s 127.0.0.1:{{ haproxy_stats_port }}/\;csv 看后端状态列是否为 UP。
-            success_msg: "HAProxy → PostgreSQL 链路可用：{{ _viahap.stdout | trim }}"
+              Probe through HAProxy (127.0.0.1:{{ haproxy_listen_port }}) failed.
+              Output: {{ _viahap.stdout | default('') }} {{ _viahap.stderr | default('') }} (rc={{ _viahap.rc }}).
+              Check in this order: systemctl status haproxy -> journalctl -u haproxy -n 50
+              (HAProxy logs to the journal on this machine, not to /var/log/haproxy.log) ->
+              curl -s 127.0.0.1:{{ haproxy_stats_port }}/\;csv and check the backend status column is UP.
+            success_msg: "HAProxy -> PostgreSQL path works: {{ _viahap.stdout | trim }}"
 
-        # ---------- 两个池的池模式 ----------
-        # 池用户口令已在本剧本开头从 userlist 取回或新生成，这里直接用。
-        - name: 查询 pgBouncer 的池清单
+        # ---------- Pool modes of the two pools ----------
+        # The pool user password was read from userlist or generated at the start of this playbook.
+        - name: Query pgBouncer's pool list
           ansible.builtin.command:
             cmd: >-
               psql -h 127.0.0.1 -p {{ pgb_listen_port }} -U pgbouncer -d pgbouncer
@@ -209,44 +212,45 @@
           failed_when: false
           no_log: true
 
-        # 「两个池都在」容易断言，「池模式真的不同」才是要点——
-        # 与网段隔离那次同一性质：配置存在不等于配置生效。
-        - name: 断言两个池的池模式确实不同
+        # "Both pools exist" is easy to assert; "the pool modes really differ" is the point --
+        # same nature as network isolation: configuration present is not configuration in effect.
+        - name: Assert the two pools really have different pool modes
           ansible.builtin.assert:
             that:
               - "'transaction' in _pools.stdout"
               - "'session' in _pools.stdout"
             fail_msg: >-
-              pgBouncer 的 SHOW DATABASES 里没有同时出现 transaction 与 session 两种池模式。
-              先确认这一步本身没有因口令取不到而失败：
+              pgBouncer's SHOW DATABASES does not show both pool modes, transaction and session.
+              First make sure this step did not itself fail for lack of a password:
               psql -h 127.0.0.1 -p {{ pgb_listen_port }} -U pgbouncer -d pgbouncer -c "SHOW DATABASES"
-              （口令在 {{ pgb_conf_dir }}/userlist.txt）。
-              若连得上而池模式相同，则是模板或配置的问题：两个池都落成事务级时，
-              dbt 与 Airflow 的 SET、临时表与 advisory lock 会在运行期随机失败，
-              而且失败现象与池无关——这正是必须在此刻验出来的原因。
-            success_msg: "两个池的池模式不同：事务级与会话级并存"
+              (the password is in {{ pgb_conf_dir }}/userlist.txt).
+              If it connects and both modes are the same, the template or configuration is wrong: with both
+              pools in transaction mode, SET, temporary tables and advisory locks of dbt and Airflow fail at
+              random at run time, and the failures do not look pool related -- which is exactly why it must be caught here.
+            success_msg: "The two pools have different modes: transaction and session side by side"
 
-        # ---------- auth_query 是否真的起作用 ----------
-        # 上面那条 SHOW DATABASES 用的是 pgbouncer 自己，而它是 userlist 里唯一的用户，
-        # 走的是绕过 auth_query 的路径——它验不了「别的用户能不能连」。
-        # 这里专门建一个只在库里存在、不在 userlist 里的用户去连一次。
+        # ---------- Does auth_query really work ----------
+        # The SHOW DATABASES above uses pgbouncer itself, the only user in userlist, which takes the path that
+        # bypasses auth_query -- it cannot tell whether other users can connect.
+        # So connect once with a user that exists only in the database and not in userlist.
         #
-        # ★ 探测用户的口令每次独立随机生成，用完即删。上一版写成「probe_ 加池用户
-        #   口令的前 12 位」，且在命令行上——执行期间对本机任何用户的 ps 可见，
-        #   等于暴露了池用户口令的大半截（NOTES.md 2026-10-12 Mac 侧移交第 1 项）。
-        #   验证用的口令与被验的口令不能有任何派生关系。
-        - name: 生成验证用户的一次性口令
+        # * The probe user's password is generated independently at random every time and the user is dropped
+        #   after use. The previous version used "probe_ + the first 12 characters of the pool user's password",
+        #   on the command line -- visible to every user on the machine via ps while running, which exposed most
+        #   of the pool user's password (NOTES.md 2026-10-12, Mac-side handover item 1).
+        #   A password used for verification must never be derived from the password being verified.
+        - name: Generate a one-time password for the probe user
           ansible.builtin.set_fact:
             _probe_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters', 'digits']) }}"
           no_log: true
 
-        - name: 清掉上次可能残留的验证用户
+        - name: Drop a probe user possibly left over from a previous run
           ansible.builtin.command:
             cmd: psql -X -tAc "DROP ROLE IF EXISTS pgb_probe"
           become_user: postgres
           changed_when: false
 
-        - name: 建立 auth_query 的验证用户
+        - name: Create the auth_query probe user
           ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/role_password.yml"
           vars:
             rp_role: pgb_probe
@@ -254,7 +258,7 @@
             rp_create: true
             rp_changed: false
 
-        - name: 用该用户经 pgBouncer 连一次
+        - name: Connect once through pgBouncer as that user
           ansible.builtin.command:
             cmd: >-
               psql -h 127.0.0.1 -p {{ pgb_listen_port }} -U pgb_probe -d {{ pg_database }}
@@ -267,34 +271,35 @@
           failed_when: false
           no_log: true
 
-        - name: 清理验证用户
+        - name: Drop the probe user
           ansible.builtin.command:
             cmd: psql -tAc "DROP ROLE IF EXISTS pgb_probe"
           become_user: postgres
           changed_when: false
 
-        - name: 断言 auth_query 可用
+        - name: Assert auth_query works
           ansible.builtin.assert:
             that: ["(_probe.stdout | default('')) is search('auth-query-ok')"]
             fail_msg: >-
-              不在 userlist 中的用户无法经 pgBouncer 认证，说明 auth_query 没生效。
-              userlist 里只有 pgbouncer 自己，其余用户全靠 auth_query 现查；
-              缺了它，除 pgbouncer 之外的任何用户都连不上，而用 pgbouncer 自己去验
-              恰好绕过这条路径——验不出问题。
-              依次检查：pgbouncer.ini 中的 auth_user / auth_query / auth_dbname 三项；
-              {{ pg_database }} 库中是否存在 public.pgbouncer_get_auth 函数且已授权给 pgbouncer。
-            success_msg: "auth_query 可用：userlist 之外的用户也能经池认证"
+              A user not in userlist cannot authenticate through pgBouncer, so auth_query is not working.
+              userlist holds only pgbouncer itself; every other user is looked up via auth_query.
+              Without it no user other than pgbouncer can connect, and verifying with pgbouncer itself
+              bypasses exactly that path -- it would never find the problem.
+              Check in order: auth_user / auth_query / auth_dbname in pgbouncer.ini;
+              whether public.pgbouncer_get_auth exists in the {{ pg_database }} database and is granted to pgbouncer.
+            success_msg: "auth_query works: users outside userlist can authenticate through the pool"
 
   handlers:
     - name: restart haproxy
       ansible.builtin.systemd_service:
         name: haproxy
         state: restarted
-    # ★ restart 会等 90 秒：发行版单元的 KillSignal=SIGINT 是 pgBouncer 的「安全关闭」，
-    #   要等所有客户端主动断开才退出；而 Airflow、Keycloak 走会话池，连接从不主动断开，
-    #   于是一直等到 TimeoutStopSec（90 秒）被 SIGKILL（2026-10-13 轮换口令时实测）。
-    #   只有 pgbouncer.ini 里 listen 一类须重启才生效的设置变了才用 restart；
-    #   auth_file（userlist）变化用 reload（SIGHUP），已建立的连接一条不断。
+    # * restart waits 90 seconds: the distribution unit's KillSignal=SIGINT is pgBouncer's "safe shutdown",
+    #   which waits for every client to disconnect; Airflow and Keycloak use session pools whose connections
+    #   never disconnect on their own, so it waits until TimeoutStopSec (90 s) and gets SIGKILLed (observed
+    #   2026-10-13 while rotating passwords). Use restart only when a pgbouncer.ini setting that needs a restart
+    #   (such as listen) changes; a change of auth_file (userlist) uses reload (SIGHUP), which keeps every
+    #   established connection.
     - name: restart pgbouncer
       ansible.builtin.systemd_service:
         name: pgbouncer

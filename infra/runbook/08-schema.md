@@ -83,14 +83,14 @@ ansible-playbook playbooks/40-schema.yml -e ansible_connection=local -K
 `-K` 会问一次 sudo 口令。预期看到这些关键行（顺序如下）：
 
 ```
-TASK [断言变更清单的编号连续、run_as 合规]      变更清单合规：4 个变更，0000 至 0003
-TASK [断言待执行的变更都排在已执行的之后]        待执行：0000 0001 0002 0003
-TASK [显示执行输出]                              ==> 结构变更 0000 … 完成（共四段）
-TASK [断言全部变更已执行且校验和一致]            结构变更 0000 至 0003 均已执行，校验和一致
-TASK [ingest：断言登录与权限角色均生效]          ingest：经 pgBouncer 登录成功 …
-TASK [dbt：断言登录与权限角色均生效]             dbt：经 pgBouncer 登录成功 …
-TASK [显示新建分区数]                            本次新建分区 65 个
-TASK [断言库角色与授权验证全部通过]              库角色与授权验证：N 项全部通过（已回滚；N 随检查增加而变）
+TASK [Assert the change manifest ids are consecutive and run_as is valid]   Change manifest valid: 4 changes, 0000 to 0003
+TASK [Assert every pending change comes after the executed ones]           Pending: 0000 0001 0002 0003
+TASK [Show the execution output]                                           ==> structural change 0000 ... done (four blocks)
+TASK [Assert every change has been executed with matching checksums]       Structural changes 0000 to 0003 executed, checksums match
+TASK [ingest: assert the login and the privilege role both work]          ingest: logged in through pgBouncer ...
+TASK [dbt: assert the login and the privilege role both work]             dbt: logged in through pgBouncer ...
+TASK [Show the number of partitions created]                               Partitions created in this run: 65
+TASK [Assert the database role and grant verification passes]              ... all N checks passed (rolled back; N grows with the checks)
 PLAY RECAP   … failed=0
 ```
 
@@ -104,7 +104,7 @@ PLAY RECAP   … failed=0
 ansible-playbook playbooks/40-schema.yml -e ansible_connection=local -K
 ```
 
-这一遍应看到：`待执行：无`、四个变更各一行「已执行，文件未改动」、新建分区 0 个、
+这一遍应看到：`Pending: none`、四个变更各一行 `executed, files unmodified`、`Partitions created in this run: 0`、
 **`changed=0`**。不是 0 就说明有一步每次都在改东西，把输出贴回来。
 
 ### 3  dbt 的 profile 加 `role:`（重跑第 7 步）
@@ -174,14 +174,14 @@ sudo -u postgres psql -d oss911 -X < ~/src/nexora_bi/test/db_roles_check.sql 2>&
 
 | 现象 | 原因 | 处置 |
 | --- | --- | --- |
-| `变更 000X 已在库中执行，但它的文件被改过` | 已执行变更的文件被改了 | 用 `git log -p ddl/` 找到改动，把文件恢复原样；要改的内容写成新变更追加到 `changes.yml` 末尾。**不要**去改 `meta.ddl_change` 里的校验和 |
-| `待执行的变更 … 中有编号小于已执行的` | 在清单中间插了变更 | 新变更只能追加在末尾，改编号 |
+| `Change 000X has been executed in the database, but its files were modified` | 已执行变更的文件被改了 | 用 `git log -p ddl/` 找到改动，把文件恢复原样；要改的内容写成新变更追加到 `changes.yml` 末尾。**不要**去改 `meta.ddl_change` 里的校验和 |
+| `Among the pending changes ... there are ids lower than the executed ...` | 在清单中间插了变更 | 新变更只能追加在末尾，改编号 |
 | 执行变更时报 SQL 错误 | 变更本身有错 | 该变更已整体回滚、未登记，库停在上一个变更。修好文件重跑即可——它从未执行过，所以可以改 |
 | `角色 oss911_xxx 已存在但属性不符` | 同名角色被人改成了可登录或带特权 | 查 `\du oss911_*`，弄清是谁改的再决定；不要直接删 |
 | `库用户 xxx 已存在但属性不符` | 同名登录用户不是本剧本建的 | 同上 |
 | `password authentication failed` | 环境文件与库中口令不一致 | 删掉 `/etc/oss911/<用户>.env` 重跑剧本：生成新口令并 ALTER ROLE（一次轮换） |
 | 新建分区数报错 `permission denied for function ensure_monthly_partitions` | 0002 的 EXECUTE 授权没生效 | 把输出贴回来，这是变更本身的问题 |
-| `库角色与授权验证` 失败 | 某个权限与设计不符 | FAIL 行写明了「哪个身份、哪条语句、期望允许还是拒绝」；按上面第 7 条单独跑看完整输出 |
+| `Assert the database role and grant verification passes` 失败 | 某个权限与设计不符 | FAIL 行写明了「哪个身份、哪条语句、期望允许还是拒绝」；按上面第 7 条单独跑看完整输出 |
 
 ## 开发机不等于生产的三处
 

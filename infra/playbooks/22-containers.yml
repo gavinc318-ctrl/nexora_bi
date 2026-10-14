@@ -1,23 +1,25 @@
-# 22-containers —— 容器化组件：Keycloak · SeaweedFS · Prometheus
+# 22-containers -- containerised components: Keycloak, SeaweedFS, Prometheus
 #
-# 三件支撑组件，都以 Quadlet（systemd 单元）管理，不用 podman run，
-# 也不用已废弃的 podman generate systemd。开机自启、依赖顺序与重启策略交给
-# systemd，离网重建时少一套自制脚本要维护。
+# Three supporting components, all managed as Quadlet (systemd units) -- not podman run, and not the
+# deprecated podman generate systemd. Start at boot, dependency order and restart policy are left to
+# systemd, so an offline rebuild has one less home-made script to maintain.
 #
-# ★ 镜像按 digest 钉死，不按 tag。tag 会被重新发布，digest 不会。
-#   首次运行时 inventory 里的 digest 为空，剧本按 tag 拉取并把解析出的 digest
-#   打印出来——当场填回 inventory 与 artifacts/MANIFEST.md。此后每次运行按
-#   digest 拉取，镜像被换掉会立刻暴露。
+# * Images are pinned by digest, not by tag. Tags get re-published, digests do not.
+#   On the first run the digests in inventory are empty; the playbook pulls by tag and prints the resolved
+#   digests -- fill them back into inventory and artifacts/MANIFEST.md on the spot. From then on every run
+#   pulls by digest, and a swapped image shows up immediately.
+#   After changing a digest in inventory, rerun this playbook and expect a change (troubleshooting entry 28).
 #
-# ★ 验证一律验行为：Keycloak 查它的库里有没有建出表（证明不是内置 H2）、
-#   SeaweedFS 做一次写入再读回的往返、Prometheus 查自己的 up 指标。
-#   「容器在运行」太容易满足，证明不了任何事。
+# * Verification always checks behaviour: Keycloak -- whether its database really has tables (proving it
+#   is not the embedded H2); SeaweedFS -- a write/read round trip; Prometheus -- its own "up" metric.
+#   "The container is running" is too easy to satisfy and proves nothing.
 
-- name: 容器化组件
+- name: Containerised components
   hosts: all
-  # 本剧本不用任何 fact（2026-10-13 逐个核对：剧本、tasks/ 与模板中均无 ansible_* 引用，
-  # 也不用依赖 fact 的 package / service 模块）。以 root 收集 fact 会扫 LVM 与全部块设备，
-  # 在本机上有时要等几分钟——不需要的就不收。要用 fact 时删掉这一行并在此说明用的是哪个。
+  # This playbook uses no facts (checked one by one on 2026-10-13: no ansible_* references in the
+  # playbook, tasks/ or templates, and no fact-dependent package / service modules). Gathering facts
+  # as root scans LVM and every block device, which on this machine sometimes takes minutes -- so we
+  # do not gather what we do not need. To use a fact, delete this line and say here which fact is used.
   gather_facts: false
   become: true
 
@@ -27,7 +29,7 @@
 
   tasks:
 
-    - name: 建立配置目录
+    - name: Create the configuration directories
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
@@ -38,12 +40,12 @@
         - "{{ quadlet_dir }}"
         - "{{ oss911_etc }}"
 
-    - name: 容器组件配置
+    - name: Container component configuration
       when: not ansible_check_mode
       block:
 
-        # ---------- 镜像：按 digest 钉死 ----------
-        - name: 拉取镜像
+        # ---------- Images: pinned by digest ----------
+        - name: Pull the images
           ansible.builtin.command:
             cmd: >-
               podman pull
@@ -54,7 +56,7 @@
           changed_when: "'Writing manifest' in _pull.stdout or 'Copying blob' in _pull.stdout"
           loop: "{{ container_images.keys() | list }}"
 
-        - name: 解析各镜像的 digest
+        - name: Resolve the digest of every image
           ansible.builtin.command:
             cmd: >-
               podman image inspect
@@ -66,23 +68,23 @@
           changed_when: false
           loop: "{{ container_images.keys() | list }}"
 
-        - name: 报告未钉死的镜像
+        - name: Report images not yet pinned
           ansible.builtin.debug:
             msg: >-
-              以下镜像尚未钉 digest，请把解析值填回 inventory/dev.yml 的
-              container_images 与 artifacts/MANIFEST.md：
+              The following images are not pinned by digest yet; fill the resolved values into
+              container_images in inventory/dev.yml and into artifacts/MANIFEST.md:
               {% for r in _digests.results %}
               {{ r.item }} = {{ r.stdout | trim }}{% endfor %}
           when: container_images.values() | map(attribute='digest') | select('equalto','') | list | length > 0
 
-        - name: 记下本次使用的镜像引用
+        - name: Record the image references used in this run
           ansible.builtin.set_fact:
             _kc_image: "{{ 'quay.io/keycloak/keycloak@' ~ container_images.keycloak.digest if container_images.keycloak.digest | length > 0 else container_images.keycloak.ref }}"
             _sw_image: "{{ 'docker.io/chrislusf/seaweedfs@' ~ container_images.seaweedfs.digest if container_images.seaweedfs.digest | length > 0 else container_images.seaweedfs.ref }}"
             _pr_image: "{{ 'docker.io/prom/prometheus@' ~ container_images.prometheus.digest if container_images.prometheus.digest | length > 0 else container_images.prometheus.ref }}"
 
-        # ---------- Keycloak 的库与账号 ----------
-        - name: 查询 Keycloak 的库用户是否存在
+        # ---------- Keycloak database and account ----------
+        - name: Query whether the Keycloak database user exists
           ansible.builtin.command:
             cmd: psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'keycloak'"
           become_user: postgres
@@ -90,29 +92,30 @@
           changed_when: false
           check_mode: false
 
-        # 库用户口令的唯一存放处是 keycloak.env。四种状态与 40-schema 的 db_login 相同；
-        # 轮换的做法是删掉 keycloak.env 重跑本剧本（runbook/06）。
+        # The only place the database user's password is stored is keycloak.env. The four states are the
+        # same as in 40-schema's db_login; rotation means deleting keycloak.env and rerunning this playbook (runbook/91).
         #
-        # 引导管理员（KC_BOOTSTRAP_ADMIN_*，及旧名 KEYCLOAK_ADMIN*）在 Keycloak 26 是
-        # 【临时】的，只在首次启动、master realm 里还没有管理员时起作用。故：
-        #   首次安装（库用户尚不存在）→ 生成引导管理员口令写入
-        #   此后 → 环境文件里还有就原样保留，没有就不再写回
-        # 建好正式管理员、删掉引导管理员之后，从环境文件里去掉这几行即可，剧本不会
-        # 再把它们加回来（runbook/06「换掉引导管理员」）。
-        # 要轮换库口令时，先换掉引导管理员——否则删环境文件会连同引导管理员口令一起丢掉。
-        - name: 读回已有的 Keycloak 环境文件
+        # The bootstrap admin (KC_BOOTSTRAP_ADMIN_*, and the old names KEYCLOAK_ADMIN*) is TEMPORARY in
+        # Keycloak 26: it only takes effect on first start, while the master realm has no admin yet. Hence:
+        #   first install (database user does not exist yet) -> generate a bootstrap admin password and write it
+        #   afterwards -> keep the lines if the env file still has them, never write them back if it does not
+        # Once a permanent admin exists and the bootstrap admin is deleted, remove those lines from the env file;
+        # the playbook will not add them back (runbook/91, "replace the bootstrap admin").
+        # Before rotating the database password, replace the bootstrap admin first -- otherwise deleting the env
+        # file loses the bootstrap admin password along with it.
+        - name: Read back the existing Keycloak env file
           ansible.builtin.slurp:
             src: "{{ oss911_etc }}/keycloak.env"
           register: _kcenv
           failed_when: false
           no_log: true
 
-        - name: 取库口令与引导管理员口令（沿用环境文件中的，或新生成）
+        - name: Get the database and bootstrap admin passwords (keep the ones in the env file, or generate)
           ansible.builtin.set_fact:
             _kcenv_text: "{{ (_kcenv.content | b64decode) if _kcenv.content is defined else '' }}"
           no_log: true
 
-        - name: 整理 Keycloak 的口令
+        - name: Settle the Keycloak passwords
           ansible.builtin.set_fact:
             _kc_db_password: >-
               {{ (_kcenv_text | regex_search('(?m)^KC_DB_PASSWORD=(.+)$', '\1') | first)
@@ -126,7 +129,7 @@
                        if _kcrole.stdout | trim != '1' else '') }}
           no_log: true
 
-        - name: 建立 Keycloak 的库用户，或为它设新口令
+        - name: Create the Keycloak database user, or set a new password for it
           ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/role_password.yml"
           vars:
             rp_role: keycloak
@@ -134,15 +137,16 @@
             rp_create: "{{ _kcrole.stdout | trim != '1' }}"
           when: _kcrole.stdout | trim != '1' or (_kc_db_password_is_new | bool)
 
-        # 库必须先建出来，21-connection 的池配置才指得上。pgBouncer 不校验库是否
-        # 存在，连接时才报错——所以这里建库、那里配池，两者的顺序只在验证时才显形。
-        - name: 建立 Keycloak 的数据库
+        # The database must exist before 21-connection's pool can point at it. pgBouncer does not check
+        # whether a database exists and only fails at connect time -- so the order "create here, configure
+        # the pool there" only shows up during verification.
+        - name: Create the Keycloak database
           ansible.builtin.command:
             cmd: createdb --owner=keycloak --template=template0 --locale=C --encoding=UTF8 {{ keycloak_db }}
           become_user: postgres
           when: _kcrole.stdout | trim != '1'
 
-        - name: 下发 Keycloak 环境文件
+        - name: Deploy the Keycloak env file
           ansible.builtin.copy:
             dest: "{{ oss911_etc }}/keycloak.env"
             owner: root
@@ -160,8 +164,8 @@
           register: _kcenv_w
           no_log: true
 
-        # ---------- Prometheus 配置 ----------
-        - name: 下发 Prometheus 配置
+        # ---------- Prometheus configuration ----------
+        - name: Deploy the Prometheus configuration
           ansible.builtin.template:
             src: ../files/prometheus.yml.j2
             dest: "{{ oss911_etc }}/prometheus.yml"
@@ -170,8 +174,8 @@
             mode: "0644"
           register: _promcfg
 
-        # ---------- Quadlet 单元 ----------
-        - name: 下发 Quadlet 单元
+        # ---------- Quadlet units ----------
+        - name: Deploy the Quadlet units
           ansible.builtin.template:
             src: "../files/quadlet/{{ item }}.container.j2"
             dest: "{{ quadlet_dir }}/{{ item }}.container"
@@ -181,22 +185,22 @@
           loop: [keycloak, seaweedfs, prometheus]
           register: _quadlets
 
-        - name: 重载 systemd
+        - name: Reload systemd
           ansible.builtin.systemd_service:
             daemon_reload: true
           when: _quadlets.changed
 
-        - name: 启动三个组件
+        - name: Start the three components
           ansible.builtin.systemd_service:
             name: "{{ item }}.service"
-            # 环境文件变了（如库口令轮换）只重启 Keycloak
+            # A changed env file (e.g. a rotated database password) restarts Keycloak only
             state: >-
               {{ 'restarted' if (_quadlets.changed or _promcfg.changed
                                  or (item == 'keycloak' and _kcenv_w.changed)) else 'started' }}
           loop: [keycloak, seaweedfs, prometheus]
 
-        # ---------- 验证：验行为，不验「在运行」----------
-        - name: 等待 Keycloak 就绪
+        # ---------- Verification: check behaviour, not "is running" ----------
+        - name: Wait for Keycloak to be ready
           ansible.builtin.uri:
             url: "http://127.0.0.1:{{ keycloak_mgmt_port }}/health/ready"
             status_code: 200
@@ -206,58 +210,59 @@
           until: _kchealth.status | default(0) == 200
           failed_when: false
 
-        # 断言失败时把真实现场带出来，而不是让人再去查一遍——
-        # 与 HAProxy 那次同一条教训。
-        - name: 就绪失败时收集容器状态与日志
+        # When the assert fails, bring the real evidence along instead of making someone go and look again --
+        # the same lesson as with HAProxy.
+        - name: Collect container status and logs when not ready
           ansible.builtin.shell:
             cmd: |
               echo "--- podman ps -a ---"
               podman ps -a --format '{% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}{% endraw %}' | grep -i keycloak || true
-              echo "--- pgBouncer 是否在网关地址上监听 ---"
-              ss -lntp 2>/dev/null | grep -E ':{{ pgb_listen_port }}' || echo "没有监听 {{ pgb_listen_port }}"
-              echo "--- pgBouncer 里有没有 keycloak 这个池 ---"
+              echo "--- is pgBouncer listening on the gateway address ---"
+              ss -lntp 2>/dev/null | grep -E ':{{ pgb_listen_port }}' || echo "nothing listening on {{ pgb_listen_port }}"
+              echo "--- does pgBouncer have a keycloak pool ---"
               grep -c '^{{ keycloak_db }}' /etc/pgbouncer/pgbouncer.ini 2>/dev/null || true
-              echo "--- journalctl -u keycloak (末 40 行) ---"
+              echo "--- journalctl -u keycloak (last 40 lines) ---"
               journalctl -u keycloak -n 40 --no-pager 2>&1 | tail -40 || true
           register: _kcdiag
           changed_when: false
           when: _kchealth.status | default(0) != 200
 
-        - name: 断言 Keycloak 就绪
+        - name: Assert Keycloak is ready
           ansible.builtin.assert:
             that: ["_kchealth.status | default(0) == 200"]
             fail_msg: >-
               {{ _kcdiag.stdout | default('') }}
               ----------------------------------------
-              Keycloak 的 /health/ready 未返回 200（实际 {{ _kchealth.status | default('无响应') }}；
-              -1 表示连接根本没建立，即端口上没有监听，容器多半没起来或在崩溃重启）。
-              最常见的原因是连不上数据库——KC_DB=postgres 一旦设定，连不上库即启动失败，
-              不会回落内置 H2。它连的是宿主机 pgBouncer 的会话池
-              {{ podman_internal_gateway }}:{{ pgb_listen_port }}，不是 PostgreSQL 本身。
-              若 pgbouncer.ini 里没有 {{ keycloak_db }} 这个池，先重跑 21-connection。
-              日志里 Connection refused 表示包到了但没人监听；超时才是网段隔离。
-            success_msg: "Keycloak 就绪"
+              Keycloak's /health/ready did not return 200 (got {{ _kchealth.status | default('no response') }};
+              -1 means no connection was established at all, i.e. nothing listens on the port, and the container
+              most likely did not start or is crash-looping).
+              The most common cause is that it cannot reach the database -- once KC_DB=postgres is set, failing to
+              connect means failing to start, with no fallback to the embedded H2. It connects to the host's
+              pgBouncer session pool {{ podman_internal_gateway }}:{{ pgb_listen_port }}, not to PostgreSQL itself.
+              If pgbouncer.ini has no {{ keycloak_db }} pool, rerun 21-connection first.
+              "Connection refused" in the log means the packet arrived but nobody listens; a timeout points to network isolation.
+            success_msg: "Keycloak is ready"
 
-        # 「起来了」不等于「用的是 PostgreSQL」——内置 H2 同样能起来，
-        # 而 H2 的数据在容器重建时会消失。故查它的库里到底有没有建出表。
-        - name: 查询 Keycloak 在库中建出的表数
+        # "Up" does not mean "using PostgreSQL" -- the embedded H2 starts just as well, and H2 data disappears
+        # when the container is recreated. So check whether its database really has tables.
+        - name: Count the tables Keycloak created in its database
           ansible.builtin.command:
             cmd: psql -d {{ keycloak_db }} -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"
           become_user: postgres
           register: _kctables
           changed_when: false
 
-        - name: 断言 Keycloak 真的用了 PostgreSQL
+        - name: Assert Keycloak really uses PostgreSQL
           ansible.builtin.assert:
             that: ["_kctables.stdout | trim | int > 20"]
             fail_msg: >-
-              {{ keycloak_db }} 库中只有 {{ _kctables.stdout | trim }} 张表，
-              Keycloak 多半回落到了内置 H2。H2 同样能让健康检查通过，
-              但数据在容器重建时消失——这类「看起来好的」配置必须在此刻验出来。
-              检查 keycloak.env 中的 KC_DB_PASSWORD 与库用户是否一致。
-            success_msg: "Keycloak 使用 PostgreSQL：{{ keycloak_db }} 库中有 {{ _kctables.stdout | trim }} 张表"
+              The {{ keycloak_db }} database has only {{ _kctables.stdout | trim }} tables;
+              Keycloak has most likely fallen back to the embedded H2. H2 passes the health check just as well,
+              but its data disappears when the container is recreated -- such "looks fine" setups must be caught here.
+              Check that KC_DB_PASSWORD in keycloak.env matches the database user.
+            success_msg: "Keycloak uses PostgreSQL: {{ _kctables.stdout | trim }} tables in the {{ keycloak_db }} database"
 
-        - name: SeaweedFS 写入一个对象
+        - name: Write an object to SeaweedFS
           ansible.builtin.uri:
             url: "http://127.0.0.1:{{ seaweedfs_filer_port }}/oss911-selftest/probe.txt"
             method: PUT
@@ -269,23 +274,23 @@
           until: _swput.status | default(0) in [200, 201, 204]
           failed_when: false
 
-        - name: SeaweedFS 读回该对象
+        - name: Read the object back from SeaweedFS
           ansible.builtin.uri:
             url: "http://127.0.0.1:{{ seaweedfs_filer_port }}/oss911-selftest/probe.txt"
             return_content: true
           register: _swget
           failed_when: false
 
-        - name: 断言 SeaweedFS 的写入与读回一致
+        - name: Assert the SeaweedFS write and read-back match
           ansible.builtin.assert:
             that: ["(_swget.content | default('')) is search('oss911-roundtrip')"]
             fail_msg: >-
-              SeaweedFS 的往返校验失败。写入返回 {{ _swput.status | default('无响应') }}，
-              读回内容为「{{ _swget.content | default('') | truncate(60) }}」。
-              查 journalctl -u seaweedfs -n 80，并确认 {{ seaweedfs_dir }} 挂载存在且可写。
-            success_msg: "SeaweedFS 往返校验通过：写入后读回内容一致"
+              SeaweedFS round trip failed. The write returned {{ _swput.status | default('no response') }},
+              the read-back content is "{{ _swget.content | default('') | truncate(60) }}".
+              Check journalctl -u seaweedfs -n 80, and that the {{ seaweedfs_dir }} mount exists and is writable.
+            success_msg: "SeaweedFS round trip OK: content read back matches what was written"
 
-        - name: 查询 Prometheus 的 up 指标
+        - name: Query Prometheus's up metric
           ansible.builtin.uri:
             url: "http://127.0.0.1:{{ prometheus_port }}/api/v1/query?query=up%7Bjob%3D%22prometheus%22%7D"
             return_content: true
@@ -295,14 +300,14 @@
           until: (_promup.json.data.result | default([]) | length) > 0
           failed_when: false
 
-        # Prometheus 起来了不代表它在采集。采不到数据的监控系统比没有监控更坏，
-        # 因为看板上会是一片平静。
-        - name: 断言 Prometheus 真的采到了数据
+        # Prometheus being up does not mean it is scraping. A monitoring system that collects nothing is worse
+        # than none, because the dashboards look perfectly calm.
+        - name: Assert Prometheus really collects data
           ansible.builtin.assert:
             that:
               - "(_promup.json.data.result | default([]) | length) > 0"
               - "_promup.json.data.result[0].value[1] == '1'"
             fail_msg: >-
-              Prometheus 查不到自身的 up 指标，说明它在运行但没有采集成功。
-              查 http://127.0.0.1:{{ prometheus_port }}/targets 看目标状态与错误。
-            success_msg: "Prometheus 采集正常：up{job=prometheus} = 1"
+              Prometheus cannot find its own up metric: it is running but scraping fails.
+              See http://127.0.0.1:{{ prometheus_port }}/targets for target status and errors.
+            success_msg: "Prometheus scraping OK: up{job=prometheus} = 1"

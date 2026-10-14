@@ -1,30 +1,31 @@
-# 开发环境 inventory
+# Development environment inventory
 #
-# 版本号与规格集中在这里，剧本里不写死。
-# 八年合同期内必然跨一次 OS 大版本与一次 PG 大版本，参数化是为了让那次跨版本廉价。
+# Version numbers and capacities live here; nothing is hard-coded in the playbooks.
+# Over an eight-year contract there will certainly be one OS major upgrade and one PG major upgrade;
+# parameterising makes that upgrade cheap.
 all:
   hosts:
     dev01:
       ansible_host: 10.55.223.118
       ansible_user: usr
-      # 控制节点就是这台机器本身（见 runbook/02）。在机器上自运行时加：
+      # The control node is this machine itself (see runbook/02). When running on the machine add:
       #   -e ansible_connection=local
-      # 保留 ansible_host 与 ansible_user 是为了将来从别处驱动时不用改 inventory。
+      # ansible_host and ansible_user are kept so that driving it from elsewhere later needs no inventory change.
   vars:
-    # ---- 版本基线（与 compliance/components.csv 保持一致）----
+    # ---- Version baseline (keep in line with compliance/components.csv) ----
     os_distribution: Ubuntu
     os_release: noble                   # Ubuntu 24.04 LTS
     postgres_version: 16
     python_version: "3.12"
 
-    # ---- 本地化：与生产一致，不取开发机默认值 ----
+    # ---- Localisation: same as production, not the development machine's defaults ----
     system_timezone: Asia/Riyadh
     system_locale: en_US.UTF-8
 
-    # ---- 基线包集 ----
-    # 分组即理由。改这个列表要同时更新 artifacts/MANIFEST.md 的 OS 行。
+    # ---- Baseline packages ----
+    # The grouping is the reason. Changing this list means updating the OS row of artifacts/MANIFEST.md too.
     base_packages:
-      # 基础操作（acl 是 Ansible 切换用户时要用的，缺了报的错很难看懂）
+      # Basic operations (acl is needed when Ansible switches users; without it the error is hard to understand)
       - locales
       - ca-certificates
       - curl
@@ -34,33 +35,33 @@ all:
       - unzip
       - jq
       - acl
-      # 编辑器：两个都装，交接后接手的人习惯不同
+      # Editors: both, since whoever takes over after handover may prefer either
       - nano
       - vim
-      # 卷管理
+      # Volume management
       - lvm2
-      # 排障工具：出问题那一刻才想起来装，而那时可能正好没网
+      # Troubleshooting tools: you only think of installing them when something breaks, and right then there may be no network
       - htop
       - sysstat
       - iotop
       - lsof
       - strace
       - tcpdump
-      # Ansible 目标机运行时
+      # Ansible target runtime
       - python3-venv
       - python3-pip
 
-    # ---- 数据库 ----
-    # 监听地址与放行网段：开发机上一切都在同一台机器上，回环就够；
-    # 生产上 pgBouncer 与 HAProxy 在 LB 虚机、PostgreSQL 在库虚机，
-    # 库必须监听内网地址并放行 LB 节点所在网段。两边的差别收在这两个值里，
-    # 剧本与模板不动。
-    #   生产取值示例：
-    #     pg_listen_addresses: "localhost,<库虚机的应用流量网段地址>"
+    # ---- Database ----
+    # Listen addresses and allowed networks: on the development machine everything is on one host and loopback
+    # is enough; in production pgBouncer and HAProxy are on the LB VMs and PostgreSQL on the database VMs, so the
+    # database must listen on the internal address and allow the LB nodes' network. The difference between the two
+    # is confined to these two values; playbooks and templates do not change.
+    #   Production example:
+    #     pg_listen_addresses: "localhost,<address of the database VM on the application traffic network>"
     #     pg_hba_allow:
-    #       - { cidr: "<LB 节点网段>/24", method: "scram-sha-256", comment: "LB 节点的 HAProxy" }
-    #   另见 LD-08 NW-01：复制、应用、管理三类流量走独立网段，
-    #   此处监听的是应用流量段，复制流量另有其地址。
+    #       - { cidr: "<LB node network>/24", method: "scram-sha-256", comment: "HAProxy on the LB nodes" }
+    #   See also LD-08 NW-01: replication, application and management traffic use separate networks;
+    #   this is the application traffic network, replication has its own address.
     pg_listen_addresses: "localhost"
     pg_hba_allow: []
 
@@ -75,55 +76,56 @@ all:
       - postgresql-common
     pg_extensions:
       - postgis
-      - pgcrypto        # core.sk 的 UUID v5 需要 digest()
+      - pgcrypto        # no current DDL depends on it: core.sk uses uuid-ossp (created by change 0001); whether to keep it is open (NOTES.md)
 
-    # ---- 连接层 ----
-    # 两个池模式，因为两类客户端对连接的要求不同（DD-67）：
-    #   事务级省连接，但 SET、临时表、advisory lock、预处理语句不保证落在同一后端；
-    #   会话级保行为，但连接在客户端断开前不归还。
-    # 会话池大小即 dbt 的并发上限——这两个数绑在一起，调一个必须同时调另一个。
+    # ---- Connection layer ----
+    # Two pool modes, because two kinds of client need different things from a connection (DD-67):
+    #   transaction mode saves connections, but SET, temporary tables, advisory locks and prepared statements
+    #   are not guaranteed to land on the same backend;
+    #   session mode preserves behaviour, but a connection is not returned until the client disconnects.
+    # The session pool size is dbt's concurrency limit -- the two numbers are tied; change one, change the other.
     connection_packages:
       - pgbouncer
       - haproxy
-    # ★ pgBouncer 一个实例只有一个 listen_port。两个「池」不是两个端口，
-    #   而是 [databases] 段里的两条库名，都在同一端口上，
-    #   由客户端连哪个库名决定用哪种池模式。要两个端口得起两个实例。
+    # * A pgBouncer instance has exactly one listen_port. The two "pools" are not two ports but two database
+    #   names in the [databases] section, on the same port; the database name a client connects to decides the
+    #   pool mode. Two ports would need two instances.
     pgb_listen_port: 6432
     pgb_pool_size_txn: 30
-    pgb_pool_size_session: 10          # = dbt threads 的上限
-    pgb_pool_size_keycloak: 10         # Keycloak 的 JDBC 池，同样走会话级
+    pgb_pool_size_session: 10          # = upper limit of dbt threads
+    pgb_pool_size_keycloak: 10         # Keycloak's JDBC pool, also session mode
     pgb_reserve_pool: 5
-    pgb_max_client_conn: 400           # 客户端侧可以多，后端才是稀缺的
-    pgb_max_db_connections: 70         # 全局硬闸：30 + 10 + 10 + 10 + 5，防止池数一多悄悄超限
-    haproxy_listen_port: 5000          # pgBouncer 的后端指向它，而不是直接指向库
+    pgb_max_client_conn: 400           # the client side can be large; the backend is the scarce side
+    pgb_max_db_connections: 70         # global hard cap: 30 + 10 + 10 + 10 + 5, so many pools cannot silently exceed the limit
+    haproxy_listen_port: 5000          # pgBouncer's backends point here, not directly at the database
     haproxy_stats_port: 7000
-    # 开发机没有 Patroni，健康检查只能退化为 pgsql-check；生产用 Patroni 的
-    # REST /primary，这一段在开发机上不等于生产（runbook/05）。
+    # The development machine has no Patroni, so the health check falls back to pgsql-check; production uses
+    # Patroni's REST /primary. This part is not production on the development machine (runbook/05).
     haproxy_health_check: pgsql-check
     haproxy_check_user: postgres
-    # 开发机只有一台库，后端就一个。生产是三台库 + Patroni REST 健康检查，
-    # 届时改的是本列表与 haproxy_health_check，剧本与模板不动。
+    # One database on the development machine, so one backend. Production has three databases plus the Patroni
+    # REST health check; then this list and haproxy_health_check change, not the playbooks or templates.
     haproxy_backends:
       - {name: pg_local, addr: "127.0.0.1:{{ pg_port }}"}
 
-    # ---- 容器运行时包 ----
-    # netavark 与 aardvark-dns 必须显式列出：它们在 Ubuntu 是 Recommends 而非
-    # Depends，缺了之后容器之间无法按名字互相解析，而报错是「连接被拒绝」，
-    # 看不出是 DNS 的问题。
+    # ---- Container runtime packages ----
+    # netavark and aardvark-dns must be listed explicitly: on Ubuntu they are Recommends, not Depends; without
+    # them containers cannot resolve each other by name, and the error is "connection refused", which does not
+    # look like DNS at all.
     container_packages:
       - podman
       - netavark
       - aardvark-dns
-      # iptables 必须显式装：netavark 配置网桥时要调用它，而 minimal 装机不含。
-      # 缺了之后报的是「netavark: No such file or directory」——听起来像 netavark
-      # 自己不在，实际是 netavark 找不到 iptables。这条错误信息极具误导性。
+      # iptables must be installed explicitly: netavark calls it to configure bridges, and a minimal install lacks it.
+      # Without it the error is "netavark: No such file or directory" -- it sounds as if netavark itself is missing,
+      # but netavark cannot find iptables. A thoroughly misleading message.
       - iptables
-      - catatonit        # 容器内的 init，避免僵尸进程
-      - uidmap           # 将来若改 rootless 要用
+      - catatonit        # init inside containers, prevents zombie processes
+      - uidmap           # needed if we ever go rootless
       - slirp4netns
 
-    # ---- LVM 卷：最小尺寸断言 ----
-    # 剧本只校验不创建。卷在装机时手工建好，剧本负责发现漂移。
+    # ---- LVM volumes: minimum size assertions ----
+    # The playbooks only verify, never create. Volumes are created by hand at install time; the playbooks detect drift.
     required_mounts:
       - { path: /,                       min_gb: 90  }
       - { path: /var/lib/containers,     min_gb: 75  }
@@ -133,93 +135,96 @@ all:
       - { path: /var/cache/build,        min_gb: 55  }
       - { path: /var/backups/pg,         min_gb: 45  }
     vg_name: ubuntu-vg
-    vg_free_min_gb: 200                  # 预留给在线扩容，低于此值告警
+    vg_free_min_gb: 200                  # reserved for online extension; warn below this
 
-    # ---- Python 侧（第 7 步）----
-    # 两个 venv，不是一个。Airflow 与 dbt 的依赖长期相互冲突（jinja2、protobuf 等），
-    # 合在一起要么装不上，要么装上之后某一方静默降级。Airflow 用 BashOperator
-    # 调 dbt 的可执行文件，两边只共享项目目录，不共享解释器环境。
-    python_bin: /usr/bin/python3            # Ubuntu 24.04 自带 3.12，Airflow 3.2+ 支持 3.10–3.14
+    # ---- Python side (step 7) ----
+    # Separate venvs, not one. Airflow's and dbt's dependencies have conflicted for a long time (jinja2, protobuf, ...);
+    # put together they either fail to install or one side is silently downgraded. Airflow calls the dbt executable
+    # with BashOperator; the two share only the project directory, not the interpreter environment.
+    python_bin: /usr/bin/python3            # Ubuntu 24.04 ships 3.12; Airflow 3.2+ supports 3.10-3.14
     venv_root: /opt/oss911
     airflow_home: /var/lib/airflow
-    wheelhouse: /var/cache/build/wheelhouse  # 独立卷（00-base 已断言）
-    # 取料（pip download）默认不跑。它需要网络，而本剧本是为离网写的——
-    # 每次运行都去 PyPI 重新解析依赖的话，这个剧本在真正离网的机器上跑不起来。
-    # 要更新 wheelhouse 时显式打开：-e wheelhouse_refresh=true
-    # wheelhouse 为空时会自动跑一次，并在之后提示把它备份进介质。
+    wheelhouse: /var/cache/build/wheelhouse  # dedicated volume (asserted in 00-base)
+    # Fetching is off by default. It needs the network, while this playbook is written for offline use --
+    # if every run went to PyPI to resolve dependencies, the playbook could not run on a really offline machine.
+    # To refresh the wheelhouse, switch it on explicitly: -e wheelhouse_refresh=true
+    # When a wheelhouse subdirectory is empty it runs once automatically; afterwards back the wheelhouse up onto the media.
     wheelhouse_refresh: false
 
     airflow_version: "3.3.2"
     airflow_extras: "postgres"
-    # 官方 constraints 是 Airflow 能装出可运行环境的硬条件，不是建议。
-    # URL 由版本与 Python 次版本决定，两者任一变化都要重新取。
+    # The official constraints are a hard requirement for Airflow to install into a working environment, not a suggestion.
+    # The URL depends on the version and the Python minor version; if either changes, fetch again.
     airflow_constraints_url: "https://raw.githubusercontent.com/apache/airflow/constraints-{{ airflow_version }}/constraints-3.12.txt"
-    # constraints 文件的 SHA-256，与 artifacts/MANIFEST.md 中的值为同一个值（DD-83）。
-    # 30-python 在安装前断言文件与之相同，不符即失败——钉死一个值，必须有一个环节在它
-    # 不符时失败，否则只是写在纸上。升级 Airflow 时：取料后剧本会报出新文件的实际值，
-    # 核对上游后同时改这里与 MANIFEST。
+    # SHA-256 of the constraints file -- the same value as in artifacts/MANIFEST.md (DD-83).
+    # 30-python asserts the file matches before installing and fails otherwise -- pinning a value needs a step
+    # that fails when it does not match, or it is pinned on paper only. When upgrading Airflow: after the fetch the
+    # playbook reports the new file's actual value; verify it against upstream and change both this and MANIFEST.
     airflow_constraints_sha256: "821effd0f491975682f2774fca3427d7bc2f59ca6de68dcb413ad2c8f890e58c"
-    airflow_api_port: 8081                  # 8080 已被 Keycloak 占用
+    airflow_api_port: 8081                  # 8080 is taken by Keycloak
 
-    # dbt 没有官方 constraints。做法是解析一次、冻结成 lock 文件进仓库，
-    # 此后一律按 lock 装——自己维护的 lock 与官方 constraints 作用相同，
-    # 区别只是维护责任在谁（DD-69）。
+    # dbt has no official constraints. We resolve once, freeze the result into a lock file in the repository,
+    # and always install by that lock -- a self-maintained lock does the same job as official constraints;
+    # the only difference is who maintains it (DD-69).
     dbt_requirements:
       - "dbt-core"
       - "dbt-postgres"
-    # 重新解析 dbt 依赖（需要网络）。默认关：lock 在仓库里（infra/dbt-requirements.lock），
-    # 是唯一权威（DD-83）。升级 dbt 时 -e dbt_relock=true：解析结果直接写回仓库路径，
-    # 由人审 diff 后提交——解析结果是候选，提交才生效。
+    # Re-resolve dbt dependencies (network needed). Off by default: the lock is in the repository
+    # (infra/dbt-requirements.lock) and is the single authority (DD-83). To upgrade dbt: -e dbt_relock=true -- the
+    # result is written straight back to the repository path and reviewed as a diff before committing; the resolved
+    # result is a candidate, committing makes it effective.
     dbt_relock: false
 
-    # 接入程序（DD-84 · LD-01 2.5）：独立的 venv-ingest，依赖冻结在仓库的
-    # infra/ingest-requirements.lock，做法与 dbt 相同（DD-83）。驱动 psycopg 3（DD-86）。
-    # setuptools 列在这里是因为离网构建本方的包要用它（--no-build-isolation）。
-    # 新增依赖须先确认许可（LD-09 4.2），并同步 MANIFEST 与 compliance/components.csv。
+    # The ingestion program (DD-84 · LD-01 2.5): its own venv-ingest, dependencies frozen in the repository's
+    # infra/ingest-requirements.lock, same approach as dbt (DD-83). Driver psycopg 3 (DD-86).
+    # setuptools is listed because building our own package offline needs it (--no-build-isolation).
+    # A new dependency needs its licence confirmed first (LD-09 4.2), plus updates to MANIFEST and compliance/components.csv.
     ingest_requirements:
       - "psycopg[binary]"
       - "PyYAML"
       - "setuptools"
     ingest_relock: false
 
-    # Airflow 的全局 pool（DD-85 · LD-08 3.3）。pool 是元数据库里的一行，整个集群共用，
-    # 不是每台机器各一个。由剧本建，不在界面上手工建——手工建的不进版本管理，重建环境时会丢。
+    # Airflow's global pools (DD-85 · LD-08 3.3). A pool is a row in the metadata database, shared by the whole
+    # cluster, not one per machine. Created by the playbook, not by hand in the UI -- hand-made pools are not under
+    # version control and are lost when the environment is rebuilt.
     airflow_pools:
       - name: icp_cms
         slots: 1
-        description: "ICP 话单下载：接口不支持并发（LD-01 4.2）"
+        description: "ICP CDR download: the interface does not support concurrent downloads (LD-01 4.2)"
       - name: dbt_build
         slots: 1
-        description: "dbt 构建：两台同时跑会使线程总数超过 pgBouncer 会话池（DD-67 · DD-85）"
+        description: "dbt builds: two nodes at once would exceed the pgBouncer session pool in total threads (DD-67, DD-85)"
 
     airflow_db: airflow
     pgb_pool_size_airflow: 10
 
-    # ---- 数据库结构（第 8 步）----
-    # 结构变更的文件从仓库装到这里再执行：postgres 读不到 /home 下的仓库
-    # （troubleshooting 第 23 条），生产上则是发布制品解包的位置。
+    # ---- Database structure (step 8) ----
+    # Structural change files are copied here from the repository and executed from here: postgres cannot read the
+    # repository under /home (troubleshooting entry 23); in production this is where the release artifact is unpacked.
     ddl_dir: /opt/oss911/ddl
-    # 可登录的库用户。权限全部来自所加入的权限角色（DD-74 · LD-02 第 13 章），
-    # 用户本身不直接持有任何授权——换人、轮换口令都不动授权。
-    # 本步只建已有使用方的两个：接入与 dbt 都由 Airflow 调起（属主 airflow）。
-    # 服务层的 query_svc / admin_svc 两个用户随服务层一起建——现在建了没有程序用，
-    # 只会多两份没人轮换的口令。
-    #   env_prefix 决定环境文件里的变量名：DBT_USER / DBT_PASSWORD 是 dbt profile 读的名字
+    # Database login users. All of their privileges come from the privilege roles they are members of
+    # (DD-74 · LD-02 chapter 13); the users themselves hold no grants -- changing people or rotating passwords never touches grants.
+    # Only the two with an existing consumer are created now: ingestion and dbt are both started by Airflow (owner airflow).
+    # The service layer's query_svc / admin_svc users are created together with the service layer -- created now,
+    # no program would use them, and they would only be two more passwords nobody rotates.
+    #   env_prefix decides the variable names in the env file: DBT_USER / DBT_PASSWORD are the names the dbt profile reads
     db_logins:
       - { name: ingest, role: oss911_ingest,    env_file: ingest.env, env_prefix: INGEST_DB, file_owner: airflow }
       - { name: dbt,    role: oss911_transform, env_file: dbt.env,    env_prefix: DBT,       file_owner: airflow }
-    # 初始分区窗口，按月（DD-77）：上 1 个月、本月、后 3 个月。此后由编排调
-    # meta.ensure_monthly_partitions 提前建出未来月份——编排就位之前，窗口在
-    # partition_months_ahead 个月后用完，届时重跑本剧本即可前推。
-    # 回溯更早的月份（如 ICP 历史补数）不靠这里调大，由补数作业按需先建分区。
+    # Initial partition window, monthly (DD-77): previous month, this month, three months ahead. From then on
+    # orchestration calls meta.ensure_monthly_partitions to create future months in advance -- until orchestration is
+    # in place the window runs out after partition_months_ahead months; then rerun the playbook to move it forward.
+    # Earlier months (e.g. ICP historical backfill) are not handled by raising this; the backfill job creates its partitions first.
     partition_months_back: 1
     partition_months_ahead: 3
 
-    # ---- 容器化组件（第 6 步）----
-    # 镜像一律按 digest 钉死，不按 tag。tag 会被重新发布，digest 不会——
-    # 离网重建时 digest 是「这是同一个镜像」的唯一依据。
-    # 首次拉取时 digest 留空，剧本会把解析出的 digest 打出来，当场填回本文件与
-    # artifacts/MANIFEST.md；此后每次运行都按 digest 拉并校验。
+    # ---- Containerised components (step 6) ----
+    # Images are always pinned by digest, not by tag. Tags get re-published, digests do not --
+    # in an offline rebuild the digest is the only proof that "this is the same image".
+    # On the first pull the digest is left empty; the playbook prints the resolved digests, to be filled back into this
+    # file and artifacts/MANIFEST.md on the spot; from then on every run pulls and verifies by digest.
+    # After changing a digest here, rerun 22-containers and expect a change (troubleshooting entry 28).
     container_images:
       keycloak:
         ref: "quay.io/keycloak/keycloak:26.0"
@@ -231,27 +236,27 @@ all:
         ref: "docker.io/prom/prometheus:v2.55.1"
         digest: "sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3"
 
-    # 容器连库不直连 PostgreSQL，走宿主机 pgBouncer 的会话池（DD-67 的拓扑，
-    # Keycloak 也是应用，不该有例外）。地址用 internal 网段的网关——
-    # 容器里的 127.0.0.1 是容器自己。
+    # Containers do not connect to PostgreSQL directly; they use the host pgBouncer's session pool (the DD-67 topology --
+    # Keycloak is an application too and gets no exception). The address is the internal network's gateway --
+    # 127.0.0.1 inside a container is the container itself.
     #
-    # ★ 为什么不让 PostgreSQL 直接监听这个网关地址：podman 的网桥只在有容器
-    #   挂着时才存在，而 systemd 启动 postgresql 一定早于容器。PG 对绑不上的
-    #   地址是跳过并继续，于是它「正常启动」却少绑了一个地址——每次开机重现。
-    #   pgBouncer 监听 0.0.0.0，没有这个顺序依赖。
+    # * Why PostgreSQL does not listen on this gateway address directly: the podman bridge exists only while a container
+    #   is attached, and systemd always starts postgresql before the containers. PG skips addresses it cannot bind and
+    #   carries on, so it "starts normally" with one address missing -- on every boot.
+    #   pgBouncer listens on 0.0.0.0 and has no such ordering dependency.
     podman_internal_gateway: "10.89.10.1"
 
     keycloak_db: keycloak
-    keycloak_http_port: 8080            # 仅绑 127.0.0.1，开发机不对外
-    keycloak_mgmt_port: 9000            # KC 25 起健康检查与指标走独立管理端口
+    keycloak_http_port: 8080            # bound to 127.0.0.1 only; not exposed on the development machine
+    keycloak_mgmt_port: 9000            # since KC 25 health checks and metrics use a separate management port
     seaweedfs_dir: /var/lib/seaweedfs
     seaweedfs_s3_port: 8333
     seaweedfs_filer_port: 8888
     seaweedfs_master_port: 9333
     prometheus_port: 9090
-    prometheus_retention: 15d           # 开发机留 15 天即可；生产按 LD-08 的留存要求另定
+    prometheus_retention: 15d           # 15 days is enough on the development machine; production follows LD-08's retention requirements
 
-    # ---- 容器网络：单机上模拟生产的两个网段 ----
+    # ---- Container networks: the two production segments simulated on one host ----
     podman_networks:
-      - { name: internal, subnet: "10.89.10.0/24" }   # 库、服务层、编排、身份
-      - { name: dmz,      subnet: "10.89.20.0/24" }   # 仅反向代理
+      - { name: internal, subnet: "10.89.10.0/24" }   # database, service layer, orchestration, identity
+      - { name: dmz,      subnet: "10.89.20.0/24" }   # reverse proxy only

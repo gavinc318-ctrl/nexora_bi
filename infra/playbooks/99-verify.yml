@@ -1,19 +1,20 @@
 ---
-# 99-verify —— 只读体检
+# 99-verify -- read-only health check
 #
-# 与 00-base 的断言重叠是刻意的：00-base 在「构建时」把关，
-# 本剧本在「任何时候」把关。机器跑了三个月之后，有人手改过什么、
-# 卷满了没有、服务掉了没有，靠它发现。
+# The overlap with 00-base's assertions is deliberate: 00-base guards at build time,
+# this playbook guards at any time. After the machine has run for three months, whether
+# someone changed something by hand, whether a volume is full, whether a service is down --
+# this is how it gets found.
 #
-# 这个剧本不改变任何东西，可以随时跑。
+# This playbook changes nothing and can be run at any time.
 
-- name: 开发环境体检
+- name: Development environment health check
   hosts: all
   become: true
   gather_facts: true
 
   tasks:
-    - name: OS 与规格
+    - name: OS and capacity
       ansible.builtin.assert:
         that:
           - ansible_facts['distribution'] == os_distribution
@@ -21,11 +22,11 @@
           - ansible_facts['memtotal_mb'] | int >= 60000
           - ansible_facts['processor_vcpus'] | int >= 16
         success_msg: >-
-          {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }} ·
-          {{ ansible_facts['processor_vcpus'] }} vCPU ·
+          {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }},
+          {{ ansible_facts['processor_vcpus'] }} vCPU,
           {{ (ansible_facts['memtotal_mb'] | int / 1024) | round(1) }} GB
 
-    - name: 时区必须是 {{ system_timezone }}
+    - name: Timezone must be {{ system_timezone }}
       ansible.builtin.command:
         cmd: timedatectl show -p Timezone --value
       register: _tz
@@ -33,27 +34,27 @@
       check_mode: false
       failed_when: _tz.stdout | trim != system_timezone
 
-    - name: 卷水位
+    - name: Volume usage
       ansible.builtin.set_fact:
         _disk_report: >-
           {{ ansible_facts['mounts']
              | selectattr('mount', 'in', required_mounts | map(attribute='path') | list)
              | map(attribute='mount') | list }}
 
-    - name: 报告各卷使用率，超过 80% 视为告警
+    - name: Report usage per volume; above 80% counts as a warning
       ansible.builtin.assert:
         that:
           - (item.size_available | int) * 100 / (item.size_total | int) > 20
         fail_msg: >-
-          {{ item.mount }} 剩余 {{ ((item.size_available | int) * 100 / (item.size_total | int)) | round(1) }}%，
-          低于 20%。扩容用预留空间：lvextend -L +NNG -r /dev/{{ vg_name }}/<lv>
+          {{ item.mount }} has {{ ((item.size_available | int) * 100 / (item.size_total | int)) | round(1) }}% free,
+          below 20%. Extend from the reserve: lvextend -L +NNG -r /dev/{{ vg_name }}/<lv>
         success_msg: >-
-          {{ item.mount }} 剩余 {{ ((item.size_available | int) * 100 / (item.size_total | int)) | round(1) }}%
+          {{ item.mount }} has {{ ((item.size_available | int) * 100 / (item.size_total | int)) | round(1) }}% free
       loop: "{{ ansible_facts['mounts'] | selectattr('mount', 'in', required_mounts | map(attribute='path') | list) | list }}"
       loop_control:
         label: "{{ item.mount }}"
 
-    - name: 内核参数已生效
+    - name: Kernel parameters in effect
       ansible.builtin.command:
         cmd: sysctl -n {{ item.key }}
       register: _sysctl
@@ -67,23 +68,23 @@
       loop_control:
         label: "{{ item.key }} = {{ item.value }}"
 
-    - name: SSH 口令登录已关闭
+    - name: SSH password login is disabled
       ansible.builtin.command:
         cmd: sshd -T
       register: _sshd
       changed_when: false
       check_mode: false
 
-    - name: 断言 SSH 加固项
+    - name: Assert the SSH hardening settings
       ansible.builtin.assert:
         that:
           - "'passwordauthentication no' in _sshd.stdout_lines"
           - "'permitrootlogin no' in _sshd.stdout_lines"
         fail_msg: >-
-          SSH 加固未生效。注意 24.04 的实际配置在 /etc/ssh/sshd_config.d/ 里，
-          grep 主配置文件看不出来——以 sshd -T 的输出为准。
+          SSH hardening is not in effect. Note that on 24.04 the actual settings live in /etc/ssh/sshd_config.d/,
+          so grepping the main config file does not show them -- the output of sshd -T is what counts.
 
-    - name: 自动升级已停用
+    - name: Automatic upgrades are disabled
       ansible.builtin.command:
         cmd: systemctl is-enabled {{ item }}
       register: _timer
@@ -95,7 +96,7 @@
       loop_control:
         label: "{{ item }}"
 
-    - name: sysstat 在采集
+    - name: sysstat is collecting
       ansible.builtin.command:
         cmd: systemctl is-active sysstat
       register: _sysstat
@@ -103,8 +104,8 @@
       check_mode: false
       failed_when: _sysstat.stdout | trim != "active"
 
-    # ---------- 容器运行时（10-runtime 之后才有意义）----------
-    - name: podman 可用
+    # ---------- Container runtime (meaningful only after 10-runtime) ----------
+    - name: podman is available
       ansible.builtin.command:
         cmd: podman --version
       register: _podman
@@ -112,7 +113,7 @@
       check_mode: false
       failed_when: false
 
-    - name: 镜像存储在独立卷上
+    - name: Image storage is on the dedicated volume
       ansible.builtin.command:
         cmd: podman info --format '{{ '{{' }} .Store.GraphRoot {{ '}}' }}'
       register: _graphroot
@@ -121,15 +122,15 @@
       failed_when: false
       when: _podman.rc == 0
 
-    - name: 断言镜像存储路径
+    - name: Assert the image storage path
       ansible.builtin.assert:
         that:
           - _graphroot.stdout | trim is match('^/var/lib/containers')
-        fail_msg: "镜像存储在 {{ _graphroot.stdout | trim }}，不在独立卷上"
-        success_msg: "镜像存储：{{ _graphroot.stdout | trim }}"
+        fail_msg: "Image storage is at {{ _graphroot.stdout | trim }}, not on the dedicated volume"
+        success_msg: "Image storage: {{ _graphroot.stdout | trim }}"
       when: _podman.rc == 0
 
-    - name: 两个网段都在
+    - name: Both network segments exist
       ansible.builtin.command:
         cmd: podman network ls --format '{{ '{{' }} .Name {{ '}}' }}'
       register: _nets
@@ -138,17 +139,17 @@
       failed_when: false
       when: _podman.rc == 0
 
-    - name: 断言网段
+    - name: Assert the network segments
       ansible.builtin.assert:
         that:
           - item.name in _nets.stdout_lines
-        fail_msg: "网段 {{ item.name }} 缺失。重跑 playbooks/10-runtime.yml"
+        fail_msg: "Network segment {{ item.name }} is missing. Rerun playbooks/10-runtime.yml"
       loop: "{{ podman_networks }}"
       loop_control:
         label: "{{ item.name }}"
       when: _podman.rc == 0
 
-    - name: 容器 DNS 解析组件已装
+    - name: The container DNS resolver is installed
       ansible.builtin.command:
         cmd: dpkg-query -W -f=${Status} aardvark-dns
       register: _aardvark

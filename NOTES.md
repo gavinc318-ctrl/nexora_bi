@@ -529,3 +529,30 @@ LD-09 4.2：「自研代码只 import 或链接宽松许可的库（MIT、BSD、
 >   psycopg2 继续由 dbt 独立进程使用，两者并存于 wheelhouse。
 > - 开发机可据此冻结 `venv-ingest` 的 lock。用 `psycopg[binary]`，并在组件清单登记 psycopg 3 为 LGPL-3。
 
+
+---
+
+## 2026-10-14  开发机：交付代码一律英文（Gavin 定），请 Mac 侧写进 CLAUDE.md
+
+**规则**：最终交付的代码不含中文——注释、任务名、提示信息、标识符都用英文。文档（runbook、NOTES、
+开发日志、LLD、CLAUDE.md）与面向业务口径的 YAML（`contracts/`、`metrics/`）保持中文。
+
+**范围**（`tools/check_no_cjk.py` 按此检查，退出码非零即有违规）：`infra/playbooks`、`infra/files`、
+`infra/inventory`、`infra/ansible.cfg`、`ddl`、`test`、`ingest`、`recon`。
+
+**两类例外，都是显式的**：
+1. **已执行并登记了校验和的结构变更文件**（`ddl/01..05`、`ddl/changes/0000 · 0002 · 0003`）保持原样——改其中的
+   中文注释会改变校验和，40-schema 按 DD-73 必然失败。名单写在检查脚本里，此后每执行一个新变更就加进去；
+   **新变更一律英文**
+2. **功能性中文**：必须与中文原件逐字匹配的字面量（如测试脚本里匹配 0002 / 0003 中文异常信息的两条模式），
+   集中放在一处，行内带 `cjk-ok` 标记并写明理由
+
+**不在范围内**：`tools/` 下支撑开发的脚本（文档转换、check_refs、ICP 枚举抽取）——不交付、不在目标环境运行
+（Gavin 2026-10-14 明确）。
+
+**已做**：上述范围全部改为英文。核对方法——YAML 按结构逐节点对齐比对（原含中文的字符串可变，其余键与值
+必须逐字相同）；模板与 SQL 逐行比对只有注释变化；ingest 重新离线安装并测退出码；权限验证脚本在临时实例上
+66 项通过、两条中文模式确实命中。runbook 08 与 91 中引用的任务名与输出改为剧本现在的英文原文；
+troubleshooting 中的历史记录保留原样。
+
+**建议 CLAUDE.md 补一条**（第 3 节「每次改完必须做的事」）：`python3 tools/check_no_cjk.py`。

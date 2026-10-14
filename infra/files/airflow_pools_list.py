@@ -1,9 +1,9 @@
-# 由 infra/playbooks/30-python.yml 以 python3 -c 内联执行（不部署为文件：airflow 用户读不到仓库）。
-# 从 `airflow pools list -o json` 的输出中解析 pool 列表，逐行打印「名称|槽位|说明」。
+# Run inline by infra/playbooks/30-python.yml via python3 -c (not deployed as a file: the airflow user cannot read the repository).
+# Parses the pool list from the output of `airflow pools list -o json` and prints "name|slots|description" per line.
 #
-# 不能简单地从第一个「[」开始解析：Airflow 3 的 pools 子命令已标为过时（改用 airflowctl），
-# 输出前面可能有日志行，而日志行本身也以「[时间]」开头。故逐个尝试以「[」开头的行，
-# 直到解出一个元素都带 "pool" 键的列表。
+# Parsing simply from the first "[" will not do: Airflow 3 marks the pools subcommands deprecated (in favour of airflowctl),
+# so log lines may precede the output, and log lines themselves start with "[timestamp]". Hence try each line starting with "["
+# until one parses into a list whose elements all have a "pool" key.
 import json, sys
 t = sys.stdin.read()
 dec = json.JSONDecoder()
@@ -18,6 +18,6 @@ for i, ch in enumerate(t):
             pools = v
             break
 if pools is None:
-    sys.exit("未能从 airflow pools list 的输出中解析出 pool 列表")
+    sys.exit("could not parse a pool list from the output of airflow pools list")
 for p in pools:
     print("{}|{}|{}".format(p["pool"], int(p["slots"]), p.get("description") or ""))

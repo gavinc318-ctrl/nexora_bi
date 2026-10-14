@@ -1,27 +1,29 @@
-# 40-schema —— 数据库结构：结构变更、库登录用户、初始分区
+# 40-schema -- database structure: structural changes, database login users, initial partitions
 #
-# 依据：DD-73（结构变更机制，LD-08 7.5）· DD-74（库角色，LD-02 第 13 章）
-# 前置：20-database（库）· 21-connection（pgBouncer，最后的登录验证要走它）·
-#       30-python（airflow 账号，环境文件的属主）
+# Basis: DD-73 (structural change mechanism, LD-08 7.5) · DD-74 (database roles, LD-02 chapter 13)
+# Prerequisites: 20-database (the database) · 21-connection (pgBouncer; the final login check goes through it) ·
+#                30-python (the airflow account, owner of the env files)
 #
-# ★ 用词：「结构变更」，不叫「迁移」——本项目中迁移专指归档数据迁入（DD-73）。
+# * Terminology: "structural change", not "migration" -- in this project "migration" means only the
+#   migration of archive data (DD-73).
 #
-# ★ 幂等性来自「这个变更执行过没有」，不来自「对象存不存在」。
-#   执行器读 ddl/changes.yml，与库中 meta.ddl_change 的登记行逐个比对：
-#     已登记且校验和相同 → 跳过
-#     已登记但校验和变了 → 失败。已执行的变更不得修改，要改只能新增变更
-#     未登记            → 按编号顺序执行，每个变更连同登记行在同一事务里
-#   CREATE TABLE IF NOT EXISTS 的做法在这里是错的：表已存在但定义变了时它静默
-#   跳过，第二遍 changed=0，而库里还是旧结构。
+# * Idempotence comes from "has this change been executed", not from "does this object exist".
+#   The executor reads ddl/changes.yml and compares it entry by entry with the rows in meta.ddl_change:
+#     registered, checksum unchanged -> skip
+#     registered, checksum changed   -> fail. An executed change must not be modified; changes go into a new change
+#     not registered                 -> execute in id order, each change together with its registry row in one transaction
+#   CREATE TABLE IF NOT EXISTS is wrong here: when the table exists but its definition changed, it skips
+#   silently, the second run shows changed=0, and the database still has the old structure.
 #
-# ★ 执行器就是本剧本加 psql，不另写工具、不引入 Flyway 一类：多一个工具就多一份
-#   要送进离网环境、要维护八年的依赖（DD-70 · LD-08 7.5）。
+# * The executor is this playbook plus psql -- no separate tool, nothing like Flyway: every extra tool is one
+#   more dependency to carry into the offline network and maintain for eight years (DD-70 · LD-08 7.5).
 
-- name: 数据库结构
+- name: Database structure
   hosts: all
-  # 本剧本不用任何 fact（2026-10-13 逐个核对：剧本、tasks/ 与模板中均无 ansible_* 引用，
-  # 也不用依赖 fact 的 package / service 模块）。以 root 收集 fact 会扫 LVM 与全部块设备，
-  # 在本机上有时要等几分钟——不需要的就不收。要用 fact 时删掉这一行并在此说明用的是哪个。
+  # This playbook uses no facts (checked one by one on 2026-10-13: no ansible_* references in the
+  # playbook, tasks/ or templates, and no fact-dependent package / service modules). Gathering facts
+  # as root scans LVM and every block device, which on this machine sometimes takes minutes -- so we
+  # do not gather what we do not need. To use a fact, delete this line and say here which fact is used.
   gather_facts: false
   become: true
 
@@ -29,14 +31,14 @@
     oss911_etc: /etc/oss911
     repo_ddl: "{{ playbook_dir }}/../../ddl"
     repo_test: "{{ playbook_dir }}/../../test"
-    # 清单在控制节点上读（开发机上控制节点即本机）
+    # The manifest is read on the control node (on the development machine the control node is this machine)
     ddl_changes: "{{ lookup('ansible.builtin.file', repo_ddl ~ '/changes.yml') | from_yaml }}"
 
   tasks:
 
-    # ================= 一、前置检查 =================
+    # ================= 1. Preconditions =================
 
-    - name: 查询业务库是否存在
+    - name: Query whether the business database exists
       ansible.builtin.command:
         cmd: psql -X -tA -c "SELECT count(*) FROM pg_database WHERE datname = '{{ pg_database }}'"
       become_user: postgres
@@ -44,15 +46,15 @@
       changed_when: false
       check_mode: false
 
-    - name: 断言业务库存在
+    - name: Assert the business database exists
       ansible.builtin.assert:
         that:
           - _db.stdout | trim == '1'
-        fail_msg: "库 {{ pg_database }} 不存在。先跑 20-database.yml"
-        success_msg: "库 {{ pg_database }} 存在"
+        fail_msg: "Database {{ pg_database }} does not exist. Run 20-database.yml first"
+        success_msg: "Database {{ pg_database }} exists"
 
-    # 清单本身的规矩用断言守，不靠评审时肉眼看
-    - name: 断言变更清单的编号连续、run_as 合规
+    # The manifest's own rules are guarded by an assert, not by eyeballing during review
+    - name: Assert the change manifest ids are consecutive and run_as is valid
       ansible.builtin.assert:
         that:
           - (ddl_changes | map(attribute='id') | list) == (ddl_changes | map(attribute='id') | sort | unique | list)
@@ -60,18 +62,19 @@
           - ddl_changes | selectattr('id', '>=', '0003') | rejectattr('run_as', 'equalto', 'owner') | list | length == 0
           - ddl_changes | rejectattr('run_as', 'in', ['superuser', 'owner']) | list | length == 0
         fail_msg: >-
-          ddl/changes.yml 不合规。要求：编号从 0000 起连续、按顺序、不重复；
-          run_as 只能是 superuser 或 owner，且 0003 起一律 owner（新对象须归属主，DD-74）。
-          当前编号：{{ ddl_changes | map(attribute='id') | join(' ') }}
-        success_msg: "变更清单合规：{{ ddl_changes | length }} 个变更，{{ ddl_changes | map(attribute='id') | first }} 至 {{ ddl_changes | map(attribute='id') | last }}"
+          ddl/changes.yml is invalid. Required: ids consecutive from 0000, in order, no duplicates;
+          run_as is superuser or owner only, and owner from 0003 on (new objects must belong to the owner role, DD-74).
+          Current ids: {{ ddl_changes | map(attribute='id') | join(' ') }}
+        success_msg: "Change manifest valid: {{ ddl_changes | length }} changes, {{ ddl_changes | map(attribute='id') | first }} to {{ ddl_changes | map(attribute='id') | last }}"
 
-    # ================= 二、装入 DDL 文件 =================
-    # 从仓库复制到 ddl_dir，由 postgres 从这里读。
-    # 仓库里删掉的文件不会从这里消失（增量目录会沉积历史，CLAUDE.md 第 5 节第四条）。
-    # 这在此处无害：执行器只按 changes.yml 列出的文件执行，且已执行变更的文件
-    # 按规矩不删不改。但不要据此推断「ddl_dir 里有的就是在用的」。
+    # ================= 2. Load the DDL files =================
+    # Copied from the repository to ddl_dir, where postgres reads them.
+    # Files deleted from the repository do not disappear from here (incremental directories accumulate history,
+    # CLAUDE.md section 5, item four). That is harmless here: the executor only runs files listed in changes.yml,
+    # and by rule the files of executed changes are never deleted or modified. But do not infer from it that
+    # "whatever is in ddl_dir is in use".
 
-    - name: 建立 DDL 目录
+    - name: Create the DDL directory
       ansible.builtin.file:
         path: "{{ ddl_dir }}"
         state: directory
@@ -79,7 +82,7 @@
         group: root
         mode: "0755"
 
-    - name: 复制 DDL 文件
+    - name: Copy the DDL files
       ansible.builtin.copy:
         src: "{{ repo_ddl }}/"
         dest: "{{ ddl_dir }}/"
@@ -88,11 +91,11 @@
         mode: "0644"
         directory_mode: "0755"
 
-    # ================= 三、结构变更 =================
+    # ================= 3. Structural changes =================
 
-    # 校验和按 changes.yml 头部的定义：按 files 顺序拼接各文件字节后的 SHA-256。
-    # 在目标机上对将要执行的那份文件算，不在仓库里算。
-    - name: 计算每个变更的文件校验和
+    # The checksum follows the definition in the header of changes.yml: SHA-256 of the files' bytes concatenated
+    # in the order of "files". It is computed on the target, over the copy that will be executed, not in the repository.
+    - name: Compute the file checksum of every change
       ansible.builtin.shell:
         cmd: cat {{ item.files | join(' ') }} | sha256sum | cut -d' ' -f1
         chdir: "{{ ddl_dir }}"
@@ -103,8 +106,8 @@
       changed_when: false
       check_mode: false
 
-    # 登记表不存在 = 空库，一个变更都没执行过
-    - name: 查询库中已登记的变更
+    # No registry table = empty database, nothing executed yet
+    - name: Query the changes registered in the database
       ansible.builtin.command:
         cmd: >-
           psql -X -tA -d {{ pg_database }} -c
@@ -117,65 +120,65 @@
         - "'relation \"meta.ddl_change\" does not exist' not in _applied_q.stderr"
       check_mode: false
 
-    - name: 整理比对所需的数据
+    - name: Prepare the data for comparison
       ansible.builtin.set_fact:
         _repo_sha: "{{ dict(_sha.results | map(attribute='item.id') | zip(_sha.results | map(attribute='stdout'))) }}"
         _applied: "{{ dict(_applied_q.stdout_lines | map('split', ' ')) if _applied_q.rc == 0 else {} }}"
 
-    - name: 断言已执行的变更都还在清单里
+    - name: Assert every executed change is still in the manifest
       ansible.builtin.assert:
         that:
           - _applied.keys() | difference(_repo_sha.keys()) | length == 0
         fail_msg: >-
-          库中登记了清单里没有的变更：{{ _applied.keys() | difference(_repo_sha.keys()) | join(' ') }}。
-          已执行的变更不得从 ddl/changes.yml 中删除——回退以新增反向变更实现（LD-08 7.5）。
-        success_msg: "库中已登记 {{ _applied | length }} 个变更，均在清单中"
+          The database has changes registered that are not in the manifest: {{ _applied.keys() | difference(_repo_sha.keys()) | join(' ') }}.
+          Executed changes must not be removed from ddl/changes.yml -- roll back with a new reverse change (LD-08 7.5).
+        success_msg: "{{ _applied | length }} changes registered in the database, all present in the manifest"
 
-    # ★ 本机制的要害：已执行变更的文件被改过，必须在这里停下
-    - name: 断言已执行变更的文件未被改动
+    # * The crux of the mechanism: if the files of an executed change were modified, stop here
+    - name: Assert the files of executed changes are unmodified
       ansible.builtin.assert:
         that:
           - _repo_sha[item.key] == item.value
         fail_msg: |-
-          变更 {{ item.key }} 已在库中执行，但它的文件被改过：
-            库中登记的校验和：{{ item.value }}
-            现在文件的校验和：{{ _repo_sha[item.key] }}
-          已执行的变更不得修改。把文件恢复原样（git log -p ddl/ 查是哪次提交改的），
-          要改的内容写成一个新的变更追加到 ddl/changes.yml 末尾。
-        success_msg: "变更 {{ item.key }}：已执行，文件未改动"
+          Change {{ item.key }} has been executed in the database, but its files were modified:
+            checksum registered in the database: {{ item.value }}
+            checksum of the files now:           {{ _repo_sha[item.key] }}
+          An executed change must not be modified. Restore the files (git log -p ddl/ shows which commit changed them)
+          and put the intended modification into a new change appended to the end of ddl/changes.yml.
+        success_msg: "Change {{ item.key }}: executed, files unmodified"
       loop: "{{ _applied | dict2items }}"
       loop_control:
         label: "{{ item.key }}"
 
-    - name: 找出待执行的变更
+    - name: Find the pending changes
       ansible.builtin.set_fact:
         _pending: "{{ ddl_changes | rejectattr('id', 'in', _applied.keys() | list) | list }}"
 
-    # 只许在末尾追加：若库里已执行到 0005，清单里却冒出一个未执行的 0004，
-    # 按编号执行就会在 0005 之后补跑 0004，与其他环境的执行顺序不同
-    - name: 断言待执行的变更都排在已执行的之后
+    # Append only: if the database has executed up to 0005 and an unexecuted 0004 shows up in the manifest,
+    # executing in id order would run 0004 after 0005 -- a different order from every other environment
+    - name: Assert every pending change comes after the executed ones
       ansible.builtin.assert:
         that:
           - _applied | length == 0 or _pending | length == 0 or
             (_pending | map(attribute='id') | min) > (_applied.keys() | max)
         fail_msg: >-
-          待执行的变更 {{ _pending | map(attribute='id') | join(' ') }} 中有编号小于已执行的
-          {{ _applied.keys() | max if _applied else '' }}。新变更只能追加在清单末尾。
-        success_msg: "待执行：{{ _pending | map(attribute='id') | join(' ') if _pending else '无' }}"
+          Among the pending changes {{ _pending | map(attribute='id') | join(' ') }} there are ids lower than the executed
+          {{ _applied.keys() | max if _applied else '' }}. New changes may only be appended to the end of the manifest.
+        success_msg: "Pending: {{ _pending | map(attribute='id') | join(' ') if _pending else 'none' }}"
 
-    # 逐个执行，第一个失败即停（set -e）——不能用 loop：loop 中一项失败后
-    # Ansible 仍会继续跑后面的项，0003 失败了 0004 照样会被执行。
-    # 每个变更：[SET LOCAL ROLE] + 各文件 + 登记行，经 psql -1 放进一个事务，
-    # 中途出错整体回滚，不留半套结构、也不留登记行。
-    # PGOPTIONS 让服务端不发 NOTICE（01 中 IF NOT EXISTS 的「已存在，跳过」），
-    # 只留警告与错误——不用 grep 在客户端过滤：管道末尾的过滤会把 psql 的失败一起吞掉。
-    - name: 执行待执行的结构变更
+    # Execute one by one and stop at the first failure (set -e) -- a loop will not do: after one item fails,
+    # Ansible still runs the remaining items, so 0004 would run even though 0003 failed.
+    # Each change: [SET LOCAL ROLE] + its files + the registry row, put into one transaction via psql -1;
+    # an error part way rolls everything back, leaving neither half a structure nor a registry row.
+    # PGOPTIONS stops the server from sending NOTICEs (the "already exists, skipping" of IF NOT EXISTS in 01),
+    # keeping warnings and errors -- no client-side grep filtering: a filter at the end of the pipe would swallow psql's failure too.
+    - name: Execute the pending structural changes
       ansible.builtin.shell:
         cmd: |
           set -euo pipefail
           export PGOPTIONS='-c client_min_messages=warning'
           {% for c in _pending %}
-          echo "==> 结构变更 {{ c.id }}（run_as={{ c.run_as }}）：{{ c.summary }}"
+          echo "==> structural change {{ c.id }} (run_as={{ c.run_as }}): {{ c.summary }}"
           {
           {% if c.run_as == 'owner' %}
             echo "SET LOCAL ROLE oss911_owner;"
@@ -184,7 +187,7 @@
             echo
             echo "INSERT INTO meta.ddl_change (change_id, files, content_sha256, summary) VALUES ('{{ c.id }}', '{{ '{' ~ (c.files | join(',')) ~ '}' }}', '{{ _repo_sha[c.id] }}', \$chg\${{ c.summary }}\$chg\$);"
           } | psql -X -q -1 -v ON_ERROR_STOP=1 -d {{ pg_database }} -f -
-          echo "    完成"
+          echo "    done"
           {% endfor %}
         chdir: "{{ ddl_dir }}"
       args:
@@ -193,12 +196,12 @@
       register: _exec
       when: _pending | length > 0
 
-    - name: 显示执行输出
+    - name: Show the execution output
       ansible.builtin.debug:
         msg: "{{ _exec.stdout_lines }}"
       when: _exec is not skipped
 
-    - name: 复查登记表与清单完全一致
+    - name: Re-check that the registry matches the manifest exactly
       ansible.builtin.command:
         cmd: >-
           psql -X -tA -d {{ pg_database }} -c
@@ -208,29 +211,29 @@
       changed_when: false
       check_mode: false
 
-    - name: 断言全部变更已执行且校验和一致
+    - name: Assert every change has been executed with matching checksums
       ansible.builtin.assert:
         that:
           - dict(_after.stdout_lines | map('split', ' ')) == _repo_sha
         fail_msg: |-
-          执行后登记表与清单不一致。
-            登记表：{{ _after.stdout_lines | join(' / ') }}
-            清单：  {{ _repo_sha | dict2items | map(attribute='key') | join(' ') }}
-        success_msg: "结构变更 {{ _repo_sha.keys() | first }} 至 {{ _repo_sha.keys() | last }} 均已执行，校验和一致"
+          After execution the registry does not match the manifest.
+            registry: {{ _after.stdout_lines | join(' / ') }}
+            manifest: {{ _repo_sha | dict2items | map(attribute='key') | join(' ') }}
+        success_msg: "Structural changes {{ _repo_sha.keys() | first }} to {{ _repo_sha.keys() | last }} executed, checksums match"
 
-    # ================= 四、库登录用户 =================
+    # ================= 4. Database login users =================
 
-    - name: 建立库登录用户
+    - name: Create the database login users
       ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/db_login.yml"
       loop: "{{ db_logins }}"
       loop_control:
         loop_var: login
-        label: "{{ login.name }} → {{ login.role }}"
+        label: "{{ login.name }} -> {{ login.role }}"
 
-    # ================= 五、初始分区（按月，DD-77） =================
-    # 以编排的真实身份（dbt 用户，经 pgBouncer）调分区函数，
-    # 顺带验证 0002 的 SECURITY DEFINER 在真实身份下确实可用。
-    - name: 建立初始分区窗口
+    # ================= 5. Initial partitions (monthly, DD-77) =================
+    # Call the partition function as the orchestration's real identity (the dbt user, through pgBouncer),
+    # which also verifies that 0002's SECURITY DEFINER really works for that identity.
+    - name: Create the initial partition window
       ansible.builtin.shell:
         cmd: |
           set -a; . {{ oss911_etc }}/dbt.env; set +a
@@ -250,18 +253,19 @@
       register: _parts
       changed_when: _parts.stdout | trim | int > 0
 
-    - name: 显示新建分区数
+    - name: Show the number of partitions created
       ansible.builtin.debug:
         msg: >-
-          本次新建分区 {{ _parts.stdout | trim }} 个
-          （按月，DD-77；窗口：本月 -{{ partition_months_back }} 至 +{{ partition_months_ahead }} 个月）。
-          编排就位之前，窗口在 {{ partition_months_ahead }} 个月后用完，届时重跑本剧本前推。
+          Partitions created in this run: {{ _parts.stdout | trim }}
+          (monthly, DD-77; window: this month -{{ partition_months_back }} to +{{ partition_months_ahead }} months).
+          Until orchestration is in place the window runs out after {{ partition_months_ahead }} months; then rerun this playbook to move it forward.
 
-    # ================= 六、权限验证 =================
-    # 逐项检查（项数随脚本增加，不在此处写死），整体在一个事务里，结尾回滚，不留痕。脚本自建临时登录用户、
-    # 以其身份逐项验证五个权限角色。脚本经标准输入喂给 psql——postgres 读不到
-    # /home 下的仓库（troubleshooting 第 23 条）。
-    - name: 运行库角色与授权验证（test/db_roles_check.sql）
+    # ================= 6. Privilege verification =================
+    # Check by check (the number grows with the script and is not hard-coded here), all in one transaction that is
+    # rolled back at the end, leaving no trace. The script creates temporary login users and verifies the five
+    # privilege roles as those users. The script is fed to psql on stdin -- postgres cannot read the repository
+    # under /home (troubleshooting entry 23).
+    - name: Run the database role and grant verification (test/db_roles_check.sql)
       ansible.builtin.command:
         cmd: psql -X -v ON_ERROR_STOP=1 -d {{ pg_database }}
         stdin: "{{ lookup('ansible.builtin.file', repo_test ~ '/db_roles_check.sql', rstrip=False) }}"
@@ -271,14 +275,14 @@
       failed_when: false
       check_mode: false
 
-    - name: 断言库角色与授权验证全部通过
+    - name: Assert the database role and grant verification passes
       ansible.builtin.assert:
         that:
           - _rolecheck.rc == 0
         fail_msg: |-
-          验证未通过（退出码 {{ _rolecheck.rc }}）。最后几行：
+          Verification failed (exit code {{ _rolecheck.rc }}). Relevant lines:
           {{ (_rolecheck.stdout_lines + _rolecheck.stderr_lines) | select('search', 'FAIL|ERROR') | list | join('\n') }}
 
-          FAIL 行写明了以哪个身份、执行哪条语句、期望允许还是拒绝。
-          完整输出：sudo -u postgres psql -d {{ pg_database }} < ~/src/nexora_bi/test/db_roles_check.sql
-        success_msg: "库角色与授权验证：{{ _rolecheck.stderr_lines | select('search', 'PASS') | list | length }} 项全部通过（已回滚）"
+          Each FAIL line states the identity, the statement, and whether it was expected to be allowed or denied.
+          Full output: sudo -u postgres psql -d {{ pg_database }} < ~/src/nexora_bi/test/db_roles_check.sql
+        success_msg: "Database role and grant verification: all {{ _rolecheck.stderr_lines | select('search', 'PASS') | list | length }} checks passed (rolled back)"

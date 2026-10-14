@@ -1,32 +1,35 @@
 # =====================================================================
-# 结构变更清单（DDL change）
+# Structural change manifest (DDL change)
 #
-# 不叫「迁移」：本项目中「迁移」专指 Hexagon 归档数据迁入（CN-15 · REQ-MIG-* ·
-# DD-37），两件事同名会在交接时被混为一谈。
+# Not called "migration": in this project "migration" means only the migration of Hexagon archive data
+# (CN-15 · REQ-MIG-* · DD-37); giving both the same name would get them confused at handover.
 #
-# 规则（执行器即 infra/playbooks/40-schema.yml 照此实现）：
-#   一、按 id 顺序执行；已登记在 meta.ddl_change 中的不再执行
-#   二、每个变更的全部文件，连同末尾写登记行的 INSERT，在【同一个事务】中执行
-#   三、content_sha256 = 按 files 所列顺序拼接各文件字节后的 SHA-256。
-#       已执行的变更若校验和变了，执行器必须失败——要改结构只能新增变更，
-#       不得改已执行的文件。幂等性来自「变更是否已执行」，不来自
-#       IF NOT EXISTS（后者在定义已变时静默跳过）
-#   四、run_as：superuser —— 执行者本身（postgres）。仅限 0000 至 0002：
-#                 0001 要建扩展，0002 要建角色
-#              owner     —— 事务开头 SET LOCAL ROLE oss911_owner，使新对象归属主
-#       0003 起一律 owner
-#   五、files 中的路径相对于本文件所在目录
+# Rules (the executor, infra/playbooks/40-schema.yml, implements exactly these):
+#   1. Execute in id order; changes already registered in meta.ddl_change are not executed again
+#   2. All files of a change, together with the INSERT of its registry row at the end, run in ONE transaction
+#   3. content_sha256 = SHA-256 of the files' bytes concatenated in the order listed in "files".
+#      If the checksum of an executed change changes, the executor must fail -- the structure can only be
+#      changed by a new change, never by editing executed files. Idempotence comes from "has the change been
+#      executed", not from IF NOT EXISTS (which skips silently when a definition has changed)
+#   4. run_as: superuser -- the executor itself (postgres). Only for 0000 to 0002:
+#                 0001 creates extensions, 0002 creates roles
+#              owner     -- SET LOCAL ROLE oss911_owner at the start of the transaction, so new objects belong to the owner role
+#      From 0003 on, always owner
+#   5. Paths in "files" are relative to the directory of this file
+#
+# Files of executed changes keep their original (Chinese) comments: editing them would change the checksum
+# (rule 3). tools/check_no_cjk.py lists them as exceptions; all new changes are written in English.
 # =====================================================================
 
 - id: "0000"
   run_as: superuser
-  summary: 结构变更登记表本身
+  summary: The structural change registry itself
   files:
     - changes/0000_ddl_change.sql
 
 - id: "0001"
   run_as: superuser
-  summary: 初始结构（LD-02）：七个 schema、50 张表、分区函数与索引
+  summary: Initial structure (LD-02) -- seven schemas, 50 tables, partition function and indexes
   files:
     - 01_schemas_and_helpers.sql
     - 02_core_dimensions.sql
@@ -36,12 +39,12 @@
 
 - id: "0002"
   run_as: superuser
-  summary: 五个权限角色、属主归一、授权与默认权限、分区函数改为 SECURITY DEFINER
+  summary: Five privilege roles, single owner, grants and default privileges, partition function made SECURITY DEFINER
   files:
     - changes/0002_roles_and_grants.sql
 
 - id: "0003"
   run_as: owner
-  summary: 隔离登记表 meta.quarantine_batch（DD-76）与热调留痕表 audit.runtime_param_change_log（DD-75）
+  summary: Quarantine registry meta.quarantine_batch (DD-76) and runtime parameter change log audit.runtime_param_change_log (DD-75)
   files:
     - changes/0003_quarantine_and_param_log.sql

@@ -1,11 +1,11 @@
-# 由 infra/playbooks/30-python.yml 管理，勿手改
+# Managed by infra/playbooks/30-python.yml, do not edit by hand
 #
-# dbt 走 pgBouncer 的会话级池（库名 {{ pg_database }}_etl）。
-# 事务级池上 dbt 的临时表、SET 与 advisory lock 会随机失败——
-# 不是必然失败而是偶尔失败，所以必须在这里把库名写对（DD-67）。
+# dbt uses pgBouncer's session pool (database name {{ pg_database }}_etl).
+# On the transaction pool dbt's temporary tables, SET and advisory locks fail at random --
+# not always but occasionally, which is why the database name must be right here (DD-67).
 #
-# threads 不得超过会话池大小 {{ pgb_pool_size_session }}：超了不会报错，
-# 会在池上排队，表现为「dbt 卡住但看不到错误」。
+# threads must not exceed the session pool size {{ pgb_pool_size_session }}: exceeding it raises no error,
+# it queues on the pool and looks like "dbt hangs without any error".
 oss911:
   target: dev
   outputs:
@@ -16,9 +16,9 @@ oss911:
       user: "{{ '{{ env_var(\'DBT_USER\') }}' }}"
       password: "{{ '{{ env_var(\'DBT_PASSWORD\') }}' }}"
       dbname: {{ pg_database }}_etl
-      # 连上后 SET ROLE 到权限角色，dbt 建的表才归 oss911_transform 所有。
-      # 不设则属主是登录用户，0002 中 FOR ROLE oss911_transform 的默认权限不生效，
-      # 服务层读不到 mart（DD-74 · LD-02 13.2）。此行不得删。
+      # After connecting, SET ROLE to the privilege role so that tables built by dbt belong to oss911_transform.
+      # Without it the owner is the login user, the FOR ROLE oss911_transform default privileges of 0002 do not apply,
+      # and the service layer cannot read mart (DD-74 · LD-02 13.2). Do not remove this line.
       role: oss911_transform
       schema: staging
       threads: {{ pgb_pool_size_session }}
