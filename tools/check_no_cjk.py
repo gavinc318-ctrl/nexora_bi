@@ -35,6 +35,11 @@ CODE_DIRS = [
     "ingest",
     "recon",
 ]
+# Development-only test tools inside the code directories: not delivered, never run in the target
+# environment, written in Chinese by decision (Gavin, 2026-10-14). Excluded by directory, explicitly.
+EXCLUDED_DIRS = {
+    "test/fake_icp",   # fake ICP interface for development and testing (AS-32), not delivered
+}
 CODE_SUFFIXES = {".yml", ".yaml", ".j2", ".sql", ".py", ".toml", ".cfg", ".ini", ".sh", ".lock", ""}
 SKIP_SUFFIXES = {".csv", ".md"}          # data and documents, not code
 
@@ -60,7 +65,9 @@ def iter_files():
             yield entry
             continue
         for dirpath, dirnames, filenames in os.walk(path):
-            dirnames[:] = [d for d in dirnames if d not in ("__pycache__", "build") and not d.endswith(".egg-info")]
+            dirnames[:] = [d for d in dirnames
+                           if d not in ("__pycache__", "build") and not d.endswith(".egg-info")
+                           and os.path.relpath(os.path.join(dirpath, d), ROOT) not in EXCLUDED_DIRS]
             for name in sorted(filenames):
                 rel = os.path.relpath(os.path.join(dirpath, name), ROOT)
                 suffix = os.path.splitext(name)[1]
