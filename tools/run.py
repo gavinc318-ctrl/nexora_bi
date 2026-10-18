@@ -38,7 +38,7 @@ HANDOFF = [
  ('HD-00_开发交接说明与文件索引.docx','REF-HD-00-handoff.md','HD-00','开发交接说明与文件索引','—',
   '交接包结构、四处必须先知道的事、开工前必须完成的事、六条实现纪律、完整文件索引'),
  ('HD-03_假设与信息需求登记册.docx','REF-HD-03-assumptions.md','HD-03','假设与信息需求登记册','—',
-  'AS-01 至 AS-31 的假设与状态、IR-01 至 IR-49 的信息需求与紧急度、客户已答复事项'),
+  'AS-01 至 AS-34 的假设与状态、IR-01 至 IR-50 的信息需求与紧急度、客户已答复事项'),
 ]
 
 for src, dst, bid, title, layer, summary in BOOKS + HANDOFF:

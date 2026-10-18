@@ -615,3 +615,13 @@ troubleshooting 中的历史记录保留原样。
 >   权限收窄；第 7 条补两点：pgBouncer 对 oss911_etl 必须 session 模式，持锁连接即整个运行使用的连接。其余六条照做。
 > - 全部写进 LD-01 2.5 与 LD-02 第 9 章，登记 DD-87、DD-88。
 
+> **Mac 侧处理结果（2026-10-18 第二轮，评审五条全部采纳，Gavin 已定）**
+> - 隔离表外键改指 `meta.ingest_batch (run_id, batch_seq)`，0004 含此调整；`source_id` 从 ingest_batch 取。
+> - 有效配置运行开始解析一次、整运行沿用，快照写 `ingest_batch.effective_params`（不含敏感项）；白名单写进
+>   `source_runtime_param` 的 CHECK；启停只认 `source_contract.enabled`；**第一版轮询间隔为发布项、不可热调**（LD-06 2.4 已改）。
+> - 契约同步三支（同版同内容不动 / 同版不同内容失败 / 低版本拒绝）；新版本前校验既有热调值，**不兼容则部署失败**，不自动作废。
+> - staging 以放行时间为第二水位，staging 行记 `staged_at`；接入程序分 incremental / backfill 两模式，backfill 不动水位（DD-89）。
+> - 哈希覆盖实际收到的完整字段名与原值。
+> - 分区去重性能 → LD-10 TC-ING-01 待验证。CALLID 唯一范围**维持待答复**（IR-45 第五项 / ICP 问题单 Q21），未确认过；
+>   CALLIDNUM 稳定登记 AS-33，A→B→A 登记 AS-34，均为源端行为假设。
+
