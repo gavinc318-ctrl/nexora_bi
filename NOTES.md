@@ -596,3 +596,22 @@ troubleshooting 中的历史记录保留原样。
 
 假接口在开发机上先**手工起**（测试与手工补数够用）；Airflow DAG 那一步再定它要不要以服务常驻——那会是
 一个只用于开发机、不进 `site.yml` 的剧本，交付边界须另说。
+
+> **Mac 侧处理结果（2026-10-18，Gavin 已定）**
+> - 「交付代码一律英文」已写进 CLAUDE.md 第 3 节（第四件事）与规则说明。
+> - **需定四处**：
+>   1. 归档照做，访问**只经 S3 API，用 boto3**，不用 SeaweedFS filer 等任何私有接口——可切换是前提（DD-87）。
+>      DD-15 的「仅由服务层访问」是指展现层与外部系统不得直连，已加注。先传对象、后提交事务，对象键
+>      `<源标识>/<run_id>/<batch_seq>`。开发期可暂缓，上线前必须就位。
+>   2. 按契约建表 `raw.icp_cdr_voice`。LD-02 第 9 章已补：源无表概念的，表名即 `raw.<源标识>`。
+>   3. 契约同步 = 部署步骤（40-schema 之后加 45-contracts，属主身份），只写 definition / contract_version /
+>      target_raw / connector，且只在文件版本号 > 库内时写。热调参数另建 `meta.source_runtime_param`，
+>      `enabled` 属热调、同步不碰；admin_svc 对 source_contract 的 UPDATE 收窄为 `UPDATE (enabled)`（DD-88）。
+>   4. **raw 按月分区**，键 `ingested_at`，索引按 DD-78：ingested_at BRIN；(run_id, batch_seq) 与
+>      (CALLID, CALLIDNUM, content_hash) B-tree；不建唯一约束。理由同 DD-77：现在是一行配置，日后是以周计的重建。
+> - **拟九条**：第 1 条改为**一批一个事务**（raw、隔离登记、ingest_batch、水位一起提交），run_log 结束时写一行，
+>   outcome 取 success / partial / failed；第 9 条 0004 增加 `meta.ingest_batch`（run_id、batch_seq、source_id、
+>   窗口起止、行数、原文件 sha256 与字节数、归档对象键、提交时间）、`meta.source_runtime_param`，以及 admin_svc
+>   权限收窄；第 7 条补两点：pgBouncer 对 oss911_etl 必须 session 模式，持锁连接即整个运行使用的连接。其余六条照做。
+> - 全部写进 LD-01 2.5 与 LD-02 第 9 章，登记 DD-87、DD-88。
+

@@ -151,10 +151,12 @@ RFP 2.7.7.5 要求迁移数据保持百分之百保真，明确包括带原始�
 
 | 层 | 规范 |
 | --- | --- |
-| raw | 与源逐字一致，附完整原始载荷（JSONB）与接入元数据：run_id、batch_seq、contract_version、源水位、原始时区偏移、落地时间。只追加，永不覆盖、永不修正（DD-02）。一源一表，表名 raw.<源标识>__<源表名>。 run_id 与 batch_seq 合起来标识一个取数批次，是隔离登记（meta.quarantine_batch，DD-76）与 staging 按批次过滤的键，故每张 raw 表都必须带这两列。 |
+| raw | 与源逐字一致，附完整原始载荷（JSONB）与接入元数据：run_id、batch_seq、contract_version、源水位、原始时区偏移、落地时间。只追加，永不覆盖、永不修正（DD-02）。一源一表，表名 raw.<源标识>__<源表名>；源无表概念的（REST 接口、文件落地），表名即 raw.<源标识>，如 raw.icp_cdr_voice（2026-10-18 补充）。 run_id 与 batch_seq 合起来标识一个取数批次，是隔离登记（meta.quarantine_batch，DD-76）与 staging 按批次过滤的键，故每张 raw 表都必须带这两列。 |
 | staging | 类型规范、去重、软删除与迟到处理、语义映射。一源一模型，不做跨源关联。全部转换写在 dbt 模型中，不写入契约 YAML（DD-05）。未映射取值落显式的未映射桶，不得归入"其他"（DD-06）。 |
 
 raw 表只能由结构变更建，接入程序不得在运行时自建。理由在属主：对象的属主天然拥有 DELETE 与 TRUNCATE，接入程序若自建 raw 表即成其属主，「只追加」随之退回靠约定（DD-02）。由结构变更建表、归属主角色，接入角色只被授予 SELECT 与 INSERT，只追加就由数据库授权执行。因此每一份接入契约的 target_raw 都对应一个结构变更（DD-73 · DD-74）。
+
+raw 表按月分区，分区键为落地时间 ingested_at（2026-10-18 补充，DD-88）。raw 是按落地时间消费的——staging 增量按 ingested_at 推进、按（run_id, batch_seq）过滤批次——不按业务时间，故与 DD-79 的归日依据规则不冲突。现在分区是一行配置，日后对数亿行只追加的表拷贝重建是以周计的窗口（DD-77 的同一论证）。索引按 DD-78：ingested_at 用 BRIN（只追加）；(run_id, batch_seq) 与幂等键加 content_hash 用 B-tree，不建唯一约束。去重的 NOT EXISTS 不带分区键，须查遍各分区的索引，八年不足一百个分区，可接受。
 
 ## 10  mart 与 ai 的处理方式
 

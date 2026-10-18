@@ -52,6 +52,20 @@ format: converted from docx, content unchanged
 | 凭据 | 接入程序自行读取 /etc/oss911/ingest.env，口令不经 DAG、模板或 Airflow 父进程传入。这是减少暴露，不是隔离：该文件属主为 airflow，同一系统用户仍可读取。若要求 Airflow 无权读取，须为接入程序设独立运行身份并配受限的启动机制（如只允许以该身份执行这一命令的 sudo 规则）——第一版不做，理由见 DD-84 |
 | 日志 | 写标准输出与标准错误，由 Airflow 收集；运行的结构化记录写 meta.run_log（第 10 章） |
 
+运行结构与事务粒度（2026-10-18 补充，DD-87 · DD-88）。一次运行（run_id）把 [窗口起点 − 回看, 窗口终点] 按接口单次上限切成若干批（batch_seq，话单为 ≤ 24 小时一片），串行取数。事务以批为粒度：一批的写 raw、隔离登记、meta.ingest_batch 登记与水位推进在同一事务提交，失败只回滚本批；不以整个运行为一个事务——补 30 天数据在第 29 天失败时回滚全部，且事务挂数小时，都不可接受。meta.run_log 只在运行结束时写一行，outcome 取 success、partial（部分批次成功）或 failed，运行中途崩溃会留下有 run_id 而无 run_log 的批次，M-01 从 meta.ingest_batch 中列出这类孤儿批次。
+
+批次登记 meta.ingest_batch。每批一行：run_id、batch_seq、source_id、窗口起止、行数、收到的原文件 sha256 与字节数、归档对象键、提交时间。这张表是 5.1 要求的校验和的存放处，是归档对象与 raw 行之间的链接，也是孤儿批次唯一能被看见的地方。
+
+原文件归档。按文件接入的源（话单 CSV、文件落地）在写 raw 之前先把收到的原文件写入对象存储，对象键为 <源标识>/<run_id>/<batch_seq>，再提交数据库事务；事务回滚留下的孤儿对象无害，按 run_id 可查并清理。访问一律经 S3 API，程序内只用标准 S3 客户端（boto3），不用任何对象存储产品的私有接口——对象存储可切换是 DD-15 选型时的前提（DD-87）。开发期可暂缓归档，上线前必须就位，这是接入程序的必备步骤而非可选项。
+
+去重与内容哈希。内容哈希按契约列序取全部源列的原值，以 JSON 数组序列化后取 SHA-256；比的是源端原文，不比解析后的值，解析规则改动不影响去重（DD-82）。取到的行先入临时表，再以一条 INSERT … SELECT … WHERE NOT EXISTS 写 raw，NOT EXISTS 以（幂等键, content_hash）判定，并排除待处理与已丢弃批次中的行。
+
+契约与运行参数的读取（DD-88）。程序从 meta.source_contract 读契约（与部署版本一致，不直接读仓库 YAML），再叠加 meta.source_runtime_param 中的热调值；enabled 列即「启停」，也属热调项。契约由部署步骤同步进库（LD-08 7.2），同步只写 definition、contract_version、target_raw、connector，且只在文件版本号大于库内时写，永不触碰 enabled 与 runtime_param。
+
+配置与凭据。契约中 host_ref: X 对应环境变量 OSS911_HOST_<X>，credential_ref: Y 对应 OSS911_CRED_<Y>_USER 与 _PASSWORD（均大写）。程序自读 /etc/oss911/ingest.env（数据库）与 /etc/oss911/icp.env（ICP 地址与服务工号），非秘密项放 /etc/oss911/ingest.conf（0644）。文件由剧本生成；生产的 ICP 服务工号口令由运维手工写入，剧本只断言其存在，不凭空生成。
+
+咨询锁（DD-85）。会话级 pg_try_advisory_lock，键由 source_id 派生，取不到即以退出码 1 结束。两点必须写死：pgBouncer 对 oss911_etl 必须是 session 模式；持锁的连接就是整个运行期间使用的那一条连接，不得从池中更换，否则锁随会话归还而丢失。
+
 ## 3  增量接入：DS CAD 展示库（IF-02）
 
 ### 3.1  水位机制
