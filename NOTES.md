@@ -649,3 +649,12 @@ troubleshooting 中的历史记录保留原样。
 - **对开发机的影响（暂不动手）**：IF-02 连接器仍为 `pg_read`，读本地集群另一个 database；`cad_mirror` 的建库、角色、
   pgBouncer 池、触发器函数将是一个新的结构变更加剧本步骤，等 DS 交付 DDL 后再排；`oss911_ingest` 对 `cad_mirror` 只 SELECT。
 
+> **Mac 侧处理结果（2026-10-19 评审第三轮，四条全部采纳）**
+> - staging 消费 raw 改为**按批次登记**：`meta.staging_batch_state (model, run_id, batch_seq, staged_at)`，取「可处理且本模型未登记」，
+>   登记与模型写入同一事务；时间水位只缩小扫描。0004 之后的结构变更里加这张表（ingest 不写它，transform 角色写）。
+> - 触发器时间戳不是提交时间：`cad_mirror` 取数上界 = 最新心跳 `started_at`（规范要求 DS 周期串行、心跳后写）；writer 角色设
+>   `statement_timeout` / `idle_in_transaction_session_timeout`；**回扫维持必需项**；LD-10 加 TC-ING-02。
+> - `cad_mirror` 属主为 NOLOGIN `cad_mirror_owner`；`cad_mirror_writer` 只 CONNECT / USAGE / cad.* SELECT+INSERT+UPDATE / cad_meta.* INSERT。
+> - 哈希段措辞改准：原批次已放行才去重命中；pending / discarded 不阻挡重新落地。
+> - 规范升 v0.2（账号权限、周期串行、事务时长、心跳后写）。
+

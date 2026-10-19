@@ -31,7 +31,7 @@ format: converted from docx, content unchanged
 
 ### 2.1  角色
 
-### 【2026-10-19 补充，DD-90】数据库层新增一个外部写入角色 cad_mirror_writer：仅为 cad_mirror 库的属主，LOGIN，不属于 LD-02 第 13 章的五个 NOLOGIN 角色体系，对 oss911 库无任何权限，不得 SUPERUSER、不得 CREATEDB、不得 REPLICATION。凭据由本方生成与轮换（runbook/91 的流程），经双方约定的渠道交付 DS，不进入任何文档与仓库。本方的 oss911_ingest 角色对 cad_mirror 只有 SELECT。
+### 【2026-10-19 补充，DD-90；同日评审更正】中间库 cad_mirror 与其全部对象（表、触发器、函数）由 NOLOGIN 角色 cad_mirror_owner 持有，与 LD-02 第 13 章的属主模式一致。DS 的写入账号 cad_mirror_writer 是 LOGIN 角色，只有：CONNECT；cad 与 cad_meta 两个 schema 的 USAGE；cad.* 的 SELECT、INSERT、UPDATE（UPSERT 所需）；cad_meta.* 的 INSERT。不授予 CREATE、DELETE、TRUNCATE、TRIGGER、REFERENCES，不得 SUPERUSER、CREATEDB、REPLICATION；对 oss911 库无任何权限。角色级设置 statement_timeout 与 idle_in_transaction_session_timeout（取值写在中间库规范），限制单事务时长。「DS 交付 DDL」与「DS 账号有 DDL 权限」是两件事：DDL 由本方以属主身份执行。凭据由本方生成与轮换（runbook/91 的流程），经双方约定的渠道交付 DS，不进入任何文档与仓库。本方的 oss911_ingest 对 cad_mirror 只有 SELECT。
 
 | 角色 | 界面范围 | 是否受部门过滤 |
 | --- | --- | --- |

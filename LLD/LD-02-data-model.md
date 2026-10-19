@@ -158,7 +158,7 @@ raw 表只能由结构变更建，接入程序不得在运行时自建。理由�
 
 raw 表按月分区，分区键为落地时间 ingested_at（2026-10-18 补充，DD-88）。raw 是按落地时间消费的——staging 按批次消费：以 ingested_at 为第一水位，以隔离放行时间为第二水位（见下段）——不按业务时间，故与 DD-79 的归日依据规则不冲突。现在分区是一行配置，日后对数亿行只追加的表拷贝重建是以周计的窗口（DD-77 的同一论证）。索引按 DD-78：ingested_at 用 BRIN（只追加）；(run_id, batch_seq) 与幂等键加 content_hash 用 B-tree，不建唯一约束。去重的 NOT EXISTS 不带分区键，须查遍各分区的索引，八年不足一百个分区；耗时须以预计历史量与单批量实测（LD-10 TC-ING-01），此处不预先宣布可接受。
 
-staging 对 raw 的消费以批次为单位，取两类批次的并集（DD-89）：一、未被隔离、且 ingested_at 大于上次处理位置的批次；二、meta.quarantine_batch 中 state = released 且 handled_at 大于上次处理位置的批次。只按 ingested_at 推进会漏掉放行：周一入 raw 被隔离、staging 随其他批次推进到周三、周四放行周一那批，它的 ingested_at 仍是周一，按时间增量永远不会再被选中。为此 staging 行记 staged_at 作为「上次处理位置」。放行因此是一次显式的补处理入口，M-03 放行界面已要求显示会重算哪些指标与日期（LD-06 第 3 章）。
+staging 对 raw 的消费以批次为单位，正确性依据是批次处理登记，不是时间水位（DD-89，2026-10-19 评审更正）。新表 meta.staging_batch_state（model、run_id、batch_seq、staged_at）记录每个消费模型已成功处理的批次；每次运行取「当前可处理且本模型尚未登记」的批次——可处理指未被隔离、或 meta.quarantine_batch 中 state = released——处理完成后在同一事务内登记（dbt 的 post-hook 默认与模型写入同一事务）。只按时间推进会漏：周一入 raw 被隔离、staging 推进到周三、周四放行周一那批，它的 ingested_at 仍是周一；而以 staging 自己的完成时刻作位置同样会漏——查询在 10:00、管理员 10:01 放行、staging 10:02 完成并记位置，下次只取 10:02 之后的放行，10:01 那批永远跳过。时间水位（ingested_at、handled_at）只用于缩小扫描范围，不作为「是否处理过」的判据。放行因此是一次显式的补处理入口，M-03 放行界面已要求显示会重算哪些指标与日期（LD-06 第 3 章）。
 
 ## 10  mart 与 ai 的处理方式
 
