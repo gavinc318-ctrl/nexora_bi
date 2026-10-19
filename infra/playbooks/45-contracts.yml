@@ -1,0 +1,70 @@
+# 45-contracts -- sync the released source contracts into meta.source_contract
+#
+# Basis: DD-88 (contract sync is a deployment step, forward only) · LD-01 2.1 / 2.5
+# Prerequisites: 40-schema (meta.source_contract, the owner role, and the raw tables the contracts point at)
+#
+# * contracts/ in the repository is the authority; meta.source_contract is a read-only copy (LD-01 2.1).
+#   Only the files listed in contracts/release.yml are synced, and every one of them must have its raw table.
+# * The rules (insert / unchanged / fail on same version with different content / refuse a lower version /
+#   check hot-tuned values before a higher version) are in infra/files/contract_sync.sql, which runs in one
+#   transaction as the owner role.
+# * Never touched here: meta.source_contract.enabled after the first insert, and meta.source_runtime_param.
+#   Deployment must not quietly change the runtime configuration (DD-88).
+
+- name: Source contracts
+  hosts: all
+  gather_facts: false   # no facts used (same reasoning as 40-schema.yml)
+  become: true
+
+  vars:
+    repo_contracts: "{{ playbook_dir }}/../../contracts"
+
+  tasks:
+
+    # Converted on the control node: Ansible's own from_yaml would template the contracts' literal
+    # "{{ window_from }}" placeholders. Module output is never templated.
+    - name: Read the released contracts
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../files/contracts_to_json.py"
+          - "{{ repo_contracts }}"
+      delegate_to: localhost
+      become: false
+      register: _contracts
+      changed_when: false
+      check_mode: false
+
+    - name: Sync the contracts into the database
+      ansible.builtin.command:
+        argv:
+          - psql
+          - -X
+          - -q
+          - -1
+          - -v
+          - ON_ERROR_STOP=1
+          - -v
+          - "contracts={{ _contracts.stdout }}"
+          - -d
+          - "{{ pg_database }}"
+          - -f
+          - "-"
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/contract_sync.sql') }}"
+      become_user: postgres
+      register: _sync
+      changed_when: _sync.stdout_lines | select('search', '[|](inserted|updated)[|]') | list | length > 0
+
+    - name: Show the result per contract
+      ansible.builtin.debug:
+        msg: "{{ _sync.stdout_lines }}"
+      when: _sync is not skipped
+
+    - name: Warn about contracts in the database that this release does not list
+      ansible.builtin.debug:
+        msg: >-
+          Not in contracts/release.yml but present in meta.source_contract (left as they are; to stop a source
+          use start / stop in M-01): {{ _sync.stdout_lines | select('search', '[|]not_in_release[|]') | list | join(', ') }}
+      when:
+        - _sync is not skipped
+        - _sync.stdout_lines | select('search', '[|]not_in_release[|]') | list | length > 0

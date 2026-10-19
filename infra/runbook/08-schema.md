@@ -10,6 +10,7 @@
 | 结构变更 0001 | `ddl/01..05_*.sql`（LD-02，原样） | 七个 schema、50 张表、分区函数、55 条索引 |
 | 结构变更 0002 | `ddl/changes/0002_roles_and_grants.sql` | 五个权限角色、属主、授权（DD-74） |
 | 结构变更 0003 | `ddl/changes/0003_quarantine_and_param_log.sql` | 隔离登记表（DD-76）、热调留痕表（DD-75） |
+| 结构变更 0004 | `ddl/changes/0004_ingest_batch_and_icp_cdr_raw.sql` | 批次登记表、隔离外键改指批次、热调参数表、`raw.icp_cdr_voice`（按月分区）、分区函数加 raw、权限收窄（DD-88） |
 | 库登录用户 | inventory 的 `db_logins` | `ingest`、`dbt` 两个用户，口令在 `/etc/oss911/{ingest,dbt}.env` |
 | 初始分区 | `meta.ensure_monthly_partitions` | 13 张分区表按月分区（DD-77），各建上月、本月、后 3 个月 |
 
