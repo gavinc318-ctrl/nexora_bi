@@ -731,3 +731,12 @@ PG 16 实例上从 0000 执行到 0004，`test/db_roles_check.sql` 全部通过�
 | 5 | raw 每行带指向 `meta.ingest_batch (run_id, batch_seq)` 的外键 | staging 按批次消费（DD-89），每行都必须属于一个已登记的批次；数据库保证比代码约定可靠，代价是每行一次主键查找 |
 | 6 | raw 的 18 列一律 text、列名小写、不设 NOT NULL；`payload` 存完整收到的记录（含契约未登记的列）；`src_tz_offset` 留空 | raw 照收原文，坏数据也要能进（DD-76）；源端不给偏移，列按 LD-02 第 9 章的版式保留 |
 | 7 | 命令行：增量 `oss911-ingest run --source X`（起点由水位算）；补数 `oss911-ingest run --source X --mode backfill --window 起/止` | DD-89 两种模式；接入程序第三步实现，DAG 只调增量 |
+
+> **Mac 侧处理结果（2026-10-19，对以上两节）**
+> - 十处差异：采纳。已并入规范 v0.3 第 3.6 节（八条要求）与答复事项 10、11；IR-51 补四项。staging 对 CAD 代码值
+>   在 DS 答复排序规则前**不做任何规范化**，届时登记 DD。
+> - 0004 两处登记：均同意，记入 DD-88 注（十、十一）。run_log outcome 只表达提交状态，`quarantined` 不用、CHECK 不改。
+> - 七处实现选择：**全部无异议**，记入 DD-88 注（十二、十三）。
+> - 契约现状：DS 侧（IF-02、IF-01）一份未写，等 DS 交 PG 版 DDL；Mac 侧拟先写一份样板 `if02a_cad_agency_event.yaml`
+>   定 IF-02 契约形状（pg_read · host_ref cad_mirror · 水位 mirror_updated_at · 上界取心跳 · 回扫段），待 Gavin 定。
+
