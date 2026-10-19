@@ -740,3 +740,10 @@ PG 16 实例上从 0000 执行到 0004，`test/db_roles_check.sql` 全部通过�
 > - 契约现状：DS 侧（IF-02、IF-01）一份未写，等 DS 交 PG 版 DDL；Mac 侧拟先写一份样板 `if02a_cad_agency_event.yaml`
 >   定 IF-02 契约形状（pg_read · host_ref cad_mirror · 水位 mirror_updated_at · 上界取心跳 · 回扫段），待 Gavin 定。
 
+> **Mac 侧更正（2026-10-19 晚）**
+> - Gavin 告知：**CAD 自身的库就是 PostgreSQL**，SQL Server 是上一代 BI（Power BI）附带的中间层，换成本方 BI 后不再存在。
+>   因此「SQL Server→PG 十处差异」一节在中间库场景下不适用：规范 v0.4 撤回 3.6，改为要 CAD 原库 PG DDL 原样
+>   （`pg_dump --schema-only`），本方只改表名列名、不改类型。那十条分析本身没错，留作归档库（IF-01，真 SQL Server）迁移时的参考。
+> - 由此提出过 PG 逻辑复制（CAD PUBLICATION → cad_mirror SUBSCRIPTION）：**Gavin 明确不采用**，理由是 wal_level 与复制槽
+>   对 CAD 生产库的风险。记入 DD-90 被拒方案五。中间库由 DS 程序 UPSERT 写入的方案与心跳围栏不变。
+
