@@ -52,6 +52,7 @@ EXECUTED_DDL = {
     "ddl/changes/0000_ddl_change.sql",
     "ddl/changes/0002_roles_and_grants.sql",
     "ddl/changes/0003_quarantine_and_param_log.sql",
+    "ddl/changes/0004_ingest_batch_and_icp_cdr_raw.sql",
 }
 
 CJK = re.compile(r"[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uff00-\uffef]")
