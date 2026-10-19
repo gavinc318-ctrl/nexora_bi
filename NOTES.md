@@ -625,3 +625,15 @@ troubleshooting 中的历史记录保留原样。
 > - 分区去重性能 → LD-10 TC-ING-01 待验证。CALLID 唯一范围**维持待答复**（IR-45 第五项 / ICP 问题单 Q21），未确认过；
 >   CALLIDNUM 稳定登记 AS-33，A→B→A 登记 AS-34，均为源端行为假设。
 
+## 2026-10-19  Mac 侧：DS 对 CAD 问题单的答复已到，第二轮追问已发
+
+- 答复件归档为 `queries/CAD_Data_View_Clarification_Questions_Answered_2026-10-15.xlsx`；`3rd API/Bill同步CAD表数据结构.xlsx`
+  替换为新版（内容相同，多一页 Table Lists：74 张表的英文视图名，**契约一律按英文视图名与翻译列名写**）。
+- 评估已写进 HD-03 IR-50。要点：统计以 `t_AgencyEvent` 为准；结案时间只在 `t_EventClosure`、解除结案以最后一次为准；
+  全部本地时间；不物理删除；14 张 `t_dm_*` 字典的取值就在结构表各页签下半部分（Mac 侧第一轮看漏）。
+- **两条待定，CAD 接入仍不解禁**：DS 称展示库为 SQL Server，Gavin 定按约定要求 PostgreSQL，已追问，LD-01 第 3 章不改；
+  `sjc` 存在改数据不更新时间戳的情况，LD-01 8.3 滚动窗口校验升为必需项，等 DS 列出哪些操作不更新 sjc 后登记 DD。
+- 第二轮 15 条已由 Gavin 直接发出（PG、案由视图、t_bd_dw、t_cjd 位置、sjc 细节与类型、坐标系、hwhrbh、工号对应、测试环境连接信息等）。
+- 业务规模维持标书口径（峰值 5 万呼叫/日），不按近期其他城市的数字改。
+- 开发机：第 2 批 ICP 链路不受影响，按 0004 清单继续。
+
