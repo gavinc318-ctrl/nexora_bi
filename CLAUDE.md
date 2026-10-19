@@ -283,7 +283,10 @@ LD-00 第 4 章另有六条偏权限与缓存的纪律，写代码前请读。�
 第二步假 ICP 接口服务（AS-32，开发期工具，不交付）已完成；第三步接入程序的实现方案已由
 Mac 侧确认（DD-86 至 DD-88，LD-01 2.5），接下来是结构变更 0004、接入程序、dbt 模型。
 真实接口尚不可达。两份厂商澄清问题单都在 `queries/`（CAD 29 项、ICP 32 项），
-CAD 答复前不动 CAD 接入与 intake / dispatch 两类事实表的模型。
+CAD 答复已到（2026-10-15）；**CAD 增量源改为本方托管、DS 写入的中间库 `cad_mirror`**（DD-90，
+同集群单独 database，结构为 CAD 74 张表原样，水位用本方触发器列 `mirror_updated_at`）。
+中间库规范已发 DS 会签（`queries/CAD_Mirror_Database_Specification.docx`），DDL 等 DS 交付；
+在此之前不动 CAD 接入与 intake / dispatch 两类事实表的模型。
 
 ---
 

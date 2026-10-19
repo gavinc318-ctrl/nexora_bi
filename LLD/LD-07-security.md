@@ -31,6 +31,8 @@ format: converted from docx, content unchanged
 
 ### 2.1  角色
 
+### 【2026-10-19 补充，DD-90】数据库层新增一个外部写入角色 cad_mirror_writer：仅为 cad_mirror 库的属主，LOGIN，不属于 LD-02 第 13 章的五个 NOLOGIN 角色体系，对 oss911 库无任何权限，不得 SUPERUSER、不得 CREATEDB、不得 REPLICATION。凭据由本方生成与轮换（runbook/91 的流程），经双方约定的渠道交付 DS，不进入任何文档与仓库。本方的 oss911_ingest 角色对 cad_mirror 只有 SELECT。
+
 | 角色 | 界面范围 | 是否受部门过滤 |
 | --- | --- | --- |
 | 接警员 | 与本人相关的话务与警情视图、个人绩效 | 否（接所有来电） |

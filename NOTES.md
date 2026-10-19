@@ -637,3 +637,15 @@ troubleshooting 中的历史记录保留原样。
 - 业务规模维持标书口径（峰值 5 万呼叫/日），不按近期其他城市的数字改。
 - 开发机：第 2 批 ICP 链路不受影响，按 0004 清单继续。
 
+## 2026-10-19  Mac 侧：CAD 增量源改为本方托管的中间库（DD-90）
+
+- DS 提出由本方建中间库、他们写入。**接受，条件是结构为 CAD 74 张表原样、DDL 由 DS 交付**——与 DD-04 否掉的
+  「我方定义结构、DS 映射写入」差一个词，DD-04 四条理由作为边界条件保留。
+- 同集群单独 database `cad_mirror`（Gavin 定），写入角色 `cad_mirror_writer` 仅为该库属主，对 `oss911` 零权限，经
+  pgBouncer session 模式单独池、TLS 写入。每表由本方加 `mirror_inserted_at / mirror_updated_at` 触发器列，作水位列；
+  `sjc` 不可靠的问题由此解决，LD-01 8.3 回扫降回加固措施。
+- DS 按主键 UPSERT，不 TRUNCATE、不整表重载；每周期写 `cad_meta.sync_heartbeat`，每日写 `cad_meta.source_daily_count` 供对账。
+- 规范 `queries/CAD_Mirror_Database_Specification.docx` 已起草，空白项即 IR-51；入向网络通道为 IR-52 / 资源表 D-09。
+- **对开发机的影响（暂不动手）**：IF-02 连接器仍为 `pg_read`，读本地集群另一个 database；`cad_mirror` 的建库、角色、
+  pgBouncer 池、触发器函数将是一个新的结构变更加剧本步骤，等 DS 交付 DDL 后再排；`oss911_ingest` 对 `cad_mirror` 只 SELECT。
+
