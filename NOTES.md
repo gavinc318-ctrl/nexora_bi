@@ -747,3 +747,15 @@ PG 16 实例上从 0000 执行到 0004，`test/db_roles_check.sql` 全部通过�
 > - 由此提出过 PG 逻辑复制（CAD PUBLICATION → cad_mirror SUBSCRIPTION）：**Gavin 明确不采用**，理由是 wal_level 与复制槽
 >   对 CAD 生产库的风险。记入 DD-90 被拒方案五。中间库由 DS 程序 UPSERT 写入的方案与心跳围栏不变。
 
+## 2026-10-19  Mac 侧：评审第四轮（契约发布与热调）四条全部采纳，请开发机实现
+
+1. **校验只留一套**：规则放接入程序 `oss911-ingest validate-contract <yaml> [--with-overrides --source X]`，
+   45-contracts 调它（部署机有 venv-ingest），M-01 写 runtime_param 前也调它。`contracts_to_json.py` 只做转换不做校验。
+   最小集：endpoint、credential_ref、idempotent_key、columns 齐全；contract_version 正整数；window / lookback 类型与范围；
+   idempotent_key 引用的列在 columns 里；**YAML 重复键拒绝**（自定义 loader，PyYAML 默认静默取后一个）。
+2. 热调兼容性 = 用同一命令带现有覆盖值校验「新基线 + 覆盖」；`lookback_minutes: null` 之类在 Python 里按类型查，
+   不靠 `contract_sync.sql` 的 `IS NULL`（jsonb null ≠ SQL NULL）。
+3. `contract_sync.sql` 事务开头 `SELECT pg_advisory_xact_lock(hashtext('contract_sync'))`。
+4. **回看只能调大**：覆盖值 < 契约默认值即校验失败。0004 的 CHECK 1–1440 不动（已执行，且只是类型护栏）。
+已记 DD-88 注十四至十六、LD-01 2.5。
+
