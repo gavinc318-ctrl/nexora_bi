@@ -48,3 +48,9 @@
   summary: Quarantine registry meta.quarantine_batch (DD-76) and runtime parameter change log audit.runtime_param_change_log (DD-75)
   files:
     - changes/0003_quarantine_and_param_log.sql
+
+- id: "0004"
+  run_as: owner
+  summary: Batch registry meta.ingest_batch, quarantine key moved to it, hot-tuned parameters meta.source_runtime_param, raw.icp_cdr_voice partitioned by month, partition function extended to raw, privileges narrowed (DD-88)
+  files:
+    - changes/0004_ingest_batch_and_icp_cdr_raw.sql

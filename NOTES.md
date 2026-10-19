@@ -701,3 +701,33 @@ troubleshooting 中的历史记录保留原样。
 - 第 1、2、4 条写进规范，由 DS 回答：原库的排序规则是什么；同步时是否原样保留大小写与尾随空格；含 NUL 的值如何处理
 - 第 1、2 条还会影响本方 staging 的写法（要不要统一转小写或去掉尾随空格）。这是一个设计选择，DS 答复后须登记 DD；
   在此之前 staging 不对 CAD 代码值做任何规范化
+
+## 2026-10-19  开发机：结构变更 0004 已写好（未执行），附两处请 Mac 侧登记、七处开发机的实现选择
+
+`ddl/changes/0004_ingest_batch_and_icp_cdr_raw.sql`，按 DD-88 · LD-01 2.5 · LD-02 第 9 章的 0004 清单写。在一次性的
+PG 16 实例上从 0000 执行到 0004，`test/db_roles_check.sql` 全部通过（检查项由 66 项增至约 100 项）；新加的检查做过
+反向验证：恢复 admin_svc 对契约表的 UPDATE、恢复 ingest 对 run_log 的 UPDATE、分区边界去掉时区偏移、去掉白名单 CHECK、
+去掉 raw 指向批次的外键，五种改坏各自都被测出。真机由 Gavin 执行 40-schema。
+
+### 一、请 Mac 侧登记（扩大或细化了已有决策）
+
+1. **分区函数扩大到 raw（DD-77 的范围）**。0002 把 SECURITY DEFINER 的 `meta.ensure_monthly_partitions` 收窄到 core 与 audit，
+   而 raw 按月分区（DD-88 第四条）后，没有它就没有人能以属主身份给 raw 建分区——接入角色不得自建（LD-02 第 9 章）。
+   0004 以 CREATE OR REPLACE 重定义：允许 core · audit · raw，按分区键类型生成边界（integer 的 date_key 照旧；
+   timestamptz 的 ingested_at 用 **UTC 月初零点**，带显式偏移，不受调用会话 TimeZone 影响——ingested_at 是系统时间，
+   没有业务日含义）。40-schema 建初始分区那一步同步加上 raw。日常预建由编排负责，与 core 相同（DD-77）
+2. **run_log 的结果取值**。CHECK 允许 success · failed · quarantined · partial 四种，DD-88 只用三种。开发机拟：批次被隔离
+   也是成功提交，运行记 success、退出码 0（与 DD-84 一致）；`quarantined` 不再使用，但不为此改约束（改了没有收益，
+   只多一个变更）。若 Mac 侧认为「整次运行的批次全部被隔离」应记 quarantined 以便 M-01 一眼看出，请定
+
+### 二、开发机的实现选择（无异议即按此）
+
+| # | 选择 | 理由 |
+| --- | --- | --- |
+| 1 | 热调白名单第一版**只有 `lookback_minutes`，取值 1–1440 的整数** | 契约里只有回看长度这一个可调参数；批量与限流（LD-06 2.4）尚无任何契约定义，名字与范围都无依据，等第一份用到它们的契约随结构变更加入。范围是开发机拟的：下限 1 防止关掉收口，上限 24 小时与接口单次上限一致 |
+| 2 | admin_svc 对 `meta.source_runtime_param` 有 INSERT · UPDATE · DELETE | DELETE 即「恢复契约默认值」；DD-88 第七条「由运维在 M-01 清理」需要它。每次变更照旧写 `audit.runtime_param_change_log` |
+| 3 | **收回 ingest 对 `meta.run_log` 的 UPDATE** | 0002 授它是为了「开始插入、结束回填」；改为结束时只写一行后不再需要，且 run_log 只增不改（LD-01 10.1）。依据不明的权限不留 |
+| 4 | `meta.ingest_batch` 在清单之外多两列：`rows_written`（去重后实际写入 raw 的行数，≤ row_count）、`received_header`（收到的列名按原顺序） | 前者让「取到多少、新增多少」不必回查 raw；后者是因为 jsonb 不保留键序，而内容哈希按收到的顺序算（LD-01 2.5），有了它可从 payload 重算哈希 |
+| 5 | raw 每行带指向 `meta.ingest_batch (run_id, batch_seq)` 的外键 | staging 按批次消费（DD-89），每行都必须属于一个已登记的批次；数据库保证比代码约定可靠，代价是每行一次主键查找 |
+| 6 | raw 的 18 列一律 text、列名小写、不设 NOT NULL；`payload` 存完整收到的记录（含契约未登记的列）；`src_tz_offset` 留空 | raw 照收原文，坏数据也要能进（DD-76）；源端不给偏移，列按 LD-02 第 9 章的版式保留 |
+| 7 | 命令行：增量 `oss911-ingest run --source X`（起点由水位算）；补数 `oss911-ingest run --source X --mode backfill --window 起/止` | DD-89 两种模式；接入程序第三步实现，DAG 只调增量 |

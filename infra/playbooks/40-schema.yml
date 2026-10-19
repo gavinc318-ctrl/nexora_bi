@@ -246,7 +246,7 @@
             FROM pg_partitioned_table pt
             JOIN pg_class c     ON c.oid = pt.partrelid
             JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname IN ('core', 'audit')"
+            WHERE n.nspname IN ('core', 'audit', 'raw')"
       args:
         executable: /bin/bash
       become_user: airflow
