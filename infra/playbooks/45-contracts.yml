@@ -1,13 +1,20 @@
 # 45-contracts -- sync the released source contracts into meta.source_contract
 #
-# Basis: DD-88 (contract sync is a deployment step, forward only) · LD-01 2.1 / 2.5
-# Prerequisites: 40-schema (meta.source_contract, the owner role, and the raw tables the contracts point at)
+# Basis: DD-88 (contract sync is a deployment step, forward only; one set of contract rules; serialized) ·
+#        LD-01 2.1 / 2.5
+# Prerequisites: 30-python (venv-ingest with oss911-ingest, ingest.conf) · 40-schema (meta.source_contract,
+#                the owner role, the ingest login user and ingest.env, the raw tables the contracts point at)
 #
 # * contracts/ in the repository is the authority; meta.source_contract is a read-only copy (LD-01 2.1).
 #   Only the files listed in contracts/release.yml are synced, and every one of them must have its raw table.
-# * The rules (insert / unchanged / fail on same version with different content / refuse a lower version /
-#   check hot-tuned values before a higher version) are in infra/files/contract_sync.sql, which runs in one
-#   transaction as the owner role.
+# * Order, all on the target, over one copy of the files:
+#     1. copy the released contracts to contracts_dir
+#     2. check each with `oss911-ingest validate-contract --with-overrides` -- the single set of contract rules,
+#        run as the airflow account with the ingest database user, the identity the ingestion program really has.
+#        It also checks the hot-tuned values now in the database against the new contract
+#     3. convert to JSON (infra/files/contracts_to_json.py, venv-ingest's Python)
+#     4. sync in one transaction as the owner role, under an advisory lock (infra/files/contract_sync.sql). It
+#        fails if the hot-tuned values differ from what step 2 saw -- someone changed one in M-01 in between
 # * Never touched here: meta.source_contract.enabled after the first insert, and meta.source_runtime_param.
 #   Deployment must not quietly change the runtime configuration (DD-88).
 
@@ -18,19 +25,67 @@
 
   vars:
     repo_contracts: "{{ playbook_dir }}/../../contracts"
+    contracts_dir: "{{ venv_root }}/contracts"
+    ingest_venv: "{{ venv_root }}/venv-ingest"
+    # release.yml holds file names only, so reading it on the control node is safe; the contracts themselves are
+    # never read by Ansible's YAML parser (it would template their literal "{{ window_from }}" placeholders)
+    contracts_release: "{{ (lookup('ansible.builtin.file', repo_contracts ~ '/release.yml') | from_yaml).release }}"
 
   tasks:
 
-    # Converted on the control node: Ansible's own from_yaml would template the contracts' literal
-    # "{{ window_from }}" placeholders. Module output is never templated.
-    - name: Read the released contracts
+    # Files dropped from release.yml stay in contracts_dir (incremental directories accumulate history, CLAUDE.md
+    # section 5, item four). Harmless: only the files in release.yml are validated, converted and synced.
+    - name: Create the contracts directory
+      ansible.builtin.file:
+        path: "{{ contracts_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy the release list and the released contracts
+      ansible.builtin.copy:
+        src: "{{ repo_contracts }}/{{ item }}"
+        dest: "{{ contracts_dir }}/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ ['release.yml'] + contracts_release }}"
+
+    - name: Validate the contracts and the hot-tuned values in the database
       ansible.builtin.command:
         argv:
-          - python3
-          - "{{ playbook_dir }}/../files/contracts_to_json.py"
-          - "{{ repo_contracts }}"
-      delegate_to: localhost
-      become: false
+          - "{{ ingest_venv }}/bin/oss911-ingest"
+          - validate-contract
+          - "{{ contracts_dir }}/{{ item }}"
+          - --with-overrides
+      become_user: airflow
+      register: _valid
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      loop: "{{ contracts_release }}"
+
+    # Asserted separately so that every contract's problems are shown, not only the first one's
+    - name: Assert every contract is valid
+      ansible.builtin.assert:
+        that:
+          - item.rc == 0
+        fail_msg: |-
+          {{ item.item }} (exit code {{ item.rc }}{{ ': configuration error' if item.rc == 2 else '' }}):
+          {{ item.stderr }}
+        success_msg: "{{ item.item }}: valid, hot-tuned values {{ (item.stdout | from_json).overrides }}"
+      loop: "{{ _valid.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Convert the released contracts to JSON
+      ansible.builtin.command:
+        argv:
+          - "{{ ingest_venv }}/bin/python"
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/contracts_to_json.py') }}"
+          - "{{ contracts_dir }}"
       register: _contracts
       changed_when: false
       check_mode: false
@@ -46,6 +101,11 @@
           - ON_ERROR_STOP=1
           - -v
           - "contracts={{ _contracts.stdout }}"
+          - -v
+          - "overrides={{ dict(_valid.results | map(attribute='stdout') | map('from_json')
+                               | map(attribute='source_id')
+                               | zip(_valid.results | map(attribute='stdout') | map('from_json')
+                                     | map(attribute='overrides'))) | to_json }}"
           - -d
           - "{{ pg_database }}"
           - -f

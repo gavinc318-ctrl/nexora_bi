@@ -759,3 +759,42 @@ PG 16 实例上从 0000 执行到 0004，`test/db_roles_check.sql` 全部通过�
 4. **回看只能调大**：覆盖值 < 契约默认值即校验失败。0004 的 CHECK 1–1440 不动（已执行，且只是类型护栏）。
 已记 DD-88 注十四至十六、LD-01 2.5。
 
+
+## 2026-10-20  开发机：评审第四轮四条已实现；另补一处竞态；校验器查出 if03b/c/d 三处契约问题
+
+### 一、四条的落实
+
+| 条 | 落在哪 |
+| --- | --- |
+| 1 单一校验 | `ingest/src/oss911_ingest/contract.py`，命令 `oss911-ingest validate-contract`。最小集照单实现，另加：列 `state` 取值、`host_ref` / `credential_ref` 须为小写标识符（它们要变成环境变量名）、疑似口令的键（由 contracts_to_json 挪过来）。YAML 重复键用自定义 loader 拒绝。`contracts_to_json.py` 只剩转换。单元测试 `ingest/tests/test_contract.py`（31 项，三处改坏均被测出） |
+| 2 热调兼容 | `--with-overrides` 读库里现值，`--overrides '<json>'` 校验候选值（给 M-01 用：写库之前值还不在库里）。`lookback_minutes: null` 在 Python 里按类型判为非法；`contract_sync.sql` 里 `IS NULL` 那段已删 |
+| 3 同步加锁 | 事务开头 `pg_advisory_xact_lock(hashtext('oss911.contract_sync'))`；实测第二个同步等到第一个提交才进 |
+| 4 回看只能调大 | 覆盖值小于契约默认值即失败；新版本把默认值调到高于现有覆盖值时同样失败（覆盖值此时等于调小） |
+
+两处与原文的差别：`--with-overrides` 不带 `--source` 时取契约自己的 source_id（剧本在解析前不知道 source_id；
+带了就必须一致，防止拿 A 的热调值校验 B 的文件）；校验在**部署机**上以 airflow 账号、ingest 库用户执行，转换也在
+部署机上用 venv-ingest 的 Python，校验与转换读的是同一份文件。
+
+### 二、补的一处竞态（开发机的实现选择）
+
+校验在同步事务之外跑。若校验之后、同步之前有人在 M-01 改了热调值，新值只按**旧**契约校验过，同步却会把新契约
+写进去。做法：校验输出它看到的热调值，作为快照传进同步事务；事务内库里的值与快照不同即失败，提示重跑。规则仍只
+在 Python 一处，SQL 只比两组值是否相同。
+
+**对 M-01 的要求（服务层实现时登记）**：反方向的竞态在 M-01 一侧——它读契约、校验候选值、写库，若这期间部署提交了
+新契约，候选值就只按旧契约校验过。M-01 应在同一事务里先 `SELECT … FROM meta.source_contract WHERE source_id = … FOR SHARE`
+锁住该源的契约行，再校验与写入；部署的 UPDATE 会等它，它也会等部署。请在 LD-06 2.4 或 DD-88 注里记一笔。
+
+### 三、校验器查出的契约问题（if03b/c/d，均未发布，不阻塞）
+
+| 契约 | 问题 | 需要定的 |
+| --- | --- | --- |
+| if03b_icp_agent_session | `idempotent_key: [agentId, inTime]`，列定义里叫 `id`，没有 `agentId` | 接口字段名到底是哪个；改键还是改列 |
+| if03c_icp_agent_day | `idempotent_key: [agentId, date_key]`，列定义只有 `IDX_*` 指标列，两个键都不在 | 坐席标识与日期是请求参数还是返回列；若是请求参数，幂等键的规则要扩展（键可来自请求参数），须登记 |
+| if03d_icp_reference | 没有 `columns`：多数据集结构（vdn、agent、skill……），列定义应在每个数据集下 | 契约形状要改，校验规则随之扩展到按数据集查 |
+
+### 四、icp.env 与 ingest.conf
+
+30-python 生成 `/etc/oss911/ingest.conf`（0644：库地址、pgBouncer 端口、session 池库名 `oss911_etl`）；`icp.env` 在
+inventory `icp_env.generate: true`（开发机）时生成假接口账号并保留，`false`（生产）时只断言三个变量齐全、只报缺的变量名。
+变量名照 if03a 的引用：`OSS911_HOST_ICP_CMS_GATEWAY`、`OSS911_CRED_ICP_CMS_SERVICE_ACCOUNT_USER / _PASSWORD`。

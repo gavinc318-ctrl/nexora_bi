@@ -481,6 +481,88 @@
           loop_control:
             label: "{{ item.item }}"
 
+        # ========== Ingestion runtime configuration (LD-01 2.5) ==========
+        # The program reads its configuration itself (oss911_ingest/config.py); nothing passes through the DAG:
+        #   ingest.conf  0644  where the database is (non-secret)                       this playbook
+        #   ingest.env   0600  database login user and password                         40-schema.yml
+        #   icp.env      0600  ICP gateway address and service account                  see below
+        # Contract references map to variable names: host_ref X -> OSS911_HOST_<X>, credential_ref Y ->
+        # OSS911_CRED_<Y>_USER / _PASSWORD. The names in inventory (icp_env) must follow the released contracts.
+        - name: Deploy the ingestion settings file
+          ansible.builtin.copy:
+            dest: "{{ oss911_etc }}/ingest.conf"
+            owner: root
+            group: root
+            mode: "0644"
+            content: |
+              # Managed by infra/playbooks/30-python.yml, do not edit by hand
+              # Non-secret settings of the ingestion program (LD-01 2.5). Credentials: ingest.env, icp.env
+              OSS911_DB_HOST={{ ingest_db_host }}
+              OSS911_DB_PORT={{ pgb_listen_port }}
+              # pgBouncer's session pool: the per-source advisory lock lives in the session (DD-85)
+              OSS911_DB_NAME={{ ingest_db_name }}
+
+        # icp.env holds the ICP service account. In production its password is issued by ICP operations, so the
+        # playbook cannot make one up: operations write the file by hand and the playbook only checks it
+        # (icp_env.generate false). On the development machine the account belongs to the fake ICP interface
+        # (AS-32): the playbook generates a random password once and keeps it; the fake interface is started with the
+        # same account (runbook/09). Deleting the file and rerunning gives a new password (= a rotation).
+        - name: Read back the existing ICP env file
+          ansible.builtin.slurp:
+            src: "{{ oss911_etc }}/icp.env"
+          register: _icpenv
+          failed_when: false
+          no_log: true
+
+        # Only the names of missing variables come out of this step, never a value
+        - name: Find which ICP settings are missing or empty
+          ansible.builtin.set_fact:
+            _icp_missing: >-
+              {{ [icp_env.host_var, icp_env.cred_prefix ~ '_USER', icp_env.cred_prefix ~ '_PASSWORD']
+                 | reject('in', (_icpenv.content | default('') | b64decode)
+                                | regex_findall('(?m)^([A-Z0-9_]+)=\S')) | list }}
+          no_log: true
+
+        - name: Assert the ICP env file is complete (written by operations in production)
+          ansible.builtin.assert:
+            that:
+              - _icpenv.content is defined
+              - _icp_missing | length == 0
+            fail_msg: >-
+              {{ oss911_etc }}/icp.env {{ 'does not exist' if _icpenv.content is not defined else 'lacks: ' ~ (_icp_missing | join(', ')) }}.
+              In production it is written by operations with the service account issued by ICP operations (LD-01 4.7),
+              owner airflow, mode 0600, lines {{ icp_env.host_var }}=..., {{ icp_env.cred_prefix }}_USER=..., {{ icp_env.cred_prefix }}_PASSWORD=...
+            success_msg: "{{ oss911_etc }}/icp.env is complete"
+          when: not (icp_env.generate | bool)
+
+        - name: Keep or generate the fake ICP service account (development only)
+          ansible.builtin.set_fact:
+            _icp_user: >-
+              {{ ((_icpenv.content | b64decode) | regex_search('(?m)^' ~ icp_env.cred_prefix ~ '_USER=(.+)$', '\1') | first)
+                 if _icpenv.content is defined and (icp_env.cred_prefix ~ '_USER') not in _icp_missing
+                 else icp_env.dev_user }}
+            _icp_pw: >-
+              {{ ((_icpenv.content | b64decode) | regex_search('(?m)^' ~ icp_env.cred_prefix ~ '_PASSWORD=(.+)$', '\1') | first)
+                 if _icpenv.content is defined and (icp_env.cred_prefix ~ '_PASSWORD') not in _icp_missing
+                 else lookup('ansible.builtin.password', '/dev/null', length=24, chars=['ascii_letters', 'digits']) }}
+          when: icp_env.generate | bool
+          no_log: true
+
+        - name: Write the ICP env file (development only)
+          ansible.builtin.copy:
+            dest: "{{ oss911_etc }}/icp.env"
+            owner: airflow
+            group: airflow
+            mode: "0600"
+            content: |
+              # Managed by infra/playbooks/30-python.yml on the development machine, do not edit by hand.
+              # The account belongs to the fake ICP interface (AS-32); production writes this file by hand.
+              {{ icp_env.host_var }}={{ icp_env.host_value }}
+              {{ icp_env.cred_prefix }}_USER={{ _icp_user }}
+              {{ icp_env.cred_prefix }}_PASSWORD={{ _icp_pw }}
+          when: icp_env.generate | bool
+          no_log: true
+
         # ========== Metadata database ==========
         - name: Query whether the Airflow database user exists
           ansible.builtin.command:
