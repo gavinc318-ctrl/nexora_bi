@@ -228,12 +228,11 @@ class Handler(BaseHTTPRequestHandler):
 
 # ---------- 边界数据注入（NOTES.md 草稿第二节）----------
 def _inject_inversion(rows, start):           # 边界情况 2：时序倒置
+    # 一律把 WAITEND 改到 WAITBEGIN 之前 5 秒。曾经的做法是对调 CALLBEGIN 与 CALLEND，但 IVR 腿两者相等，
+    # 对调后数据不变，注入静默失效——2026-10-20 接入程序联调时发现
     if rows:
         r = dict(rows[0])
-        if r["CALLEND"] and r["CALLBEGIN"]:
-            r["CALLEND"], r["CALLBEGIN"] = r["CALLBEGIN"], r["CALLEND"]
-        else:
-            r["WAITEND"] = (datetime.strptime(r["WAITBEGIN"], gen.TS_FMT) - timedelta(seconds=5)).strftime(gen.TS_FMT)
+        r["WAITEND"] = (datetime.strptime(r["WAITBEGIN"], gen.TS_FMT) - timedelta(seconds=5)).strftime(gen.TS_FMT)
         rows[0] = r
     return rows
 

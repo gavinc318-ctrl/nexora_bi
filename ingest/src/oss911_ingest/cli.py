@@ -1,6 +1,7 @@
 """Command line entry point.
 
-    oss911-ingest run --source <contract id> --window <start>/<end>
+    oss911-ingest run --source <contract id> [--start-at <time>]                     incremental (DAG)
+    oss911-ingest run --source <contract id> --mode backfill --window <start>/<end>  manual backfill
     oss911-ingest validate-contract <contract.yaml> [--overrides <json> | --with-overrides [--source <id>]]
 
 Exit codes (LD-01 2.5 · DD-84). The DAGs depend on this convention; change both together:
@@ -63,9 +64,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    run = sub.add_parser("run", help="run one ingestion for one source and one window")
+    run = sub.add_parser(
+        "run", help="run one ingestion for one source",
+        description="incremental (default): from the watermark minus the lookback up to now, advancing the watermark. "
+                    "backfill: an explicit window, the watermark untouched (DD-89). Times are in the source's own "
+                    "time zone (contract window.source_timezone).")
     run.add_argument("--source", required=True, help="source_id from the contract, e.g. icp_cdr_voice")
-    run.add_argument("--window", required=True, help="<start>/<end>, e.g. 2026-10-14T00:00:00/2026-10-14T00:05:00")
+    run.add_argument("--mode", choices=["incremental", "backfill"], default="incremental")
+    run.add_argument("--window", help="backfill only: <start>/<end>, e.g. 2026-10-14T00:00:00/2026-10-15T00:00:00")
+    run.add_argument("--start-at", metavar="TIME",
+                     help="incremental, first run of a source only (no watermark yet): where the watermark starts, "
+                          "e.g. 2026-10-20T00:00:00")
 
     val = sub.add_parser(
         "validate-contract",
@@ -136,10 +145,26 @@ def cmd_validate_contract(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    start, end = parse_window(args.window)
-    print(f"oss911-ingest {__version__}: source={args.source} window={start:%Y-%m-%d %H:%M:%S}/{end:%Y-%m-%d %H:%M:%S}")
-    print("ingestion logic not implemented yet (batch 2 in progress)", file=sys.stderr)
-    return EXIT_FAILED
+    from .runner import RunFailed, Runner
+
+    window = start_at = None
+    if args.mode == "backfill":
+        if args.window is None or args.start_at is not None:
+            raise UsageError("--mode backfill needs --window and takes no --start-at")
+        window = parse_window(args.window)
+    else:
+        if args.window is not None:
+            raise UsageError("--window is for --mode backfill; incremental runs start from the watermark")
+        if args.start_at is not None:
+            try:
+                start_at = datetime.strptime(args.start_at, WINDOW_FORMAT)
+            except ValueError as exc:
+                raise UsageError(f"--start-at must have the format {WINDOW_FORMAT}: {exc}") from None
+    try:
+        return Runner(args.source, args.mode, window, start_at).run()
+    except RunFailed as exc:
+        print(f"run failed: {exc}", file=sys.stderr)
+        return EXIT_FAILED
 
 
 def main(argv: list[str] | None = None) -> int:

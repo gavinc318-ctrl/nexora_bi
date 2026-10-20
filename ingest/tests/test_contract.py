@@ -205,6 +205,26 @@ class CliTest(unittest.TestCase):
         self.assertEqual(self.run_cli("validate-contract", CDR, "--overrides", '{"lookback_minutes": 30}')[0], 2)
         self.assertEqual(self.run_cli("validate-contract", "/nonexistent.yaml")[0], 2)
 
+    def test_run_usage_errors_exit_2(self):
+        self.assertEqual(self.run_cli("run", "--source", "x", "--mode", "backfill")[0], 2)            # no --window
+        self.assertEqual(self.run_cli("run", "--source", "x", "--window",
+                                      "2026-10-01T00:00:00/2026-10-02T00:00:00")[0], 2)            # window is for backfill
+        self.assertEqual(self.run_cli("run", "--source", "x", "--mode", "backfill", "--start-at", "2026-10-01T00:00:00",
+                                      "--window", "2026-10-01T00:00:00/2026-10-02T00:00:00")[0], 2)
+        self.assertEqual(self.run_cli("run", "--source", "x", "--start-at", "2026-10-01 00:00")[0], 2)
+        self.assertEqual(self.run_cli("run", "--source", "x", "--mode", "backfill",
+                                      "--window", "2026-10-02T00:00:00/2026-10-01T00:00:00")[0], 2)   # reversed
+
+    def test_run_missing_config_exits_2(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.environ["OSS911_ETC"] = d
+            try:
+                code, _, err = self.run_cli("run", "--source", "icp_cdr_voice")
+            finally:
+                del os.environ["OSS911_ETC"]
+        self.assertEqual(code, 2)
+        self.assertIn("ingest.conf does not exist", err)
+
     def test_with_overrides_wrong_source(self):
         code, _, err = self.run_cli("validate-contract", CDR, "--with-overrides", "--source", "other")
         self.assertEqual(code, 1)

@@ -229,6 +229,13 @@ class FakeICPTest(unittest.TestCase):
         clean = self.rows(s, e)                                 # 注入只用一次
         self.assertFalse(any(r["CALLTYPE"] == str(gen.CALLTYPE_UNKNOWN) or r["WAITBEGIN"] == "" for r in clean))
 
+    def test_inversion_always_inverts(self):
+        # 曾经对调 CALLBEGIN 与 CALLEND：IVR 腿两者相等，对调后不变，注入静默失效。逐个窗口查，不靠碰巧
+        for h in range(0, 12):                                  # setUp 把「此刻」定在 12:00，只取之前的窗口
+            self.control(inject=["inversion"])
+            rows = self.rows(f"2026-10-14 {h:02d}:00:00", f"2026-10-14 {h:02d}:10:00")
+            self.assertTrue(any(r["WAITEND"] and r["WAITEND"] < r["WAITBEGIN"] for r in rows), f"{h} 点的窗口没有倒置行")
+
     def test_unknown_injection_rejected(self):
         with self.assertRaises(urllib.error.HTTPError) as cm:
             self.control(inject=["no_such_thing"])

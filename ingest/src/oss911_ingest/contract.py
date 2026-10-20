@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
@@ -182,6 +183,23 @@ def validate_contract(doc: dict) -> list[str]:
             p.append("window.restate_days must be a non-negative integer")
         if "schedule" in win and not (isinstance(win["schedule"], str) and win["schedule"].strip()):
             p.append("window.schedule must be a non-empty string")
+        if "source_timezone" in win:
+            # The zone the source's naive times are in: decides what "now" is for an incremental window
+            try:
+                ZoneInfo(win["source_timezone"]) if isinstance(win["source_timezone"], str) else ZoneInfo("")
+            except (ZoneInfoNotFoundError, ValueError):
+                p.append("window.source_timezone must be an IANA time zone name, e.g. UTC or Asia/Riyadh")
+        elif "max_span_hours" in win:
+            p.append("window.source_timezone is required for a time window (which zone the source's times are in)")
+
+    # Value tables that batch checks compare against must be in the contract: the CSV files in 3rd API/ are
+    # development material and are not deployed
+    for name, enum in (doc.get("enums") or {}).items():
+        if isinstance(enum, dict) and "values" in enum:
+            vals = enum["values"]
+            if not (isinstance(vals, list) and vals and all(_is_int(v) or isinstance(v, str) for v in vals)
+                    and len(set(map(str, vals))) == len(vals)):
+                p.append(f"enums.{name}.values must be a non-empty list of distinct codes")
     return p
 
 
