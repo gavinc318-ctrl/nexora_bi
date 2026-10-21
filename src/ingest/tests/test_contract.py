@@ -81,9 +81,12 @@ class ContractRulesTest(unittest.TestCase):
         self.assertProblem(doc, "credential_ref")
 
     def test_auth_may_inherit(self):
+        # The general rule accepts inherits; the CDR source itself still requires its own auth.obtain (REQUIRED)
         doc = cdr()
         doc["auth"] = {"inherits": "icp_cdr_voice"}
-        self.assertEqual(validate_contract(doc), [])
+        problems = validate_contract(doc)
+        self.assertFalse(any(p.startswith("auth must") or p.startswith("auth.inherits") for p in problems), problems)
+        self.assertTrue(any("auth.obtain.credential_ref is required" in p for p in problems))
 
     def test_reference_names_must_be_identifiers(self):
         doc = cdr()
@@ -122,6 +125,29 @@ class ContractRulesTest(unittest.TestCase):
         doc = cdr()
         doc["window"]["min_span_seconds"] = 24 * 3600
         self.assertProblem(doc, "shorter than")
+
+    def test_required_fields(self):
+        paths = ["endpoint.path", "endpoint.host_ref", "endpoint.request_body", "auth.header", "auth.obtain.path",
+                 "auth.obtain.credential_ref", "window.max_span_hours", "window.min_span_seconds",
+                 "window.lookback_minutes", "window.source_timezone", "watermark.column", "idempotent_key",
+                 "columns", "enums.call_type.values"]
+        for path in paths:
+            for empty in ("missing", None, "", []):
+                doc = cdr()
+                *parents, leaf = path.split(".")
+                node = doc
+                for part in parents:
+                    node = node[part]
+                if empty == "missing":
+                    del node[leaf]
+                else:
+                    node[leaf] = empty
+                self.assertProblem(doc, f"{path} is required")
+
+    def test_source_without_ingestion_cannot_be_released(self):
+        doc = cdr()
+        doc["source_id"] = "icp_agent_day"
+        self.assertProblem(doc, "no ingestion")
 
     def test_connector_and_target(self):
         doc = cdr()

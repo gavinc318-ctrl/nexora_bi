@@ -24,6 +24,33 @@ RAW_TABLE = re.compile(r"^raw\.[a-z][a-z0-9_]*$")
 SECRET_KEY = re.compile(r"passw|secret|private_key", re.IGNORECASE)
 LOOKBACK_MAX = 1440          # minutes; same bounds as the database CHECK (0004)
 
+# Required layer (DD-88 item nineteen). The general rules above say what a field must look like when it is
+# there; this says which fields a source cannot run without. Declared per (connector, source_id): each source's
+# ingestion code reads its own fields (runner.CHECKS registers the batch checks for the same sources), so the
+# list is "everything the code for that source reads". A missing field fails validation -- at deployment, in
+# M-01, and at the start of a run, which then ends with exit code 2 before touching any data. It must never
+# surface as a KeyError in the middle of a run, or as a quarantined batch: a contract defect is not a data defect.
+# A source with no entry here has no ingestion code and cannot be released.
+REQUIRED = {
+    ("rest_api", "icp_cdr_voice"): [
+        "endpoint.path", "endpoint.host_ref", "endpoint.request_body",
+        "auth.header", "auth.obtain.path", "auth.obtain.credential_ref",
+        "window.max_span_hours", "window.min_span_seconds", "window.lookback_minutes", "window.source_timezone",
+        "watermark.column", "idempotent_key", "columns",
+        "enums.call_type.values",          # the batch checks compare CALLTYPE against it (cdr.py)
+    ],
+}
+_MISSING = object()
+
+
+def _at(doc: Any, path: str) -> Any:
+    node = doc
+    for part in path.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return _MISSING
+        node = node[part]
+    return node
+
 
 class ContractError(Exception):
     """The contract or the overrides break a rule. args[0] is the list of all problems found."""
@@ -96,6 +123,17 @@ def _walk(node: Any, path: str = ""):
 def validate_contract(doc: dict) -> list[str]:
     """All problems found in the contract; an empty list means it is valid."""
     p: list[str] = []
+
+    # Required layer first: present and not empty (null, "", [] and {} all count as missing)
+    required = REQUIRED.get((doc.get("connector"), doc.get("source_id")))
+    if required is None:
+        p.append(f"no ingestion for connector {doc.get('connector')!r} / source {doc.get('source_id')!r}: "
+                 "a contract can only be released together with the code that ingests it")
+    else:
+        for path in required:
+            value = _at(doc, path)
+            if value is _MISSING or value is None or value in ("", [], {}):
+                p.append(f"{path} is required for {doc.get('source_id')}")
 
     # Top level: the four fields that are also columns of meta.source_contract, plus enabled
     sid = doc.get("source_id")

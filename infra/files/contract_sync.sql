@@ -10,7 +10,9 @@
 -- --with-overrides` just before, against the hot-tuned values in the database at that moment (DD-88 item
 -- fourteen: one set of rules). "overrides" is what that check saw. This script only makes sure the database
 -- still holds exactly those values: if someone changed one in M-01 between the check and this transaction,
--- the check no longer covers it, and deployment fails with "rerun" instead of syncing past it.
+-- the check no longer covers it, and deployment fails with "rerun" instead of syncing past it. The comparison
+-- is made while holding the contract row FOR UPDATE; M-01 holds it FOR SHARE while it checks and writes a value
+-- (LD-06 2.4), so the two wait for each other instead of interleaving.
 --
 -- Runs as the owner role, like a structural change: the contract copy is read-only for everyone else
 -- (admin_svc may change "enabled" only, 0004).
@@ -56,18 +58,11 @@ DECLARE
     raw_ok   boolean;
     checked  jsonb;
     now_held jsonb;
+    exists_  boolean;
+    n        integer;
 BEGIN
     FOR c IN SELECT jsonb_array_elements(current_setting('oss911.contracts')::jsonb) LOOP
         ver := (c->>'contract_version')::integer;
-
-        -- The hot-tuned values must be the ones the check saw. A missing entry means the check saw none
-        checked := coalesce(current_setting('oss911.overrides')::jsonb -> (c->>'source_id'), '{}');
-        SELECT coalesce(jsonb_object_agg(p.param_name, p.param_value), '{}') INTO now_held
-          FROM meta.source_runtime_param p WHERE p.source_id = c->>'source_id';
-        IF checked <> now_held THEN
-            RAISE EXCEPTION 'Contract % (%): hot-tuned values changed after they were checked (checked %, now %). Run the deployment again',
-                c->>'source_id', c->>'file', checked, now_held;
-        END IF;
 
         SELECT EXISTS (SELECT 1 FROM pg_class t JOIN pg_namespace n ON n.oid = t.relnamespace
                         WHERE t.relkind IN ('r', 'p') AND n.nspname = 'raw'
@@ -78,9 +73,25 @@ BEGIN
                 c->>'source_id', c->>'file', c->>'target_raw';
         END IF;
 
-        SELECT * INTO cur FROM meta.source_contract WHERE source_id = c->>'source_id';
+        -- Row lock first, comparison second (DD-88 item seventeen). M-01 takes FOR SHARE on this row before it
+        -- checks and writes a hot-tuned value, so from here until commit no value can change underneath; and
+        -- under READ COMMITTED the read below sees everything committed before the lock was granted. Compared
+        -- the other way round, a value written between the comparison and the UPDATE would slip through.
+        -- A source not in the database yet has no row to lock, and cannot have hot-tuned values either (foreign
+        -- key); the advisory lock above serializes deployments
+        SELECT * INTO cur FROM meta.source_contract WHERE source_id = c->>'source_id' FOR UPDATE;
+        exists_ := FOUND;     -- captured now: every later SELECT ... INTO resets FOUND
 
-        IF NOT FOUND THEN
+        -- The hot-tuned values must be the ones the check saw. A missing entry means the check saw none
+        checked := coalesce(current_setting('oss911.overrides')::jsonb -> (c->>'source_id'), '{}');
+        SELECT coalesce(jsonb_object_agg(p.param_name, p.param_value), '{}') INTO now_held
+          FROM meta.source_runtime_param p WHERE p.source_id = c->>'source_id';
+        IF checked <> now_held THEN
+            RAISE EXCEPTION 'Contract % (%): hot-tuned values changed after they were checked (checked %, now %). Run the deployment again',
+                c->>'source_id', c->>'file', checked, now_held;
+        END IF;
+
+        IF NOT exists_ THEN
             INSERT INTO meta.source_contract (source_id, connector, target_raw, contract_version, definition, enabled)
             VALUES (c->>'source_id', c->>'connector', c->>'target_raw', ver, c->'definition', (c->>'enabled')::boolean);
             INSERT INTO contract_sync_result VALUES (c->>'source_id', 'inserted', ver);
@@ -103,6 +114,10 @@ BEGIN
                SET definition = c->'definition', contract_version = ver,
                    target_raw = c->>'target_raw', connector = c->>'connector', synced_at = now()
              WHERE source_id = c->>'source_id';
+            GET DIAGNOSTICS n = ROW_COUNT;
+            IF n <> 1 THEN
+                RAISE EXCEPTION 'Contract %: expected to update one row, updated %', c->>'source_id', n;
+            END IF;
             INSERT INTO contract_sync_result VALUES (c->>'source_id', 'updated', ver);
         END IF;
     END LOOP;

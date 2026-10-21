@@ -3,8 +3,10 @@
 Structure of a run (DD-88 · DD-89):
   - one database connection for the whole run, through pgBouncer's session pool; the per-source advisory lock
     is taken on it and dies with it (DD-85). The connection is never swapped while the run lasts
-  - the contract is read from meta.source_contract, hot-tuned values from meta.source_runtime_param, once, at
-    the start; both are checked with the single set of rules (contract.py) and used for the whole run
+  - the contract (definition, contract_version, enabled) and its hot-tuned values are read in ONE statement at
+    the start -- one statement is one snapshot, so a deployment committing in between cannot pair an old contract
+    with new values (DD-88 item eighteen). No row lock is taken and none is held while downloading. Both are
+    checked with the single set of rules (contract.py) and used, unchanged, for the whole run
   - [start, end] is cut into batches no longer than the interface allows, fetched one after another
   - each batch commits in its own transaction: meta.ingest_batch, the raw rows, a quarantine registration if
     any, clarification items, and -- in incremental mode -- the watermark. A failure rolls back that batch
@@ -110,7 +112,7 @@ class Runner:
             if contract is None:
                 raise ConfigError(f"source {self.source_id} has no contract in meta.source_contract "
                                   "(not released, or 45-contracts not run)")
-            definition, version, enabled = contract
+            definition, version, enabled, overrides = contract
             if not enabled:
                 self.say(f"source {self.source_id} is disabled (meta.source_contract.enabled); nothing done")
                 return EXIT_OK
@@ -123,7 +125,7 @@ class Runner:
                 self._run_log(conn, version, "failed", msg)
                 raise RunFailed(msg)
             try:
-                return self._locked(conn, definition, version)
+                return self._locked(conn, definition, version, overrides)
             finally:
                 if not conn.closed:
                     conn.rollback()
@@ -131,22 +133,20 @@ class Runner:
                     conn.commit()
 
     def _read_contract(self, conn):
-        row = conn.execute(
-            "SELECT definition, contract_version, enabled FROM meta.source_contract WHERE source_id = %s",
+        # One statement, one snapshot: the contract and the hot-tuned values belong to the same moment
+        return conn.execute(
+            """SELECT c.definition, c.contract_version, c.enabled,
+                      coalesce((SELECT jsonb_object_agg(p.param_name, p.param_value)
+                                  FROM meta.source_runtime_param p WHERE p.source_id = c.source_id), '{}'::jsonb)
+                 FROM meta.source_contract c WHERE c.source_id = %s""",
             (self.source_id,)).fetchone()
-        return row
 
     # ------------------------------------------------------------------------------------------------------------
-    def _locked(self, conn, definition: dict, version: int) -> int:
+    def _locked(self, conn, definition: dict, version: int, overrides: dict) -> int:
         if self.source_id not in CHECKS:
             raise ConfigError(f"this program has no ingestion for source {self.source_id}")
         doc = dict(definition, enabled=True)
-        problems = validate_contract(doc)
-        overrides = dict(conn.execute(
-            "SELECT param_name, param_value FROM meta.source_runtime_param WHERE source_id = %s",
-            (self.source_id,)).fetchall())
-        problems += validate_overrides(doc, overrides)
-        conn.commit()
+        problems = validate_contract(doc) + validate_overrides(doc, overrides)
         if problems:
             raise ConfigError(f"contract {self.source_id} v{version} in the database fails validation: "
                               + "; ".join(problems))

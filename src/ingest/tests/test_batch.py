@@ -140,10 +140,11 @@ class CdrCheckTest(unittest.TestCase):
         self.assertEqual(r.quarantine, [])                        # not quarantined (contract batch_checks 5)
         self.assertEqual(dict(r.unknown_values["CALLTYPE"]), {"9999": 2})   # 6 is a known internal-call code
 
-    def test_contract_without_value_table(self):
+    def test_contract_without_value_table_is_not_a_data_problem(self):
+        # Required field: caught by validation before any batch (contract.REQUIRED), never turned into a quarantine
+        from oss911_ingest.contract import validate_contract
         defn = dict(CONTRACT, enums={})
-        r = check_cdr(COLUMNS, [[leg()[c] for c in COLUMNS]], defn)
-        self.assertTrue(any("enums.call_type.values" in q for q in r.quarantine))
+        self.assertTrue(any("enums.call_type.values is required" in p for p in validate_contract(defn)))
 
 
 class CutTest(unittest.TestCase):

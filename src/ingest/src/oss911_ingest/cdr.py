@@ -4,7 +4,10 @@ The contract states the checks in words, which cannot be executed; this module i
 must change with them. Outcome of a batch (LD-01 7.1 · DD-76 · DD-82):
   - any quarantine reason -> the whole batch is written to raw as usual and registered in meta.quarantine_batch
   - CALLTYPE outside the value table -> not quarantined; each value goes to meta.clarification_queue
-A CALLID without a CALLIDNUM = -1 row is a call still in progress: left to the lookback window, not an error.
+A CALLID without a CALLIDNUM = -1 row is a call still in progress, not an error. Its later legs are picked up by
+the next run's lookback when the call is shorter than the lookback, and by the daily re-sweep when it is longer
+(LD-01 4.4).
+The contract fields used here are required for this source (contract.REQUIRED) and checked before any batch.
 """
 
 from __future__ import annotations
@@ -85,12 +88,10 @@ def check_cdr(header: list[str], rows: list[list[str]], definition: dict) -> Che
     for pair, n in sorted(inverted.items()):
         res.quarantine.append(f"time inversion {pair} ({n} rows)")
 
-    known = {str(v) for v in (((definition.get("enums") or {}).get("call_type") or {}).get("values") or [])}
-    if known:
-        unknown = Counter(v for v in (get(r, "CALLTYPE") for r in rows) if v not in known)
-        if unknown:
-            res.unknown_values["CALLTYPE"] = unknown
-    else:
-        # The run cannot judge CALLTYPE without the value table; that is a contract defect, not a data defect
-        res.quarantine.append("contract has no enums.call_type.values; CALLTYPE cannot be checked")
+    # Required field (contract.REQUIRED): validated at the start of the run, so present here. Without it the run
+    # would have ended with exit code 2 -- a contract defect must not be turned into a quarantined batch
+    known = {str(v) for v in definition["enums"]["call_type"]["values"]}
+    unknown = Counter(v for v in (get(r, "CALLTYPE") for r in rows) if v not in known)
+    if unknown:
+        res.unknown_values["CALLTYPE"] = unknown
     return res

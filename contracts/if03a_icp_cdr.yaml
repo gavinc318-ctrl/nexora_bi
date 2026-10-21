@@ -7,7 +7,8 @@
 source_id: icp_cdr_voice
 connector: rest_api
 target_raw: raw.icp_cdr_voice
-contract_version: 2                  # v2（2026-10-20）：加 window.source_timezone 与 enums.call_type.values
+contract_version: 3                  # v2（2026-10-20）：加 window.source_timezone 与 enums.call_type.values
+                                     # v3（2026-10-21）：batch_checks 第 1 条措辞——进行中通话的收尾靠回看与每日回扫
 enabled: true
 
 endpoint:
@@ -114,7 +115,7 @@ enums:
 
 quality:
   batch_checks:
-    - "同一 CALLID 必须恰有一行 CALLIDNUM = -1；缺失即该通呼叫尚未结束，留给回看窗口，不报错"
+    - "同一 CALLID 至多一行 CALLIDNUM = -1；缺失即该通呼叫尚未结束，不报错。其收尾：短于回看的由下一次增量的回看取到，更长的靠每日回扫（LD-01 4.4）"
     - "同一 CALLID 内 CALLIDNUM 不得重复"
     - "WAITBEGIN 不得为空；为空即整批隔离：照常写入 raw 并登记 meta.quarantine_batch（LD-01 7.1 · DD-82）"
     - "WAITEND < WAITBEGIN、CALLEND < CALLBEGIN 等时序倒置：整批照常写入 raw，登记隔离（DD-76 · DD-82）"
