@@ -32,7 +32,7 @@ CODE_DIRS = [
     "infra/ansible.cfg",
     "ddl",
     "test",
-    "ingest",
+    "src",
     "recon",
 ]
 # Development-only test tools inside the code directories: not delivered, never run in the target

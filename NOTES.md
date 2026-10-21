@@ -836,3 +836,21 @@ inventory `icp_env.generate: true`（开发机）时生成假接口账号并保�
   已有的 18 列由谁、何时写进去（契约同步时？）设计没写，请定
 - **调用间隔**：猜 13「建议周期调用间隔 5 秒」——补数多批时连续下载、不等待。若真实平台限流，须加
 - 假接口的「时序倒置」注入曾静默失效（IVR 腿 CALLBEGIN = CALLEND，对调后不变），接入联调时发现；已修，并补了逐窗口的自测
+
+## 2026-10-21  开发机：自研代码统一放 `src/`（Gavin 定），接入程序移到 `src/ingest/`；请 Mac 侧改 CLAUDE.md
+
+Gavin 定：本方自己写的代码一律放仓库根下的 `src/` 子目录，免得根目录越来越乱。第一步把 `ingest/` 整体移到
+`src/ingest/`（git mv，历史可追）。包内仍是 Python 标准的 src 布局，所以源码路径是 `src/ingest/src/oss911_ingest/`。
+
+已随之改的：30-python 的源码路径（部署位置 `/opt/oss911/ingest-src`、`venv-ingest` 不变）、`tools/check_no_cjk.py` 的
+扫描范围（`ingest` → `src`，已验证 `src/` 下放一行中文会被查出）、两个测试文件的路径、runbook 07 与 10。
+
+**请 Mac 侧改 CLAUDE.md**：第 3 节「交付代码一律英文」的范围清单里 `ingest` 改为 `src`；第 2 节写入点表格与第 11 节
+文档地图若提到 `ingest/`，同样改为 `src/ingest/`。
+
+没有动的、请 Mac 侧一并判断是否也要归入 `src/`：
+- `recon/recon_hash_pg.sql`（对账 SQL，交付件）
+- `test/db_roles_check.sql`（随部署运行的权限验证）与 `test/fake_icp/`（不交付的开发工具）
+- `ddl/`、`contracts/`、`metrics/`：结构变更与业务口径，开发机认为不属于「代码」，建议留在根下
+
+此后新写的代码（Airflow DAG、dbt 项目）直接放 `src/` 下，拟为 `src/dags/`、`src/dbt/`。

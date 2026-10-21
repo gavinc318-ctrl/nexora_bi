@@ -1,6 +1,6 @@
 """Tests of the contract rules (oss911_ingest.contract) and of validate-contract's exit codes.
 
-Run from the repository root:  python3 ingest/tests/test_contract.py -v
+Run from the repository root:  python3 src/ingest/tests/test_contract.py -v
 Needs only PyYAML; no database. The --with-overrides path reads the database and is exercised by
 infra/playbooks/45-contracts.yml on the real machine.
 """
@@ -14,8 +14,9 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(os.path.dirname(HERE))
-sys.path.insert(0, os.path.join(REPO, "ingest", "src"))
+INGEST = os.path.dirname(HERE)
+REPO = os.path.dirname(os.path.dirname(INGEST))
+sys.path.insert(0, os.path.join(INGEST, "src"))
 
 from oss911_ingest import cli                                     # noqa: E402
 from oss911_ingest.contract import (                              # noqa: E402

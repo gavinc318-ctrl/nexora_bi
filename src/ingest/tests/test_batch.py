@@ -1,6 +1,6 @@
 """Tests of CSV parsing, the content hash, the ICP CDR batch checks and window cutting.
 
-Run from the repository root:  python3 ingest/tests/test_batch.py -v
+Run from the repository root:  python3 src/ingest/tests/test_batch.py -v
 No database and no network. The end-to-end path (fake ICP interface -> raw) is exercised against a database
 as described in infra/runbook/10-ingest.md.
 """
@@ -11,8 +11,9 @@ import unittest
 from datetime import datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(os.path.dirname(HERE))
-sys.path.insert(0, os.path.join(REPO, "ingest", "src"))
+INGEST = os.path.dirname(HERE)
+REPO = os.path.dirname(os.path.dirname(INGEST))
+sys.path.insert(0, os.path.join(INGEST, "src"))
 
 from oss911_ingest.cdr import check_cdr                       # noqa: E402
 from oss911_ingest.config import ConfigError                  # noqa: E402

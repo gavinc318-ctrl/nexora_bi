@@ -46,7 +46,7 @@
     # The ingestion program (DD-84): the third venv. Its lock is likewise the repository copy (DD-83)
     ingest_venv: "{{ venv_root }}/venv-ingest"
     ingest_lock: "{{ playbook_dir | dirname }}/ingest-requirements.lock"
-    ingest_src_repo: "{{ playbook_dir | dirname | dirname }}/ingest"
+    ingest_src_repo: "{{ playbook_dir | dirname | dirname }}/src/ingest"   # our own code lives under src/ (2026-10-21)
     # Building our package makes pip write build/ and *.egg-info into the source directory -- written into the
     # repository as root, the next git operation runs into root-owned files. So copy it here and build here.
     ingest_src_dir: "{{ venv_root }}/ingest-src"

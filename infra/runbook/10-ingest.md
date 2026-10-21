@@ -26,7 +26,7 @@
 
 ### 三、坏数据也进 raw
 
-批次校验（契约 if03a 的 batch_checks，写成代码在 `ingest/src/oss911_ingest/cdr.py`）不通过时，**整批照常写进
+批次校验（契约 if03a 的 batch_checks，写成代码在 `src/ingest/src/oss911_ingest/cdr.py`）不通过时，**整批照常写进
 raw，并登记 `meta.quarantine_batch`**，退出码仍是 0——隔离是设计好的结果，不是失败。CALLTYPE 不在值表内的
 不隔离，进 `meta.clarification_queue`（同一个值只开一条）。表头与契约不一致也整批隔离，新列以 `unknown`
 登记 `meta.mapping_registry`。

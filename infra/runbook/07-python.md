@@ -60,7 +60,7 @@ https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3
 ## 第三个 venv：接入程序（第 2 批起）
 
 ```
-/opt/oss911/venv-ingest     oss911-ingest（仓库 ingest/）+ psycopg 3 · PyYAML（按 infra/ingest-requirements.lock）
+/opt/oss911/venv-ingest     oss911-ingest（仓库 src/ingest/）+ psycopg 3 · PyYAML（按 infra/ingest-requirements.lock）
 ```
 
 接入程序是独立的命令行程序，Airflow 以 BashOperator 调用，与 dbt 相同（DD-84 · LD-01 2.5）。
@@ -70,7 +70,7 @@ https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3
 驱动是 psycopg 3（LGPL-3，DD-86），按 LD-09 4.2 只 import、不修改、**不得打成单文件可执行**。
 与 dbt 用的 psycopg2 并存于 wheelhouse，互不替代。
 
-本方的包从仓库的 `ingest/` 复制到 `/opt/oss911/ingest-src` 再构建（构建会写 `build/` 与
+本方的包从仓库的 `src/ingest/` 复制到 `/opt/oss911/ingest-src` 再构建（构建会写 `build/` 与
 `*.egg-info`，以 root 写进仓库会留下 root 属主的文件），只在源码变了或尚未安装时才重装。
 
 退出码是 DAG 依赖的约定：**0 成功（含批次被隔离）· 1 运行失败 · 2 用法或配置错误**，不得出现 99。
