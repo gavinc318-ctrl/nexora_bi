@@ -37,7 +37,7 @@ format: converted from docx, content unchanged
 
 ### 2.4  热调与发布的界线
 
-运行参数的热调（启停、回看长度、批量、限流）在 M-01 完成，不走发布流程，但写审计。凡改变口径、结构或行为逻辑的，一律走发布制品（LD-08 7.2）。热调值存 meta.source_runtime_param，不改 meta.source_contract.definition；启停只用 source_contract.enabled 一处。第一版的轮询间隔是 Airflow DAG 的 schedule，接入程序读参数改变不了触发频率，故间隔作发布项、不可热调（2026-10-18，DD-88 更正；原文四类中的「间隔」据此移出）。
+运行参数的热调（启停、回看长度、批量、限流）在 M-01 完成，不走发布流程，但写审计。凡改变口径、结构或行为逻辑的，一律走发布制品（LD-08 7.2）。热调值存 meta.source_runtime_param，不改 meta.source_contract.definition；启停只用 source_contract.enabled 一处。第一版的轮询间隔是 Airflow DAG 的 schedule，接入程序读参数改变不了触发频率，故间隔作发布项、不可热调（2026-10-18，DD-88 更正；原文四类中的「间隔」据此移出）。 【2026-10-21 补充】M-01 写覆盖值的事务须先对该源的 meta.source_contract 行 SELECT … FOR SHARE，再调用接入程序的同一套校验（LD-01 2.5），通过后写入并留痕；部署同步对同一行 FOR UPDATE，两者互斥，避免「部署刚提高下限、热调按旧规则写入更小值」的非法组合。
 
 界面上要让这条界线看得见：热调项与发布项分区呈现，发布项在界面中为只读并标明其来自哪个发布版本。可改的与不可改的混在一起，最终会有人试图在生产上直接改口径。
 

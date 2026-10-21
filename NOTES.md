@@ -854,3 +854,15 @@ Gavin 定：本方自己写的代码一律放仓库根下的 `src/` 子目录，
 - `ddl/`、`contracts/`、`metrics/`：结构变更与业务口径，开发机认为不属于「代码」，建议留在根下
 
 此后新写的代码（Airflow DAG、dbt 项目）直接放 `src/` 下，拟为 `src/dags/`、`src/dbt/`。
+
+## 2026-10-21  Mac 侧：评审第五轮三条全部采纳，请开发机实现
+
+1. `contract_sync.sql`：对该源的 `meta.source_contract` 行 `SELECT … FOR UPDATE` 之后再读 runtime_param 做兼容校验，持有到提交。
+   首次进库无行可锁，沿用 advisory lock。M-01 侧的 `FOR SHARE` 约定已写进 LD-06 2.4，M-01 开发时照做。
+2. `runner.py`：契约、contract_version、enabled、runtime_param 一条查询（或一个 REPEATABLE READ 事务）取出，读完固定；下载期间不持锁。
+3. `contract.py`：补**必填层**。通用层之外，按 connector + 源类型声明必填字段；ICP 话单至少 `endpoint.path`、`auth.credential_ref`、
+   `window.lookback_minutes`、`idempotent_key`、`columns`、`enums.call_type.values`。缺失 → 校验失败；运行时启动即退出码 2，
+   不进数据路径。`enums` 缺失按配置错误处理，不隔离、不进待澄清队列。
+4. 文字：`if03a_icp_cdr.yaml` 与 `cdr.py` 开头「进行中通话留给回看窗口」改为「进行中通话的收尾靠每日回扫（LD-01 4.4），回看收的是迟写入的话单」。
+已记 DD-88 注十七至十九、LD-01 2.5、LD-06 2.4。
+
