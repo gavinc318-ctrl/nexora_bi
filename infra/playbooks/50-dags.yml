@@ -1,0 +1,133 @@
+# 50-dags -- deploy the Airflow DAGs from src/dags/ into the DAG folder
+#
+# Basis: DD-84 · DD-85 · LD-01 2.5 · LD-06 2.4
+# Prerequisites: 30-python (Airflow, the pools, venv-ingest) · 45-contracts (/opt/oss911/contracts, which the
+#                ingestion DAGs are generated from)
+#
+# * The DAG folder holds exactly the .py files of src/dags/. A file deleted from the repository is deleted here
+#   too: unlike most leftovers (CLAUDE.md section 5, item four), a stale DAG file is not harmless -- the scheduler
+#   keeps running it.
+# * After copying, the DAGs are parsed and written to the metadata database at once (airflow dags reserialize)
+#   instead of waiting for the DAG processor's next scan, and import errors fail the playbook.
+# * New DAGs start paused (Airflow's dags_are_paused_at_creation). Unpausing is an operator action
+#   (runbook/11); start / stop of a source is meta.source_contract.enabled, the DAG's pause is for operations.
+
+- name: Airflow DAGs
+  hosts: all
+  gather_facts: false   # no facts used (same reasoning as 40-schema.yml)
+  become: true
+
+  vars:
+    oss911_etc: /etc/oss911
+    repo_dags: "{{ playbook_dir }}/../../src/dags"
+    dags_dir: "{{ airflow_home }}/dags"
+    af_venv: "{{ venv_root }}/venv-airflow"
+    # Read on the control node: the DAG files of this release
+    dag_files: "{{ query('ansible.builtin.fileglob', repo_dags ~ '/*.py') | map('basename') | sort }}"
+
+  tasks:
+
+    - name: Assert the repository has DAG files
+      ansible.builtin.assert:
+        that:
+          - dag_files | length > 0
+        fail_msg: "No .py files in {{ repo_dags }}"
+        success_msg: "DAG files in this release: {{ dag_files | join(', ') }}"
+
+    - name: Copy the DAG files
+      ansible.builtin.copy:
+        src: "{{ repo_dags }}/{{ item }}"
+        dest: "{{ dags_dir }}/{{ item }}"
+        owner: airflow
+        group: airflow
+        mode: "0640"
+      loop: "{{ dag_files }}"
+
+    # __pycache__ is written by Airflow's own DAG processor on every parse; removing it would make every run
+    # "changed" (and it would only come back)
+    - name: Find the files in the DAG folder
+      ansible.builtin.find:
+        paths: "{{ dags_dir }}"
+        file_type: any
+        hidden: true
+        excludes: ["__pycache__"]
+      register: _present
+
+    - name: Remove files that are not DAG files of this release
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ _present.files | map(attribute='path') | reject('in', dag_files | map('regex_replace', '^', dags_dir ~ '/') | list) | list }}"
+
+    - name: Parse the DAGs into the metadata database now
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail      # the sed that masks the connection string must not hide a failure
+          set -a; . {{ oss911_etc }}/airflow.env; set +a
+          {{ af_venv }}/bin/airflow dags reserialize 2>&1 | sed -E 's#(postgresql\+psycopg2://[^:]+:)[^@]+@#\1***@#g'
+      args:
+        executable: /bin/bash
+      become_user: airflow
+      register: _reser
+      changed_when: false
+
+    - name: Query import errors
+      ansible.builtin.shell:
+        cmd: |
+          set -a; . {{ oss911_etc }}/airflow.env; set +a
+          {{ af_venv }}/bin/airflow dags list-import-errors -o json 2>/dev/null
+      args:
+        executable: /bin/bash
+      become_user: airflow
+      register: _imperr
+      changed_when: false
+      check_mode: false
+
+    - name: Assert there are no import errors
+      ansible.builtin.assert:
+        that:
+          - (_imperr.stdout | trim) in ['', '[]'] or (_imperr.stdout | from_json | length == 0)
+        fail_msg: |-
+          Airflow reports import errors:
+          {{ _imperr.stdout }}
+        success_msg: "No DAG import errors"
+
+    - name: Query the DAGs Airflow knows
+      ansible.builtin.shell:
+        cmd: |
+          set -a; . {{ oss911_etc }}/airflow.env; set +a
+          {{ af_venv }}/bin/airflow dags list -o json 2>/dev/null
+      args:
+        executable: /bin/bash
+      become_user: airflow
+      register: _dags
+      changed_when: false
+      check_mode: false
+
+    # The source_ids of the released contracts, from the copy deployment made (the DAG file reads the same copy).
+    # Read with venv-ingest's Python; Ansible's own YAML parser must not read contracts (it would template them)
+    - name: Read the released source ids
+      ansible.builtin.command:
+        argv:
+          - "{{ venv_root }}/venv-ingest/bin/python"
+          - -c
+          - |
+            import os, sys, yaml
+            base = sys.argv[1]
+            for name in yaml.safe_load(open(os.path.join(base, "release.yml")))["release"]:
+                print(yaml.safe_load(open(os.path.join(base, os.path.basename(name))))["source_id"])
+          - "{{ venv_root }}/contracts"
+      register: _released
+      changed_when: false
+      check_mode: false
+
+    # One ingestion DAG per released contract
+    - name: Assert there is an ingestion DAG for every released contract
+      ansible.builtin.assert:
+        that:
+          - ('ingest_' ~ item) in (_dags.stdout | from_json | map(attribute='dag_id') | list)
+        fail_msg: "No DAG ingest_{{ item }}. Present: {{ _dags.stdout | from_json | map(attribute='dag_id') | join(', ') }}"
+        success_msg: >-
+          DAG ingest_{{ item }} present, paused:
+          {{ (_dags.stdout | from_json | selectattr('dag_id', 'equalto', 'ingest_' ~ item) | first).is_paused }}
+      loop: "{{ _released.stdout_lines }}"

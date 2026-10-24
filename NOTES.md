@@ -900,3 +900,22 @@ DD-89 现成），与 5 分钟增量共用 pool `icp_cms` 与咨询锁。回扫�
 重跑 30-python 时停在第一个要 root 的任务上不动。查明是 `-K` 口令输错：本地连接下 Ansible 不报错、不超时，一直等。
 已用 `sudo -k` 加故意输错复现。做法：跑剧本前先 `sudo -v`。已写进 `troubleshooting.md` 第 30 条与 runbook 09。
 CLAUDE.md 第 5 节「完整清单在 troubleshooting.md（29 条…）」请改为 30 条。
+
+## 2026-10-24  开发机：ICP 话单的增量 DAG 与部署剧本 50-dags；七处实现选择请 Mac 侧确认
+
+`src/dags/oss911_ingest.py` 按发布清单（45-contracts 复制到 `/opt/oss911/contracts` 的那份）每个源生成一个 DAG，现在只有
+`ingest_icp_cdr_voice`：调度取契约 `window.schedule`（`*/5 * * * *`），任务就是 `oss911-ingest run --source icp_cdr_voice`。
+`infra/playbooks/50-dags.yml` 部署它并当场解析校验。以 Airflow 3.3.2 自己的 DagBag 在本地解析过：参数如下表；未登记 pool 的源
+生成时报导入错误（这正是期望的行为）。真机由 Gavin 执行，步骤与并发测试见 runbook/11。
+
+| # | 选择 | 理由 |
+| --- | --- | --- |
+| 1 | DAG 由发布清单生成，不手写；一个源一个 DAG | LD-06：「DAG 由接入契约注册表动态生成，界面只展示不编辑」；轮询间隔是契约的发布项（LD-06 2.4） |
+| 2 | 每个源走哪个全局 pool 写在 DAG 文件的 `POOLS` 里（`icp_cdr_voice → icp_cms`）；发布了却没登记 pool 的源，DAG 文件报导入错误 | 并发限制必须显式；pool 是编排的事，不放进面向业务的契约 |
+| 3 | `skip_on_exit_code=None`；重试 2 次、间隔 2 分钟，不分退出码；超时 30 分钟 | DD-84 · LD-01 2.5「第一版一律有限次重试」；24 小时切片的下载以秒计，30 分钟没完即卡死 |
+| 4 | `max_active_runs=1`、`catchup=False` | 增量从水位起算，追数是接入程序的事：停一天再开，下一次运行自己切批追到现在（真机已见：3 天缺口切成 4 批） |
+| 5 | 任务环境只给 `PATH` 与 `LANG`，不继承 Airflow 进程环境 | 工作进程的环境里有元数据库连接串（含口令）；LD-01 2.5「口令不经 DAG、模板或 Airflow 父进程传入」反过来也成立：Airflow 的口令不该进接入程序 |
+| 6 | 新 DAG 保持 Airflow 默认的「创建即暂停」，由运维手工开 | 开发机假接口不常开；**生产要定**：是部署后由剧本打开，还是保留人工开启这一步。注意不要让 DAG 的暂停变成第二个「启停」——源的启停只认 `meta.source_contract.enabled` |
+| 7 | 50-dags 让 DAG 目录与 `src/dags/` 的 `.py` 一一对应，仓库里删掉的文件在目标上也删掉（Airflow 自己写的 `__pycache__` 除外） | 过期的 DAG 文件不是无害的残留——调度器会一直跑它（CLAUDE.md 第 5 节第四条的反例） |
+
+仍缺：**每日回扫 DAG**，等上节问的时刻与覆盖范围。双活下 pool 是否全局生效，须在测试环境双节点验证（DD-85）。
