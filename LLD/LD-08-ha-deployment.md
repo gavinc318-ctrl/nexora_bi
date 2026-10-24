@@ -39,6 +39,8 @@ RFP 1.5.2.9 规定数据库为服务等级 1（99.999%），BI、报表与仪表
 
 ### 3.3  ETL 节点：Airflow 双活
 
+### 【2026-10-24 补充，DD-85 的一条遗漏前提】「scheduler 无状态」成立的条件之一是 Airflow 的两把密钥是共享配置而不是节点本地状态：[api_auth] jwt_secret（scheduler 签发任务令牌、API server 校验）与 [core] fernet_key（加密元数据库中的连接口令）。二者默认在首次启动时各节点随机生成，双活下任务在另一台汇报即被拒、口令在另一台解不开，且是间歇性的，单机开发环境永远复现不了。处置：由剧本生成一次、存 /etc/oss911/airflow.env（0600）、各节点同一份、已有密钥优先纳管；轮换进 runbook/91（fernet_key 轮换须按 Airflow 的多密钥重加密流程）。另：新 DAG 保持创建即暂停，首次上线由人工开启，列为验收步骤（初始化水位 → 开启 → 确认首个任务成功）；此后的重复部署不得改变 DAG 的暂停状态——源的启停只认 meta.source_contract.enabled，DAG 暂停不是第二个开关。
+
 Airflow、dbt 与接入程序运行在 ETL-1、ETL-2 两台虚机上（DD-85）。两台都运行 Airflow 的全部组件——api-server、scheduler、dag-processor、triggerer——执行器为 LocalExecutor，元数据库置于 PostgreSQL 高可用集群中的独立数据库（DD-44）。两台同时工作，不分主备。
 
 双活靠的是 scheduler 本身不保存状态：任务的依赖关系、每个任务实例的状态、pool 的占用全部在元数据库里。两个 scheduler 各自循环，每一轮查询「依赖已满足、可以运行」的任务，以数据库行锁锁住选中的任务实例后再启动，另一个 scheduler 遇到锁即跳过——同一任务不会被两边同时执行，谁锁到就在谁的机器上运行。接入程序与 dbt 作为子进程，在锁到任务的那台机器上运行。任务之间的依赖照常生效：上游未完成，下游不会进入可运行的名单，无论由哪个 scheduler 判断，结论相同。
