@@ -774,6 +774,20 @@
               first make sure pgbouncer.ini has that entry and auth_query works (21-connection asserts both).
             success_msg: "Airflow metadata database reachable (through the pgBouncer session pool)"
 
+        # Tasks report to this URL while they run. Check it answers as Airflow's execution API, not merely that
+        # something answers: with the default URL the reports went to Keycloak on 8080, which also answers -- with
+        # an error that killed every task at its first report (troubleshooting entry 31). The components were
+        # possibly just restarted, so allow the API server some time to come up.
+        - name: Check the task execution API answers at the configured URL
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ airflow_api_port }}/execution/health"
+            return_content: true
+          register: _exec_api
+          until: _exec_api.status == 200 and (_exec_api.json | default({})).status | default('') == 'healthy'
+          retries: 12
+          delay: 5
+          check_mode: false
+
         # ========== Global pools (DD-85 · LD-08 3.3) ==========
         # Output one "name|slots|description" per line and compare before setting: pools set writes every time,
         # so setting unconditionally would always report changed

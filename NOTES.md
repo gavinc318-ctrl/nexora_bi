@@ -919,3 +919,21 @@ CLAUDE.md 第 5 节「完整清单在 troubleshooting.md（29 条…）」请改
 | 7 | 50-dags 让 DAG 目录与 `src/dags/` 的 `.py` 一一对应，仓库里删掉的文件在目标上也删掉（Airflow 自己写的 `__pycache__` 除外） | 过期的 DAG 文件不是无害的残留——调度器会一直跑它（CLAUDE.md 第 5 节第四条的反例） |
 
 仍缺：**每日回扫 DAG**，等上节问的时刻与覆盖范围。双活下 pool 是否全局生效，须在测试环境双节点验证（DD-85）。
+
+## 2026-10-24  开发机：DAG 任务全部失败——Airflow 执行 API 地址指到了 Keycloak（已修）；另报一个生产隐患：Airflow 密钥未受管
+
+**现象与原因**：`ingest_icp_cdr_voice` 每次都失败，接入程序一次都没被调到。Airflow 3 的任务进程运行时向执行 API 汇报，
+默认地址 `localhost:8080`，而 8080 是 Keycloak；API server 当初因此改到 8081，汇报地址没跟着改。已在 `airflow.env` 写入
+`AIRFLOW__CORE__EXECUTION_API_SERVER_URL`，30-python 并断言该地址回的是执行 API 的 health。troubleshooting 第 31 条。
+**第 7 步「Airflow 完成」当时只验证了组件启动与元数据库连接，任务执行路径到今天才第一次走到**——开发日志里第 7 步的
+「完成」应理解为「装好」而非「能跑任务」。
+
+**生产隐患（请 Mac 侧登记，建议并入 LD-08 的 Airflow 部署）**：Airflow 的两把密钥目前不受剧本管理——
+- `[api_auth] jwt_secret`：scheduler 签发任务令牌、API server 校验，**所有组件必须同一把**
+- `[core] fernet_key`：加密元数据库里的连接与变量口令，所有节点必须同一把，换了旧密文即不可读
+
+二者都是 Airflow 首次启动时随机生成、写进各自 `AIRFLOW_HOME/airflow.cfg` 的。开发机所有组件共用一个 `airflow.cfg`，
+所以没出问题；生产上 ETL-1、ETL-2 双活加独立的 API server（LD-08），每台机器会各生成一把，**任务在另一台机器上汇报即被拒、
+连接口令在另一台上解不开**，且是间歇性的——单机开发环境永远复现不了（CLAUDE.md 第 5 节第一条）。
+拟：两把密钥与其他口令同样由剧本生成一次、存 `/etc/oss911/airflow.env`（0600）、各节点同一份；轮换流程进 runbook/91。
+开发机可以现在就改成受管（生成后写入 env、组件重启一次；目前元数据库里没有任何加密的连接，换 fernet_key 无损）。请定是否现在做。

@@ -586,3 +586,22 @@ dbt/dbt_core_experimental_parser-2.0.5.tar.gz
   口令错了当场看得见；之后 15 分钟内本终端的 sudo 不再要口令，剧本里的提权直接通过。**副作用要知道**：这 15 分钟
   里 `-K` 输错输对都能跑通，所以「剧本跑通了」不证明输进 `-K` 的口令是对的。没能写进剧本：卡住发生在 Ansible
   取得 root 之前，剧本里的任何检查都还没机会运行
+
+### 现象：DAG 任务每次都失败，任务日志只有一行 `::group::Pre Execute`；scheduler 日志里是 `Server error detail: {'error': 'Unable to find matching target resource method'}`
+
+- **原因** —— Airflow 3 的任务进程运行时要向执行 API（`[core] execution_api_server_url`）汇报，默认地址是
+  `http://localhost:8080/execution/`。开发机的 8080 是 **Keycloak**，Airflow 的 API server 当初为此改到了 8081
+  （inventory `airflow_api_port`），**但汇报地址没有跟着改**。任务一汇报就打到 Keycloak 上，回的那句就是 Keycloak
+  （RESTEasy）找不到路径时的报错，任务进程随即被判失败，日志里留不下原因。接入程序一次都没被调到，`meta.run_log`
+  没有新行。第 7 步只验证了组件能启动、能连元数据库，「任务真正执行」这条路径直到第一个 DAG 才走到。2026-10-24 遇到
+- **处置** —— 30-python 在 `airflow.env` 里写入 `AIRFLOW__CORE__EXECUTION_API_SERVER_URL=http://127.0.0.1:<airflow_api_port>/execution/`
+  并重启四个组件；手工核对：
+
+  ```bash
+  curl -s http://127.0.0.1:8081/execution/health     # {"status":"healthy"}
+  curl -s http://127.0.0.1:8080/execution/health     # Keycloak 的报错——汇报若打到这里就会出事
+  ```
+
+- **预防** —— 30-python 启动 Airflow 后断言该地址回的是执行 API 的 `{"status":"healthy"}`，不只是「有东西应答」——
+  Keycloak 也会应答。**改一个端口时，要把所有指向它的地方一起找出来**：这是 CLAUDE.md 第 5 节第四类错误（换了做法，
+  旧做法的依赖不会自己消失）
