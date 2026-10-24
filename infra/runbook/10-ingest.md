@@ -41,14 +41,13 @@ raw，并登记 `meta.quarantine_batch`**，退出码仍是 0——隔离是设�
 
 前提：30-python（新版接入程序）与 45-contracts（契约 v2）已跑过。
 
-**一、起假接口**（另开一个终端，一直开着；账号与 `icp.env` 一致，见 runbook/09）：
+**一、起假接口**（另开一个终端，一直开着；账号与端口从 `icp.env` 读，与接入程序一致）：
 
 ```bash
-cd ~/src/nexora_bi
-eval "$(sudo grep -E '^OSS911_CRED_ICP_CMS_SERVICE_ACCOUNT_(USER|PASSWORD)=' /etc/oss911/icp.env)"
-python3 test/fake_icp/server.py --port 18080 --seed 1 \
-  --account "$OSS911_CRED_ICP_CMS_SERVICE_ACCOUNT_USER:$OSS911_CRED_ICP_CMS_SERVICE_ACCOUNT_PASSWORD"
+~/src/nexora_bi/test/fake_icp/start.sh
 ```
+
+看到「假 ICP 接口：端口 18080 …」即起来了。终端关掉或机器重启它就没了，每次要重起。
 
 **二、第一次增量**，以接入程序真实运行的身份（airflow）执行，水位从 2 小时前开始（时间按 UTC，契约
 `window.source_timezone`）：

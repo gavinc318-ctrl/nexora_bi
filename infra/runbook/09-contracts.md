@@ -82,13 +82,10 @@ sudo -u postgres psql -d oss911 -c "SELECT source_id, contract_version, enabled,
 
 `/etc/oss911/icp.env` 存 ICP 网关地址与服务工号（LD-01 2.5）。生产上口令由 ICP 运维发，运维手写此文件，剧本只
 检查齐全（inventory `icp_env.generate: false`）；开发机上账号属于假接口（AS-32），30-python 生成一次随机口令并
-保留。启动假接口时用同一账号：
+保留。启动假接口的脚本从这个文件读账号与端口，两边因此永远一致：
 
 ```bash
-cd ~/src/nexora_bi
-eval "$(sudo grep -E '^OSS911_CRED_ICP_CMS_SERVICE_ACCOUNT_(USER|PASSWORD)=' /etc/oss911/icp.env)"
-python3 test/fake_icp/server.py --port 18080 --seed 1 \
-  --account "$OSS911_CRED_ICP_CMS_SERVICE_ACCOUNT_USER:$OSS911_CRED_ICP_CMS_SERVICE_ACCOUNT_PASSWORD"
+~/src/nexora_bi/test/fake_icp/start.sh
 ```
 
 口令会出现在假接口进程的命令行里（`ps` 看得到）。假接口只在开发机、只监听 127.0.0.1，可以接受；这条做法

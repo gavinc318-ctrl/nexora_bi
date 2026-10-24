@@ -14,6 +14,14 @@
 
 ## 启动
 
+开发机上用脚本，账号与端口从 `/etc/oss911/icp.env` 读（接入程序读的同一份，30-python 生成）：
+
+```bash
+test/fake_icp/start.sh [种子]
+```
+
+不经脚本、手工指定账号时：
+
 ```bash
 python3 test/fake_icp/server.py --port 18080 --seed 1 --account <工号>:<口令>
 ```

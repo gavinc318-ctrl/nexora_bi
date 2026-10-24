@@ -48,7 +48,7 @@ cd infra && ansible-playbook playbooks/50-dags.yml -e ansible_connection=local -
 af() { sudo -u airflow bash -c 'set -a; . /etc/oss911/airflow.env; set +a; exec /opt/oss911/venv-airflow/bin/airflow "$@"' _ "$@"; }
 ```
 
-**一、起假接口**（另一个终端，同 runbook/10 第一步）
+**一、起假接口**（另一个终端）：`~/src/nexora_bi/test/fake_icp/start.sh`
 
 **二、开 DAG，等两三个周期**
 
