@@ -71,6 +71,9 @@
       register: _reser
       changed_when: false
 
+    # The Airflow CLI prints warnings to stdout before its JSON (e.g. "Could not import graphviz" -- graphviz only
+    # renders DAG images on the command line, not needed here, and not worth a new dependency). The JSON is always
+    # the last line, so only the last line is parsed.
     - name: Query import errors
       ansible.builtin.shell:
         cmd: |
@@ -86,7 +89,7 @@
     - name: Assert there are no import errors
       ansible.builtin.assert:
         that:
-          - (_imperr.stdout | trim) in ['', '[]'] or (_imperr.stdout | from_json | length == 0)
+          - (_imperr.stdout_lines | last | default('[]') | from_json | length) == 0
         fail_msg: |-
           Airflow reports import errors:
           {{ _imperr.stdout }}
@@ -125,9 +128,9 @@
     - name: Assert there is an ingestion DAG for every released contract
       ansible.builtin.assert:
         that:
-          - ('ingest_' ~ item) in (_dags.stdout | from_json | map(attribute='dag_id') | list)
-        fail_msg: "No DAG ingest_{{ item }}. Present: {{ _dags.stdout | from_json | map(attribute='dag_id') | join(', ') }}"
+          - ('ingest_' ~ item) in (_dags.stdout_lines | last | from_json | map(attribute='dag_id') | list)
+        fail_msg: "No DAG ingest_{{ item }}. Present: {{ _dags.stdout_lines | last | from_json | map(attribute='dag_id') | join(', ') }}"
         success_msg: >-
           DAG ingest_{{ item }} present, paused:
-          {{ (_dags.stdout | from_json | selectattr('dag_id', 'equalto', 'ingest_' ~ item) | first).is_paused }}
+          {{ (_dags.stdout_lines | last | from_json | selectattr('dag_id', 'equalto', 'ingest_' ~ item) | first).is_paused }}
       loop: "{{ _released.stdout_lines }}"
