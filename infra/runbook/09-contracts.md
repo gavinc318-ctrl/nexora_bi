@@ -52,6 +52,7 @@
 先跑 30-python（装新版接入程序、生成 `ingest.conf` 与开发机的 `icp.env`），再跑本步：
 
 ```bash
+sudo -v        # 先确认 sudo 口令：-K 口令输错时剧本会静默卡住（troubleshooting 第 30 条）
 cd ~/src/nexora_bi && git pull --rebase
 cd infra
 ansible-playbook playbooks/30-python.yml   -e ansible_connection=local -K

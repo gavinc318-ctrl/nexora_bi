@@ -568,3 +568,21 @@ dbt/dbt_core_experimental_parser-2.0.5.tar.gz
 - **预防** —— 改 `userlist.txt`（口令）只需 **reload**（SIGHUP），pgBouncer 重读 auth_file，已建立
   的连接一条不断。21-connection 已改为 userlist 变化走 reload；只有 pgbouncer.ini 里须重启才生效
   的设置（如监听地址与端口）变化才 restart，那时等 90 秒是预期内的
+
+### 现象：剧本停在第一个要 root 的任务上不动（如 30-python 的 `TASK [Install build dependencies]`），不报错
+
+- **原因** —— **提权口令输错了**。以本地连接（`-e ansible_connection=local`）运行时，`-K` 收到的口令错误，
+  sudo 回一句「Sorry, try again」后第二次要口令、在标准输入上等；Ansible 只送一次、也没认出这是重新要口令，
+  双方互相等，**不报错、不超时**。另开终端 `ps aux | grep -E '[s]udo|[A]nsiballZ'` 可见：只有 `sudo` 进程，
+  下面没有以 root 运行的 `AnsiballZ_*.py`——任务本身还没开始。2026-10-24 重跑 30-python 时遇到，随后用
+  `sudo -k` 加故意输错复现。注意 `-K` 的提示本身不校验口令，输什么都先收下
+- **处置** —— Ctrl+C 中断（任务尚未开始，中断是安全的），先 `sudo -v` 确认口令，再重跑剧本
+- **预防** —— 每次跑剧本之前，在同一个终端里先：
+
+  ```bash
+  sudo -v
+  ```
+
+  口令错了当场看得见；之后 15 分钟内本终端的 sudo 不再要口令，剧本里的提权直接通过。**副作用要知道**：这 15 分钟
+  里 `-K` 输错输对都能跑通，所以「剧本跑通了」不证明输进 `-K` 的口令是对的。没能写进剧本：卡住发生在 Ansible
+  取得 root 之前，剧本里的任何检查都还没机会运行
