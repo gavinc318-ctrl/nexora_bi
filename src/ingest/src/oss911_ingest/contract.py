@@ -36,6 +36,7 @@ REQUIRED = {
         "endpoint.path", "endpoint.host_ref", "endpoint.request_body",
         "auth.header", "auth.obtain.path", "auth.obtain.credential_ref",
         "window.max_span_hours", "window.min_span_seconds", "window.lookback_minutes", "window.source_timezone",
+        "window.schedule",                 # the DAG's schedule, taken into the DAG manifest (LD-01 2.1)
         "watermark.column", "idempotent_key", "columns",
         "enums.call_type.values",          # the batch checks compare CALLTYPE against it (cdr.py)
     ],
@@ -219,8 +220,11 @@ def validate_contract(doc: dict) -> list[str]:
             p.append(f"window.lookback_minutes must be an integer from 1 to {LOOKBACK_MAX}")
         if "restate_days" in win and not _int_in(win["restate_days"], 0):
             p.append("window.restate_days must be a non-negative integer")
-        if "schedule" in win and not (isinstance(win["schedule"], str) and win["schedule"].strip()):
-            p.append("window.schedule must be a non-empty string")
+        if "schedule" in win and not (isinstance(win["schedule"], str) and len(win["schedule"].split()) == 5):
+            # Form only: five cron fields. Whether Airflow accepts the expression is decided by Airflow itself --
+            # deployment parses the DAGs with the candidate manifest before syncing (45-contracts) -- rather than
+            # by a second cron parser here, which would be a new dependency and a second authority
+            p.append("window.schedule must be a cron expression of five fields, e.g. '*/5 * * * *'")
         if "source_timezone" in win:
             # The zone the source's naive times are in: decides what "now" is for an incremental window
             try:

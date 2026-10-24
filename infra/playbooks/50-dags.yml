@@ -1,8 +1,8 @@
 # 50-dags -- deploy the Airflow DAGs from src/dags/ into the DAG folder
 #
 # Basis: DD-84 · DD-85 · LD-01 2.5 · LD-06 2.4
-# Prerequisites: 30-python (Airflow, the pools, venv-ingest) · 45-contracts (/opt/oss911/contracts, which the
-#                ingestion DAGs are generated from)
+# Prerequisites: 30-python (Airflow, the pools, venv-ingest) · 45-contracts (the DAG manifest
+#                /opt/oss911/release/dags.json, the only thing the DAGs read -- LD-01 2.1)
 #
 # * The DAG folder holds exactly the .py files of src/dags/. A file deleted from the repository is deleted here
 #   too: unlike most leftovers (CLAUDE.md section 5, item four), a stale DAG file is not harmless -- the scheduler
@@ -107,30 +107,22 @@
       changed_when: false
       check_mode: false
 
-    # The source_ids of the released contracts, from the copy deployment made (the DAG file reads the same copy).
-    # Read with venv-ingest's Python; Ansible's own YAML parser must not read contracts (it would template them)
-    - name: Read the released source ids
-      ansible.builtin.command:
-        argv:
-          - "{{ venv_root }}/venv-ingest/bin/python"
-          - -c
-          - |
-            import os, sys, yaml
-            base = sys.argv[1]
-            for name in yaml.safe_load(open(os.path.join(base, "release.yml")))["release"]:
-                print(yaml.safe_load(open(os.path.join(base, os.path.basename(name))))["source_id"])
-          - "{{ venv_root }}/contracts"
-      register: _released
-      changed_when: false
-      check_mode: false
+    # The manifest says which DAGs must exist: one ingest_<source> per managed source, and resweep_<source> where
+    # the source has a time window. JSON, written by `oss911-ingest dag-manifest`; reading it here is safe
+    - name: Read the DAG manifest
+      ansible.builtin.slurp:
+        src: "{{ venv_root }}/release/dags.json"
+      register: _manifest
 
-    # One ingestion DAG per released contract
-    - name: Assert there is an ingestion DAG for every released contract
+    - name: Assert every DAG of the manifest is present
       ansible.builtin.assert:
         that:
-          - ('ingest_' ~ item) in (_dags.stdout_lines | last | from_json | map(attribute='dag_id') | list)
-        fail_msg: "No DAG ingest_{{ item }}. Present: {{ _dags.stdout_lines | last | from_json | map(attribute='dag_id') | join(', ') }}"
+          - item in (_dags.stdout_lines | last | from_json | map(attribute='dag_id') | list)
+        fail_msg: "No DAG {{ item }}. Present: {{ _dags.stdout_lines | last | from_json | map(attribute='dag_id') | join(', ') }}"
         success_msg: >-
-          DAG ingest_{{ item }} present, paused:
-          {{ (_dags.stdout_lines | last | from_json | selectattr('dag_id', 'equalto', 'ingest_' ~ item) | first).is_paused }}
-      loop: "{{ _released.stdout_lines }}"
+          DAG {{ item }} present, paused:
+          {{ (_dags.stdout_lines | last | from_json | selectattr('dag_id', 'equalto', item) | first).is_paused }}
+      loop: >-
+        {{ (_manifest.content | b64decode | from_json).sources | map(attribute='source_id') | map('regex_replace', '^', 'ingest_') | list
+           + (_manifest.content | b64decode | from_json).sources | selectattr('resweep') | map(attribute='source_id')
+             | map('regex_replace', '^', 'resweep_') | list }}

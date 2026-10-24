@@ -1,0 +1,12 @@
+# =====================================================================
+# 每个数据源的下载经哪个 Airflow 全局 pool（DD-85 · LD-01 2.1）
+#
+# 由 `oss911-ingest dag-manifest` 读取，写进 DAG 发布清单 /opt/oss911/release/dags.json；DAG 只读那份清单。
+# **覆盖库内全部受管的源**（meta.source_contract 里的每一行，enabled = false 的也算），不是只覆盖本次 release.yml：
+# 从 release.yml 拿掉一份契约不删库内副本，它的 DAG 也还在。库内有源而这里没有，发布失败——并发限制必须显式。
+#
+# pool 本身（名字与槽数）由 30-python 按 inventory 的 airflow_pools 建立。pool 是整个集群共用的一行，两台 ETL
+# 同一时刻在同一 pool 里最多跑「槽数」个任务。ICP 话单接口不支持并发下载（LD-01 4.2），所以 icp_cms 只有 1 槽。
+# =====================================================================
+pools:
+  icp_cdr_voice: icp_cms

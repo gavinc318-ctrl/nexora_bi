@@ -961,3 +961,41 @@ CLAUDE.md 第 5 节「完整清单在 troubleshooting.md（29 条…）」请改
 > - `dags.json` 由**库内全部受管源**生成（含 enabled=false），不是 `release.yml`；pool 映射独立为 `contracts/pools.yml`
 >   覆盖全部受管源，库内有源而映射缺失 → 发布失败。
 
+
+## 2026-10-24  开发机：第六、七轮评审已实现；三处落实方式与原文不同，请 Mac 侧确认
+
+> 对上面「Mac 侧：对 DAG 七处选择、评审两条与密钥问题的处理」及其第七轮更正的处理结果。
+
+### 一、已实现（临时库加假接口实测，真机待 Gavin 执行）
+
+| 项 | 落实 | 实测 |
+| --- | --- | --- |
+| DAG 只读发布清单 | `src/dags/oss911_ingest.py` 只读 `/opt/oss911/release/dags.json`；清单缺失即导入错误 | DagBag 解析：一源一增量 DAG，停用的源也在；有时间窗口的源另有回扫 DAG |
+| 清单的生成 | 新子命令 `oss911-ingest dag-manifest`：库内全部受管源（含 enabled = false）＋ `contracts/pools.yml`；缺 pool 或缺 schedule 即失败；临时文件加 rename，内容不变不重写（重跑 `changed=0`） | 首次写、不变、停用的源仍在、缺 pool 失败且旧文件不动 |
+| 45-contracts 顺序 | 复制候选 → 契约校验 → 候选清单＋Airflow DagBag 按文件名解析本次的 DAG 文件 → 同步 → **每次都**从库重写清单；清单写不出时剧本报「RELEASE UNFINISHED」并说明重跑即可 | — |
+| schedule 必填 | 进必填层；校验器只查「5 个字段」，语法以 Airflow 解析为准（见下第二节 1） | — |
+| SIGTERM | 转成异常：回滚进行中的批、写 run_log、退出码 1 | 三天补数在第 2 批下载中途发 SIGTERM：第 1 批已提交，第 2 批无登记，run_log `partial`、`watermark_to` 停在第 1 批终点、原因写明 |
+| 每日回扫 | `--mode resweep --days N`（1–30，默认 1）：窗口 = 源端时区今天零点往前 N 天、再往前一个回看；批次记 `backfill`（0004 的 CHECK 只有两值），不动水位。DAG `resweep_<源>` 每天 02:00 UTC，与增量同 pool | 窗口与批次、水位不动均对 |
+| 「无 -1 腿的 CALLID 数」 | 回扫结束时计算：窗口内开始的腿所属 CALLID 中，**全部腿里**都没有 -1 的个数（零点前开始的呼叫末腿可能在零点后）；打印并写进 run_log 的 message（见下第二节 2） | 2 个，与独立查询一致 |
+| 暂停状态 | 50-dags 不碰暂停；首次上线三步写进 runbook/11（`--start-at` 建水位 → 开启 → 确认首个任务） | — |
+| Airflow 密钥受管 | 30-python：env 文件已有 → 沿用；否则取 Airflow 自己写进 `airflow.cfg` 的 → 都没有才生成（fernet 用 Airflow 自带的 cryptography 生成）；写入 `airflow.env`。runbook/91 第四节写了两把各自的轮换步骤——**「删文件重跑」对它们不是轮换**（会从 airflow.cfg 把旧值纳管回来），fernet 按「新,旧 → rotate-fernet-key → 只留新」 | 三种来源优先次序按剧本原文测过 |
+| 50-dags | 按清单核对：每个 `ingest_<源>`、每个应有的 `resweep_<源>` 都在 | — |
+
+### 二、与原文不同的三处，请确认
+
+1. **cron 语法不用 croniter**。croniter 不在接入程序的依赖里，引入它要过 MANIFEST、许可与上游健康度（DD-46）；而 Airflow 自己
+   就用 croniter 解析 schedule。最权威的检查是部署时让 Airflow 解析一遍 DAG——第六轮本来就要求候选目录里做 DagBag 解析。于是
+   校验器只查形式（5 个字段），语法以 45-contracts 第 3 步的 Airflow 解析为准。规则仍只有一处权威，也不多一个依赖
+2. **「无 -1 腿的 CALLID 数」暂放 run_log.message**。没有指标表，Prometheus 也还没接入接入程序。等监控那一批再做成正式指标；
+   在此之前按 `outcome = 'success' AND message LIKE 'open calls%'` 可查
+3. **「部署锁持有到清单分发结束」改为「写清单的命令自己拿同一把锁」**。同步事务的 `pg_advisory_xact_lock` 在提交时释放，剧本是
+   独立的一条条命令，没法让一个会话跨任务持锁，生产上两台 ETL 各写各的更做不到。`dag-manifest` 在读库到 rename 之间持有同一把锁
+   （会话级 `pg_advisory_lock`，同一个键 `oss911.contract_sync`），与同步串行：任何一台节点最后写下的，都是它持锁那一刻库里的最新
+   状态，较早的部署不可能最后写入旧清单。实测：同步持锁 3 秒，`dag-manifest` 等了 2.6 秒才写。用 ingest 库用户读库（对 meta 只读），
+   ETL 节点本来就有 `ingest.env`
+
+### 三、留意
+
+- 生产上同步只该在一处执行、清单要在每台 ETL 节点上写；开发机单台，剧本现在是 `hosts: all`。inventory 分组随 LD-08 的部署清单定，
+  届时同步一步加 `run_once`、清单一步按 ETL 组执行
+- 回扫的范围（默认 1 天）与时刻（02:00 UTC）是首版值，待 ICP 问题单 Q19 / Q20 答复后定

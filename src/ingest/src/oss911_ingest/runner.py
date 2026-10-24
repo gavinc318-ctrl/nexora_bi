@@ -17,18 +17,28 @@ Modes (DD-89):
   incremental  start = watermark - lookback, end = now in the source's time zone; the watermark moves forward
                after each batch. The first run of a source has no watermark; it needs --start-at, given once
   backfill     explicit window; batches are marked backfill; the watermark is not touched
+  resweep      the daily re-sweep (LD-01 4.4): the last N whole days in the source's time zone, extended back by the
+               lookback; a backfill in every respect (batches marked backfill, watermark untouched) except that the
+               window is computed. It catches calls longer than the lookback, which incremental runs never see end.
+               After it, the number of calls in the window still without a final leg is reported -- the measure of
+               whether the re-sweep reaches far enough
+
+Termination: SIGTERM (Airflow's execution timeout, or a task stopped by hand) is turned into an exception, so the
+current batch is rolled back and the run ends like any failed run -- run_log written, exit code 1 -- instead of
+the process vanishing without a record.
 """
 
 from __future__ import annotations
 
 import json
+import signal
 import sys
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .cdr import check_cdr
+from .cdr import check_cdr, open_calls
 from .config import ConfigError, db_settings, read_env_file, require
 from .contract import effective_lookback_minutes, validate_contract, validate_overrides
 from .icp import IcpClient, IcpError
@@ -39,12 +49,23 @@ SOURCE_TIME = "%Y-%m-%d %H:%M:%S"       # how windows and watermarks are written
 # Sources this program can ingest, and the batch checks of each. A source with a contract but no entry here
 # cannot run: there is no generic "accept anything" path, because every source's checks are its own.
 CHECKS = {"icp_cdr_voice": check_cdr}
+# What a re-sweep reports afterwards, per source (LD-01 4.4)
+OBSERVE_AFTER_RESWEEP = {"icp_cdr_voice": open_calls}
 
 EXIT_OK, EXIT_FAILED = 0, 1
 
 
 class RunFailed(Exception):
     """The run cannot go on; ends with exit code 1 and a failed / partial run_log row."""
+
+
+class Terminated(BaseException):
+    """SIGTERM arrived. BaseException, like KeyboardInterrupt: no "except Exception" may swallow it."""
+
+
+def _on_sigterm(signum, frame):
+    raise Terminated("terminated by SIGTERM (Airflow execution timeout, or the task was stopped); "
+                     "the batch in progress was rolled back")
 
 
 @dataclass
@@ -80,9 +101,10 @@ def lock_key(source_id: str) -> str:
 
 class Runner:
     def __init__(self, source_id: str, mode: str, window: tuple[datetime, datetime] | None,
-                 start_at: datetime | None, out=sys.stdout):
+                 start_at: datetime | None, out=sys.stdout, resweep_days: int = 1):
         self.source_id = source_id
         self.mode = mode
+        self.resweep_days = resweep_days
         self.window = window
         self.start_at = start_at
         self.out = out
@@ -98,6 +120,7 @@ class Runner:
 
     # ------------------------------------------------------------------------------------------------------------
     def run(self) -> int:
+        signal.signal(signal.SIGTERM, _on_sigterm)
         settings = db_settings()   # configuration first: a missing file is a configuration error (2)
         import psycopg             # imported here so that usage errors are reported without the driver
 
@@ -178,6 +201,13 @@ class Runner:
                 # A watermark in the future means a wrong --start-at, a clock that moved back, or the wrong
                 # source_timezone; fetching would ask for a window that has not happened
                 raise ConfigError(f"watermark {fmt(watermark)} is later than now ({fmt(end)}, {tz.key})")
+        elif self.mode == "resweep":
+            # Whole days in the source's time zone, ending at today's midnight, extended back by the lookback so
+            # the legs around the first midnight are fetched once more as well
+            end = datetime.now(tz).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
+            start = end - timedelta(days=self.resweep_days, minutes=lookback)
+            self.window = (start, end)
+            self.wm_from = None
         else:
             start, end = self.window
             self.wm_from = None
@@ -187,23 +217,39 @@ class Runner:
                  f"{fmt(start)} / {fmt(end)}, {len(slices)} batch(es), lookback {lookback} min")
 
         client = self._icp_client(definition)
-        writer = BatchWriter(conn, self.source_id, version, self.run_id, self.mode, params, definition)
+        # ingest_batch.mode knows incremental and backfill (0004); a re-sweep is a backfill with a computed window
+        batch_mode = "incremental" if self.mode == "incremental" else "backfill"
+        writer = BatchWriter(conn, self.source_id, version, self.run_id, batch_mode, params, definition)
         try:
             for seq, (s, e) in enumerate(slices, 1):
                 self._one_batch(conn, client, writer, Batch(seq, s, e))
-        except (IcpError, RunFailed, ConfigError) as exc:
-            conn.rollback()
+        except (IcpError, RunFailed, ConfigError, Terminated) as exc:
             outcome = "partial" if self.committed else "failed"
-            self._run_log(conn, version, outcome, f"batch {self.committed + 1}: {exc}")
+            self._record_failure(conn, version, outcome, f"batch {self.committed + 1}: {exc}")
             raise RunFailed(f"{outcome} after {self.committed} batch(es): {exc}") from None
         except BaseException as exc:
-            conn.rollback()
             outcome = "partial" if self.committed else "failed"
-            self._run_log(conn, version, outcome, f"batch {self.committed + 1}: {type(exc).__name__}: {exc}")
+            self._record_failure(conn, version, outcome, f"batch {self.committed + 1}: {type(exc).__name__}: {exc}")
             raise
-        self._run_log(conn, version, "success", None)
+        message = None
+        if self.mode == "resweep" and self.source_id in OBSERVE_AFTER_RESWEEP:
+            message = OBSERVE_AFTER_RESWEEP[self.source_id](conn, definition, self.window, tz)
+            conn.commit()
+            self.say(f"  {message}")
+        self._run_log(conn, version, "success", message)
         self.say(f"run {self.run_id}: success, {self.committed} batch(es), {self.rows_received} rows received")
         return EXIT_OK
+
+    def _record_failure(self, conn, version: int, outcome: str, message: str) -> None:
+        """Roll back the batch in progress and write the run_log row. If the connection itself is broken (e.g. the
+        signal arrived inside a database call), say so on stderr; the server rolls the transaction back when the
+        connection closes, so no half batch remains either way."""
+        try:
+            conn.rollback()
+            self._run_log(conn, version, outcome, message)
+        except Exception as exc:          # noqa: BLE001 -- the original failure is what gets reported
+            print(f"could not write run_log ({type(exc).__name__}: {exc}); original failure: {message}",
+                  file=sys.stderr)
 
     def _icp_client(self, definition: dict) -> IcpClient:
         host_ref = definition["endpoint"]["host_ref"]

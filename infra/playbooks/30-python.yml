@@ -594,6 +594,63 @@
           when: _afenv.content is not defined
           no_log: true
 
+        # Airflow's two keys are shared configuration, not node state (DD-85 note · LD-08 3.3):
+        #   jwt_secret  -- the scheduler signs task tokens, the API server checks them
+        #   fernet_key  -- encrypts connection passwords and variables in the metadata database
+        # Left alone, Airflow generates both at first start into the node's own airflow.cfg: with two ETL nodes each
+        # has its own, tasks reporting to the other node are refused and passwords cannot be decrypted there --
+        # intermittently, and never on a single development machine. So they are managed like the other secrets:
+        # kept in airflow.env (0600, the same file on every node), and existing keys are adopted before anything is
+        # generated -- the env file first, then airflow.cfg (a new fernet_key would make existing ciphertext unreadable).
+        # Environment variables take precedence over airflow.cfg, so the values left there no longer matter.
+        # Rotation: runbook/91 (the fernet_key has a multi-key re-encryption procedure).
+        - name: Read back Airflow's own configuration file (for keys it generated itself)
+          ansible.builtin.slurp:
+            src: "{{ airflow_home }}/airflow.cfg"
+          register: _afcfg
+          failed_when: false
+          no_log: true
+
+        - name: Adopt the existing Airflow keys
+          ansible.builtin.set_fact:
+            _af_jwt_secret: >-
+              {{ ((_afenv.content | b64decode) | regex_search('(?m)^AIRFLOW__API_AUTH__JWT_SECRET=(.+)$', '\1') | default([''], true) | first)
+                 if _afenv.content is defined else '' }}
+            _af_fernet_key: >-
+              {{ ((_afenv.content | b64decode) | regex_search('(?m)^AIRFLOW__CORE__FERNET_KEY=(.+)$', '\1') | default([''], true) | first)
+                 if _afenv.content is defined else '' }}
+            _af_cfg_text: "{{ (_afcfg.content | b64decode) if _afcfg.content is defined else '' }}"
+          no_log: true
+
+        - name: Take the keys from airflow.cfg where the env file has none
+          ansible.builtin.set_fact:
+            _af_jwt_secret: >-
+              {{ _af_jwt_secret or (_af_cfg_text | regex_search('(?m)^jwt_secret = (\S+)\s*$', '\1') | default([''], true) | first) }}
+            _af_fernet_key: >-
+              {{ _af_fernet_key or (_af_cfg_text | regex_search('(?m)^fernet_key = (\S+)\s*$', '\1') | default([''], true) | first) }}
+          no_log: true
+
+        - name: Generate the JWT secret (only when neither file has one)
+          ansible.builtin.set_fact:
+            _af_jwt_secret: "{{ lookup('ansible.builtin.password', '/dev/null', length=64, chars=['ascii_letters', 'digits']) }}"
+          when: not _af_jwt_secret
+          no_log: true
+
+        # A Fernet key has a fixed format (url-safe base64 of 32 bytes); let the library Airflow uses make it
+        - name: Generate the Fernet key (only when neither file has one)
+          ansible.builtin.command:
+            cmd: "{{ af_venv }}/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+          register: _af_fernet_new
+          when: not _af_fernet_key
+          changed_when: false
+          no_log: true
+
+        - name: Use the generated Fernet key
+          ansible.builtin.set_fact:
+            _af_fernet_key: "{{ _af_fernet_new.stdout | trim }}"
+          when: _af_fernet_new is not skipped
+          no_log: true
+
         - name: Create the Airflow database user, or set a new password for it
           ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/role_password.yml"
           vars:

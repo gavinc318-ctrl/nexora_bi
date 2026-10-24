@@ -95,3 +95,27 @@ def check_cdr(header: list[str], rows: list[list[str]], definition: dict) -> Che
     if unknown:
         res.unknown_values["CALLTYPE"] = unknown
     return res
+
+
+def open_calls(conn, definition: dict, window, tz) -> str:
+    """After a re-sweep: how many calls with legs beginning in the window still have no CALLIDNUM = -1 leg.
+
+    The measure of whether the re-sweep reaches far enough (LD-01 4.4). The final leg is looked for among all of the
+    call's legs, not only those beginning in the window: a call starting at 23:50 may have its last leg after
+    midnight. Legs of a window cannot have been ingested before the window began, which bounds the scan to the
+    recent raw partitions.
+    """
+    start, end = window
+    table = definition["target_raw"]
+    schema, name = table.split(".")
+    from psycopg import sql   # local: this module is otherwise free of the driver (unit tests run without it)
+
+    query = sql.SQL(
+        "WITH w AS (SELECT DISTINCT callid FROM {t} WHERE waitbegin >= %s AND waitbegin < %s AND ingested_at >= %s) "
+        "SELECT count(*) FROM w WHERE NOT EXISTS "
+        "(SELECT 1 FROM {t} r WHERE r.callid = w.callid AND r.callidnum = '-1')"
+    ).format(t=sql.Identifier(schema, name))
+    n = conn.execute(query, (start.strftime(TIME_FORMAT), end.strftime(TIME_FORMAT),
+                             start.replace(tzinfo=tz))).fetchone()[0]
+    return (f"open calls after re-sweep: {n} CALLID(s) with legs beginning in "
+            f"{start:%Y-%m-%d %H:%M:%S} / {end:%Y-%m-%d %H:%M:%S} have no CALLIDNUM = -1 leg yet (LD-01 4.4)")

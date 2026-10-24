@@ -2,6 +2,8 @@
 
     oss911-ingest run --source <contract id> [--start-at <time>]                     incremental (DAG)
     oss911-ingest run --source <contract id> --mode backfill --window <start>/<end>  manual backfill
+    oss911-ingest run --source <contract id> --mode resweep [--days N]               daily re-sweep (DAG)
+    oss911-ingest dag-manifest --pools <pools.yml> --out <dags.json> [--candidate <contracts dir>]
     oss911-ingest validate-contract <contract.yaml> [--overrides <json> | --with-overrides [--source <id>]]
 
 Exit codes (LD-01 2.5 · DD-84). The DAGs depend on this convention; change both together:
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 
@@ -70,7 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
                     "backfill: an explicit window, the watermark untouched (DD-89). Times are in the source's own "
                     "time zone (contract window.source_timezone).")
     run.add_argument("--source", required=True, help="source_id from the contract, e.g. icp_cdr_voice")
-    run.add_argument("--mode", choices=["incremental", "backfill"], default="incremental")
+    run.add_argument("--mode", choices=["incremental", "backfill", "resweep"], default="incremental")
+    run.add_argument("--days", type=int, default=1,
+                     help="resweep only: how many whole days back from today's midnight (source time zone); default 1")
     run.add_argument("--window", help="backfill only: <start>/<end>, e.g. 2026-10-14T00:00:00/2026-10-15T00:00:00")
     run.add_argument("--start-at", metavar="TIME",
                      help="incremental, first run of a source only (no watermark yet): where the watermark starts, "
@@ -90,7 +95,77 @@ def build_parser() -> argparse.ArgumentParser:
                        help="check the values currently in meta.source_runtime_param for this source (deployment)")
     val.add_argument("--source", help="with --with-overrides: must equal the contract's source_id (a guard against "
                                       "checking one source's file with another source's values); defaults to it")
+    man = sub.add_parser(
+        "dag-manifest", help="write the DAG manifest from the contracts in the database (LD-01 2.1)",
+        description="Lists every source managed in meta.source_contract (disabled ones included) with its schedule, "
+                    "pool and contract version. Written atomically and only when changed, under the contract-sync "
+                    "advisory lock. With --candidate, the released contracts in that directory are laid over the "
+                    "database first -- the state after the coming sync -- for parsing the DAGs before syncing.")
+    man.add_argument("--pools", required=True, help="contracts/pools.yml: source_id -> Airflow pool")
+    man.add_argument("--out", required=True, help="the manifest to write, e.g. /opt/oss911/release/dags.json")
+    man.add_argument("--candidate", metavar="DIR", help="a contracts directory (release.yml and the released files)")
     return parser
+
+
+def _load_mapping(path: str, what: str) -> dict:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return load_contract(fh.read())        # the strict loader: duplicate keys are refused here as well
+    except OSError as exc:
+        raise UsageError(f"cannot read {what} {path}: {exc.strerror}") from None
+
+
+def cmd_dag_manifest(args: argparse.Namespace) -> int:
+    from . import manifest
+
+    try:
+        pools_doc = _load_mapping(args.pools, "pool mapping")
+        pools = pools_doc.get("pools")
+        if not (isinstance(pools, dict) and all(isinstance(k, str) and isinstance(v, str) and v for k, v in pools.items())):
+            print(f"{args.pools}: 'pools' must map source_id to a pool name", file=sys.stderr)
+            return EXIT_FAILED
+        candidates = {}
+        if args.candidate:
+            release = _load_mapping(os.path.join(args.candidate, "release.yml"), "release list").get("release") or []
+            for name in release:
+                doc = _load_mapping(os.path.join(args.candidate, os.path.basename(name)), "contract")
+                candidates[doc["source_id"]] = doc
+    except ContractError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return EXIT_FAILED
+
+    settings = db_settings()
+    import psycopg
+
+    with psycopg.connect(**settings.connect_kwargs()) as conn:
+        if not args.candidate:
+            # Same lock as the contract sync, held from reading the database to the rename (module docstring)
+            conn.execute("SET lock_timeout = '120s'")
+            conn.execute("SELECT pg_advisory_lock(hashtext(%s))", (manifest.LOCK_KEY,))
+        try:
+            managed = {sid: {"contract_version": ver, "enabled": enabled, "definition": definition}
+                       for sid, ver, enabled, definition in conn.execute(
+                           "SELECT source_id, contract_version, enabled, definition FROM meta.source_contract")}
+            for sid, doc in candidates.items():
+                managed[sid] = {"contract_version": doc["contract_version"],
+                                "enabled": managed.get(sid, {}).get("enabled", doc.get("enabled")),
+                                "definition": {k: v for k, v in doc.items() if k != "enabled"}}
+            try:
+                data = manifest.serialize(manifest.build(managed, pools))
+            except manifest.ManifestError as exc:
+                for line in exc.problems:
+                    print(f"manifest: {line}", file=sys.stderr)
+                return EXIT_FAILED
+            try:
+                changed = manifest.write_atomic(args.out, data)
+            except OSError as exc:
+                raise UsageError(f"cannot write {args.out}: {exc.strerror}") from None
+        finally:
+            if not args.candidate and not conn.closed:
+                conn.execute("SELECT pg_advisory_unlock(hashtext(%s))", (manifest.LOCK_KEY,))
+    print(json.dumps({"out": args.out, "changed": changed, "sources": sorted(managed),
+                      "candidate": bool(args.candidate)}, sort_keys=True))
+    return EXIT_OK
 
 
 def read_overrides_from_db(source_id: str) -> dict[str, str]:
@@ -148,7 +223,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     from .runner import RunFailed, Runner
 
     window = start_at = None
-    if args.mode == "backfill":
+    if args.mode != "resweep" and args.days != 1:
+        raise UsageError("--days is for --mode resweep")
+    if args.mode == "resweep":
+        if args.window is not None or args.start_at is not None:
+            raise UsageError("--mode resweep computes its own window; it takes no --window or --start-at")
+        if not 1 <= args.days <= 30:
+            raise UsageError("--days must be from 1 to 30")
+    elif args.mode == "backfill":
         if args.window is None or args.start_at is not None:
             raise UsageError("--mode backfill needs --window and takes no --start-at")
         window = parse_window(args.window)
@@ -161,7 +243,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             except ValueError as exc:
                 raise UsageError(f"--start-at must have the format {WINDOW_FORMAT}: {exc}") from None
     try:
-        return Runner(args.source, args.mode, window, start_at).run()
+        return Runner(args.source, args.mode, window, start_at, resweep_days=args.days).run()
     except RunFailed as exc:
         print(f"run failed: {exc}", file=sys.stderr)
         return EXIT_FAILED
@@ -175,6 +257,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_run(args)
         if args.command == "validate-contract":
             return cmd_validate_contract(args)
+        if args.command == "dag-manifest":
+            return cmd_dag_manifest(args)
         raise UsageError(f"unknown command: {args.command}")
     except (UsageError, ConfigError) as exc:
         print(f"usage error: {exc}", file=sys.stderr)

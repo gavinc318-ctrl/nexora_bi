@@ -14,6 +14,9 @@
 | Keycloak 引导管理员 | `/etc/oss911/keycloak.env` 的 `KC_BOOTSTRAP_ADMIN_*` | 仅首次启动 | 22-containers（只在首次安装时生成） |
 | Keycloak 正式管理员 | **不在本机任何文件里**，由管理员本人保管 | — | 手工（本文第三节） |
 | `pgb_probe` | 不存放：21 每次运行临时生成，验完即删 | — | 21-connection |
+| Airflow `jwt_secret`（任务令牌的签名密钥） | `/etc/oss911/airflow.env` 的 `AIRFLOW__API_AUTH__JWT_SECRET` | scheduler 签、API server 验 | 30-python（**轮换不按「删文件」，见第四节**） |
+| Airflow `fernet_key`（元数据库里连接口令的加密密钥） | `/etc/oss911/airflow.env` 的 `AIRFLOW__CORE__FERNET_KEY` | Airflow 全部组件 | 30-python（**轮换不按「删文件」，见第四节**） |
+| ICP 服务工号 | `/etc/oss911/icp.env` | 接入程序、假接口启动脚本 | 开发机 30-python 生成；生产由运维手写，剧本只检查 |
 
 **「唯一存放处」是轮换机制的基础**：剧本每次运行都先读这个文件——读得到就沿用，
 读不到就生成新口令并 `ALTER ROLE`。所以：
@@ -191,3 +194,47 @@ ssh -L 8080:127.0.0.1:8080 nexora-bi
 重来即可。万一两个管理员都进不去，Keycloak 26 可以在容器里重新建一个临时管理员：
 `sudo podman exec -it keycloak /opt/keycloak/bin/kc.sh bootstrap-admin user`。
 这条命令要在 Keycloak 停止服务的状态下执行，做之前先把情况贴回来。
+
+## 第四节  Airflow 的两把密钥
+
+两把密钥是**各节点共享的配置**，不是节点自己的状态（DD-85 注 · LD-08 3.3）：生产上 ETL-1、ETL-2 与 API server
+必须用同一把，否则任务在另一台机器上汇报会被拒、连接口令在另一台上解不开，而且时好时坏。30-python 把它们存在
+`/etc/oss911/airflow.env`，各节点同一份。来源的优先次序：env 文件里已有的 → Airflow 首次启动时自己写进
+`airflow.cfg` 的 → 都没有才生成。
+
+**所以「删掉文件重跑」对这两把不是轮换**：删了 `airflow.env`，剧本会从 `airflow.cfg` 把旧密钥又纳管回来。
+轮换要按下面的步骤显式地换。
+
+### jwt_secret
+
+它只用于签发与校验任务运行期间的短期令牌，库里没有用它加密的数据，换掉无需迁移。
+
+1. 选一个没有任务在跑的时刻（`af dags list-runs <dag> --state running` 为空），或接受正在跑的任务失败一次、按重试再跑
+2. 生成新值，替换 `airflow.env` 里 `AIRFLOW__API_AUTH__JWT_SECRET=` 那一行（**各节点同时换成同一个值**）：
+
+   ```bash
+   NEW=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
+   sudo sed -i "s|^AIRFLOW__API_AUTH__JWT_SECRET=.*|AIRFLOW__API_AUTH__JWT_SECRET=$NEW|" /etc/oss911/airflow.env; unset NEW
+   ```
+
+3. 同时重启四个组件：`sudo systemctl restart airflow-scheduler airflow-api-server airflow-dag-processor airflow-triggerer`
+4. 重跑 30-python：应为 `changed=0`（它读到 env 里的新值并沿用）
+
+### fernet_key
+
+它加密了元数据库里的连接口令与变量，**直接换掉，旧密文就再也解不开**。Airflow 支持多把并存（逗号分隔，第一把用于加密，
+其余只用于解密），按三步换：
+
+1. 生成新密钥，把这一行改成「新,旧」，各节点同一份，重启四个组件：
+
+   ```bash
+   NEW=$(sudo -u airflow /opt/oss911/venv-airflow/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')
+   OLD=$(sudo sed -n 's/^AIRFLOW__CORE__FERNET_KEY=//p' /etc/oss911/airflow.env)
+   sudo sed -i "s|^AIRFLOW__CORE__FERNET_KEY=.*|AIRFLOW__CORE__FERNET_KEY=$NEW,$OLD|" /etc/oss911/airflow.env; unset NEW OLD
+   sudo systemctl restart airflow-scheduler airflow-api-server airflow-dag-processor airflow-triggerer
+   ```
+
+2. 用新密钥重新加密库里的全部密文：`af rotate-fernet-key`（`af` 函数见 runbook/11）
+3. 把这一行改成只剩新密钥（删掉「,旧」），再重启四个组件；重跑 30-python 应为 `changed=0`
+
+开发机上目前元数据库里没有任何加密的连接或变量，但步骤照做，生产上不会是这样。

@@ -1,10 +1,18 @@
-# 第 11 步 —— Airflow DAG：每 5 分钟一次增量
+# 第 11 步 —— Airflow DAG：每 5 分钟一次增量，每天一次回扫
 
 ## 这一步在做什么
 
-把 `src/dags/` 部署进 Airflow 的 DAG 目录（`/var/lib/airflow/dags`）。`oss911_ingest.py` 按发布清单（45-contracts
-复制到 `/opt/oss911/contracts` 的那份）每个源生成一个 DAG，现在只有 `ingest_icp_cdr_voice`：每 5 分钟（契约
-`window.schedule`）调一次 `oss911-ingest run --source icp_cdr_voice`，也就是第 10 步手工跑的那条命令。
+把 `src/dags/` 部署进 Airflow 的 DAG 目录（`/var/lib/airflow/dags`）。`oss911_ingest.py` **只读 DAG 发布清单**
+`/opt/oss911/release/dags.json`，不读契约 YAML（LD-01 2.1）。清单由 45-contracts 在契约同步进库之后、作为最后一步
+从数据库生成（`oss911-ingest dag-manifest`）：列出库内全部受管的源（停用的也在），各自的 schedule、pool（来自
+`contracts/pools.yml`）与契约版本。每个源生成：
+
+| DAG | 何时 | 做什么 |
+| --- | --- | --- |
+| `ingest_icp_cdr_voice` | 每 5 分钟（契约 `window.schedule`） | `oss911-ingest run --source icp_cdr_voice`——第 10 步手工跑的那条 |
+| `resweep_icp_cdr_voice` | 每天 02:00 UTC | `… --mode resweep --days 1`：前一天整天再往前多一个回看长度，补长于回看的通话（LD-01 4.4）；不动水位；跑完报告「至今没有 -1 腿的 CALLID 数」，记在 run_log 的 message 里 |
+
+两个 DAG 走同一个 pool，不会同时下载。**顺序上 45-contracts 在前、50-dags 在后**：没有清单，DAG 文件报导入错误。
 
 ## 先懂四件事
 
@@ -21,15 +29,21 @@
 
 ### 三、任务的几个固定设置
 
-`skip_on_exit_code=None`（否则退出码 99 会被当成「跳过」）；重试 2 次、间隔 2 分钟，不分退出码；30 分钟超时；
+`skip_on_exit_code=None`（否则退出码 99 会被当成「跳过」）；重试 2 次、间隔 2 分钟，不分退出码；30 分钟超时——
+超时时 Airflow 发 SIGTERM，接入程序回滚正在下载的那一批、写 run_log、以 1 退出，已提交的批不受影响；
 同一源同一时刻只跑一个；**不补跑**（catchup=False）——停了一天再开，下一次运行自己从水位追到现在（第 10 步
 见过：三天的缺口切成 4 批）。任务的环境变量只给 `PATH` 与 `LANG`：Airflow 进程的环境里有元数据库的连接串，
 不该传给接入程序；接入程序自己读 `/etc/oss911`（LD-01 2.5）。
 
-### 四、新 DAG 是暂停的
+### 四、新 DAG 是暂停的，开启是首次上线的验收步骤
 
-Airflow 新建的 DAG 默认暂停。开发机上假接口不总开着，暂停着正好；要跑时手工开，测完再停。
-**源的启停**是 `meta.source_contract.enabled`（M-01），DAG 的暂停是运维用的。
+Airflow 新建的 DAG 默认暂停，50-dags **重复部署不改变暂停状态**。一个源第一次上线按这个顺序，缺一步都不算上线：
+
+1. 人工执行一次增量，带 `--start-at` 建立水位（runbook/10 第二步）。没有水位时增量以退出码 2 结束，不会自己起算
+2. 开启 `ingest_<源>` 与 `resweep_<源>`
+3. 确认第一个自动任务 `success`，run_log 里它的 `watermark_from` 接着第 1 步的 `watermark_to`
+
+**源的启停**是 `meta.source_contract.enabled`（M-01），DAG 的暂停是运维用的，不是第二个开关。
 
 ## 执行
 
@@ -39,8 +53,10 @@ cd ~/src/nexora_bi && git pull --rebase
 cd infra && ansible-playbook playbooks/50-dags.yml -e ansible_connection=local -K
 ```
 
-第一遍：「Copy the DAG files」changed；最后一步显示 `DAG ingest_icp_cdr_voice present, paused: True`。
-第二遍 `changed=0`。
+前提：本轮的 45-contracts 已跑过（`/opt/oss911/release/dags.json` 已写出）。
+
+第一遍：「Copy the DAG files」changed；最后一步显示 `DAG ingest_icp_cdr_voice present`。`resweep_icp_cdr_voice`
+是新 DAG，处于暂停；`ingest_icp_cdr_voice` 保持你上次留下的状态。第二遍 `changed=0`。
 
 以下 Airflow 命令都以 airflow 账号、带它的环境文件执行，先定义一个便于粘贴的函数：
 

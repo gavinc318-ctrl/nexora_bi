@@ -1,4 +1,4 @@
-# 45-contracts -- sync the released source contracts into meta.source_contract
+# 45-contracts -- sync the released source contracts into meta.source_contract, then write the DAG manifest
 #
 # Basis: DD-88 (contract sync is a deployment step, forward only; one set of contract rules; serialized) ·
 #        LD-01 2.1 / 2.5
@@ -8,13 +8,21 @@
 # * contracts/ in the repository is the authority; meta.source_contract is a read-only copy (LD-01 2.1).
 #   Only the files listed in contracts/release.yml are synced, and every one of them must have its raw table.
 # * Order, all on the target, over one copy of the files:
-#     1. copy the released contracts to contracts_dir
+#     1. copy the released contracts and contracts/pools.yml to contracts_dir
 #     2. check each with `oss911-ingest validate-contract --with-overrides` -- the single set of contract rules,
 #        run as the airflow account with the ingest database user, the identity the ingestion program really has.
 #        It also checks the hot-tuned values now in the database against the new contract
-#     3. convert to JSON (infra/files/contracts_to_json.py, venv-ingest's Python)
-#     4. sync in one transaction as the owner role, under an advisory lock (infra/files/contract_sync.sql). It
+#     3. rehearse the scheduling: a candidate DAG manifest (the database with the released contracts laid over it,
+#        i.e. the state after the sync) and Airflow's own parser over src/dags with it. Whether Airflow accepts a
+#        schedule is decided here, by Airflow (LD-01 2.1)
+#     4. convert to JSON (infra/files/contracts_to_json.py, venv-ingest's Python)
+#     5. sync in one transaction as the owner role, under an advisory lock (infra/files/contract_sync.sql). It
 #        fails if the hot-tuned values differ from what step 2 saw -- someone changed one in M-01 in between
+#     6. write the DAG manifest /opt/oss911/release/dags.json from the database (`oss911-ingest dag-manifest`),
+#        under the same lock, atomically, only if changed. ALWAYS, even when every contract is unchanged: the sync
+#        commit and the manifest are two operations, and a failure between them leaves the release unfinished --
+#        the rerun must regenerate the manifest. In production this step runs on every ETL node, and the release is
+#        finished only when every node's manifest is written and verified (LD-01 2.1 · LD-08 7.2)
 # * Never touched here: meta.source_contract.enabled after the first insert, and meta.source_runtime_param.
 #   Deployment must not quietly change the runtime configuration (DD-88).
 
@@ -27,6 +35,10 @@
     repo_contracts: "{{ playbook_dir }}/../../contracts"
     contracts_dir: "{{ venv_root }}/contracts"
     ingest_venv: "{{ venv_root }}/venv-ingest"
+    af_venv: "{{ venv_root }}/venv-airflow"
+    oss911_etc: /etc/oss911
+    release_dir: "{{ venv_root }}/release"             # the DAG manifest; read by the DAGs (src/dags)
+    candidate_dir: "{{ venv_root }}/release/candidate"  # step 3's rehearsal: candidate manifest and DAG files
     # release.yml holds file names only, so reading it on the control node is safe; the contracts themselves are
     # never read by Ansible's YAML parser (it would template their literal "{{ window_from }}" placeholders)
     contracts_release: "{{ (lookup('ansible.builtin.file', repo_contracts ~ '/release.yml') | from_yaml).release }}"
@@ -43,14 +55,26 @@
         group: root
         mode: "0755"
 
-    - name: Copy the release list and the released contracts
+    - name: Copy the release list, the pool mapping and the released contracts
       ansible.builtin.copy:
         src: "{{ repo_contracts }}/{{ item }}"
         dest: "{{ contracts_dir }}/{{ item }}"
         owner: root
         group: root
         mode: "0644"
-      loop: "{{ ['release.yml'] + contracts_release }}"
+      loop: "{{ ['release.yml', 'pools.yml'] + contracts_release }}"
+
+    - name: Create the release and rehearsal directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: airflow
+        group: airflow
+        mode: "0755"
+      loop:
+        - "{{ release_dir }}"
+        - "{{ candidate_dir }}"
+        - "{{ candidate_dir }}/dags"
 
     - name: Validate the contracts and the hot-tuned values in the database
       ansible.builtin.command:
@@ -79,6 +103,82 @@
       loop_control:
         label: "{{ item.item }}"
 
+    # ---------- 3. Rehearse the scheduling before anything is synced ----------
+    - name: Write the candidate DAG manifest (database + released contracts, i.e. after the sync)
+      ansible.builtin.command:
+        argv:
+          - "{{ ingest_venv }}/bin/oss911-ingest"
+          - dag-manifest
+          - --candidate
+          - "{{ contracts_dir }}"
+          - --pools
+          - "{{ contracts_dir }}/pools.yml"
+          - --out
+          - "{{ candidate_dir }}/dags.json"
+      become_user: airflow
+      register: _cand
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Assert the candidate manifest could be built
+      ansible.builtin.assert:
+        that:
+          - _cand.rc == 0
+        fail_msg: |-
+          The DAG manifest cannot be built for this release (exit code {{ _cand.rc }}); nothing has been synced:
+          {{ _cand.stderr }}
+        success_msg: "Candidate manifest: {{ (_cand.stdout_lines | last | from_json).sources | join(', ') }}"
+
+    - name: Copy the DAG files of this release for the rehearsal
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ candidate_dir }}/dags/"
+        owner: airflow
+        group: airflow
+        mode: "0640"
+      with_fileglob: "{{ playbook_dir }}/../../src/dags/*.py"
+
+    # Airflow's own parser decides whether the DAGs (and their schedules) are acceptable. Only the parse: the
+    # rehearsal folder is not the scheduler's, nothing is written to the metadata database. Each file of this release
+    # is parsed by name, so a file left in the rehearsal folder by an earlier release cannot sway the verdict
+    - name: Parse the DAGs with the candidate manifest
+      ansible.builtin.shell:
+        cmd: |
+          set -a; . {{ oss911_etc }}/airflow.env; set +a
+          OSS911_DAG_MANIFEST={{ candidate_dir }}/dags.json {{ af_venv }}/bin/python -c '
+          import json, sys
+          from airflow.dag_processing.dagbag import DagBag
+          errors, dags = {}, []
+          for path in sys.argv[1:]:
+              bag = DagBag(dag_folder=path)
+              errors.update({k: v.strip().splitlines()[-1] for k, v in bag.import_errors.items()})
+              dags += bag.dag_ids
+          print(json.dumps({"errors": errors, "dags": sorted(dags)}))
+          ' {% for f in query('ansible.builtin.fileglob', playbook_dir ~ '/../../src/dags/*.py') %}{{ candidate_dir }}/dags/{{ f | basename }} {% endfor %}
+      args:
+        executable: /bin/bash
+      become_user: airflow
+      register: _rehearse
+      changed_when: false
+      check_mode: false
+
+    - name: Assert the DAGs parse and every source has its DAG
+      ansible.builtin.assert:
+        that:
+          - _rehearse_result.errors | length == 0
+          - (_cand.stdout_lines | last | from_json).sources
+            | map('regex_replace', '^', 'ingest_') | difference(_rehearse_result.dags) | length == 0
+        fail_msg: |-
+          The DAGs do not parse with this release's manifest; nothing has been synced.
+          {{ _rehearse_result }}
+        success_msg: "DAGs parse with the candidate manifest: {{ _rehearse_result.dags | join(', ') }}"
+      vars:
+        _rehearse_result: >-
+          {{ (_rehearse.stdout_lines | last | default('{"errors": {"parser": "printed nothing (rc ' ~ _rehearse.rc ~ ')"}, "dags": []}'))
+             | from_json }}
+
+    # ---------- 4-5. Convert and sync ----------
     - name: Convert the released contracts to JSON
       ansible.builtin.command:
         argv:
@@ -119,6 +219,34 @@
       ansible.builtin.debug:
         msg: "{{ _sync.stdout_lines }}"
       when: _sync is not skipped
+
+    # ---------- 6. The DAG manifest, from the database, every time ----------
+    - name: Write the DAG manifest from the database
+      ansible.builtin.command:
+        argv:
+          - "{{ ingest_venv }}/bin/oss911-ingest"
+          - dag-manifest
+          - --pools
+          - "{{ contracts_dir }}/pools.yml"
+          - --out
+          - "{{ release_dir }}/dags.json"
+      become_user: airflow
+      register: _manifest
+      changed_when: _manifest.rc == 0 and (_manifest.stdout_lines | last | from_json).changed
+      failed_when: false
+
+    - name: Assert the DAG manifest was written (otherwise the release is unfinished)
+      ansible.builtin.assert:
+        that:
+          - _manifest.rc == 0
+        fail_msg: |-
+          RELEASE UNFINISHED: the contracts are synced, but the DAG manifest could not be written (exit code {{ _manifest.rc }}):
+          {{ _manifest.stderr }}
+          The scheduler still follows the previous manifest. Fix the cause and run this playbook again: the sync
+          will report "unchanged" and the manifest will be regenerated (LD-01 2.1).
+        success_msg: >-
+          DAG manifest {{ release_dir }}/dags.json {{ 'written' if (_manifest.stdout_lines | last | from_json).changed else 'unchanged' }}:
+          {{ (_manifest.stdout_lines | last | from_json).sources | join(', ') }}
 
     - name: Warn about contracts in the database that this release does not list
       ansible.builtin.debug:
