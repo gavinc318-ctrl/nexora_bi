@@ -1017,3 +1017,13 @@ graphviz 警告的屏蔽对 Airflow 服务生效、在命令行却不生效：�
 - 坐标暂定 WGS84 经纬度（AS-35）；`hwhrbh` 废弃；CLOSE=100、CANCEL=110；案由两视图以表同步。
 - 中间库规范（IR-51）答复未到，CAD 接入仍不开工。
 
+## 2026-10-25  Mac 侧：中间库 DDL 改由本方生成（DD-90 条件一更正）
+
+- Gavin 告知：上一代 SQL Server 中间库的 DDL 是当时的 BI 方建的，DS 只写入。现在也一样：**我们建，DS 核对会签**。
+- 结构表里的类型是上一代中间库的 SQL Server 类型，不是 CAD 原库的；按规范 3.2 映射，**宁宽勿严**（text / timestamp / numeric / bigint），
+  写入不得因类型失败，收紧在 staging。开发机那十条差异里 NUL、空串、尾随空格几条对 DS 的搬运程序仍然有效。
+- 74 张表可能是上一代 BI 挑的子集 → 向 DS 要 CAD 原库 `information_schema.columns` 完整目录（规范 v0.5 第 3.6 节）。
+- 主键结构表未标，必须 DS 答（IR-51 第 2 项）。
+- 拟：Mac 侧写 `tools/cad_mirror_ddl.py`（不交付）从结构表生成 74 张建表 SQL，输出交开发机审类型映射后按结构变更流程放进
+  `ddl/cad_mirror/`；主键以 `-- PK: TBD` 占位，DS 答复前不执行。待 Gavin 定。
+
