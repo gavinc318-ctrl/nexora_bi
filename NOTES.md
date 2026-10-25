@@ -999,3 +999,7 @@ CLAUDE.md 第 5 节「完整清单在 troubleshooting.md（29 条…）」请改
 - 生产上同步只该在一处执行、清单要在每台 ETL 节点上写；开发机单台，剧本现在是 `hosts: all`。inventory 分组随 LD-08 的部署清单定，
   届时同步一步加 `run_once`、清单一步按 ETL 组执行
 - 回扫的范围（默认 1 天）与时刻（02:00 UTC）是首版值，待 ICP 问题单 Q19 / Q20 答复后定
+
+## 2026-10-25  开发机：troubleshooting 第 32 条（env 文件同时被 systemd 与 shell 读，含空格的值须加引号）；请 Mac 侧把 CLAUDE.md 的 31 条改为 32
+
+graphviz 警告的屏蔽对 Airflow 服务生效、在命令行却不生效：值里有空格未加引号，shell 读 `airflow.env` 时把它截断。已加引号并以两种读法验证。

@@ -605,3 +605,18 @@ dbt/dbt_core_experimental_parser-2.0.5.tar.gz
 - **预防** —— 30-python 启动 Airflow 后断言该地址回的是执行 API 的 `{"status":"healthy"}`，不只是「有东西应答」——
   Keycloak 也会应答。**改一个端口时，要把所有指向它的地方一起找出来**：这是 CLAUDE.md 第 5 节第四类错误（换了做法，
   旧做法的依赖不会自己消失）
+
+### 现象：`airflow.env` 里加的设置对 Airflow 服务生效，在命令行（`af …`、剧本里的 `set -a; . airflow.env`）却不生效
+
+- **原因** —— 同一个 env 文件有**两种读者**：systemd 的 `EnvironmentFile` 把等号后整行当值；shell 的 `. 文件` 按 shell
+  语法解析，**值里的空格会把它截断**。2026-10-24 加的 `PYTHONWARNINGS=ignore:Could not import graphviz:UserWarning`
+  对服务有效，在 shell 里却只赋了 `ignore:Could`，再把 `not` 当命令执行（`not: command not found`，被 `2>/dev/null`
+  吞掉），graphviz 警告照打。当时只用「直接设环境变量」验证过过滤条件，没有经过「`. 文件`」这一步——又一次验证路径与
+  真实使用路径不同（CLAUDE.md 第 5 节第二条）
+- **处置** —— 值加双引号：`PYTHONWARNINGS="ignore:Could not import graphviz:UserWarning"`。systemd 与 shell 都会去掉引号
+- **预防** —— 凡是被 systemd 与 shell 两边读的 env 文件，**含空格的值一律加双引号**；验证时两种读法各试一次：
+
+  ```bash
+  bash -c 'set -a; . /etc/oss911/airflow.env; set +a; printenv PYTHONWARNINGS'
+  sudo systemctl show airflow-scheduler -p Environment | tr ' ' '\n' | grep -c PYTHONWARNINGS   # 只数，不打印口令
+  ```
