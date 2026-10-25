@@ -142,7 +142,7 @@ python3 tools/check_no_cjk.py        # 退出码非零即有违规
 
 ## 5  已经付过学费的坑（**读这一节，能省掉几天**）
 
-完整清单在 `infra/runbook/troubleshooting.md`（31 条，每条含现象/原因/处置/预防）。
+完整清单在 `infra/runbook/troubleshooting.md`（32 条，每条含现象/原因/处置/预防）。
 这里只列反复出现的四类**思维错误**：
 
 ### 一、开发环境验不到的东西，不会自己冒出来

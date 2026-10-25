@@ -1003,3 +1003,17 @@ CLAUDE.md 第 5 节「完整清单在 troubleshooting.md（29 条…）」请改
 ## 2026-10-25  开发机：troubleshooting 第 32 条（env 文件同时被 systemd 与 shell 读，含空格的值须加引号）；请 Mac 侧把 CLAUDE.md 的 31 条改为 32
 
 graphviz 警告的屏蔽对 Airflow 服务生效、在命令行却不生效：值里有空格未加引号，shell 读 `airflow.env` 时把它截断。已加引号并以两种读法验证。
+
+> **Mac 侧确认（2026-10-25）**：三处落实方式**均同意**（croniter 不引入、open calls 暂放 message、dag-manifest 自持锁——后者比原文正确）。
+> 两条待办：回扫批次记 `backfill` 是 0004 CHECK 两值的权宜，下一个结构变更加 `resweep`；「无 -1 腿的 CALLID 数」在监控那批转正式指标。
+> CLAUDE.md 已改 32 条。
+
+## 2026-10-25  Mac 侧：DS 第二轮答复要点（影响后续 CAD 模型，现在不动代码）
+
+- **`sjc` 不可依赖**（DS 原话）：中间库触发器时间戳是唯一路径，回扫必需。
+- 单据链：`t_jzsjd → t_cjd（每次派遣）→ t_unitddzld（每 unit）→ t_fkd`，一对多。派警事实粒度据此定。
+- `t_dm_czlx` 是 `t_sjczjl`（时间线）的 OperateType；`t_unitczjl` 只记 unit 状态变更。此前理解有误。
+- 工号是否与华为同套：DS 不保证 → IR-53 发 MOI 二选一（行政保证同号 / 本方维护对照表）。
+- 坐标暂定 WGS84 经纬度（AS-35）；`hwhrbh` 废弃；CLOSE=100、CANCEL=110；案由两视图以表同步。
+- 中间库规范（IR-51）答复未到，CAD 接入仍不开工。
+
