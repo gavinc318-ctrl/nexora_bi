@@ -1,0 +1,175 @@
+# Included by 40-schema.yml (database oss911) and 41-cad-mirror.yml (database cad_mirror): one executor for
+# every database that has structural changes, so the rules are written once (DD-73 · LD-08 7.5).
+#
+# Parameters:
+#   dc_repo_dir       repository directory holding the manifest and the files (copied to dc_target_dir)
+#   dc_changes        the parsed manifest (list of {id, run_as, summary, files})
+#   dc_manifest_name  how to call the manifest in messages, e.g. ddl/changes.yml
+#   dc_target_dir     where postgres reads the files from (it cannot read the repository under /home)
+#   dc_database       the database the changes are executed in
+#   dc_registry       the registry table, e.g. meta.ddl_change
+#   dc_owner_role     the role run_as=owner switches to
+#   dc_mutable        optional, default false: executed files may still be rewritten (development phase); a changed
+#                     checksum then asks for a rebuild instead of a new change. dc_rebuild_var names the switch
+# The manifest's own rules (id sequence, which ids may run as superuser) differ per database and are asserted by
+# the including playbook before it includes this file.
+
+# ================= 2. Load the DDL files =================
+# Copied from the repository to dc_target_dir, where postgres reads them.
+# Files deleted from the repository do not disappear from here (incremental directories accumulate history,
+# CLAUDE.md section 5, item four). That is harmless here: the executor only runs files listed in the manifest,
+# and by rule the files of executed changes are never deleted or modified. But do not infer from it that
+# "whatever is in dc_target_dir is in use".
+
+- name: Create the DDL directory
+  ansible.builtin.file:
+    path: "{{ dc_target_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Copy the DDL files
+  ansible.builtin.copy:
+    src: "{{ dc_repo_dir }}/"
+    dest: "{{ dc_target_dir }}/"
+    owner: root
+    group: root
+    mode: "0644"
+    directory_mode: "0755"
+
+# ================= 3. Structural changes =================
+
+# The checksum follows the definition in the header of changes.yml: SHA-256 of the files' bytes concatenated
+# in the order of "files". It is computed on the target, over the copy that will be executed, not in the repository.
+- name: Compute the file checksum of every change
+  ansible.builtin.shell:
+    cmd: cat {{ item.files | join(' ') }} | sha256sum | cut -d' ' -f1
+    chdir: "{{ dc_target_dir }}"
+  loop: "{{ dc_changes }}"
+  loop_control:
+    label: "{{ item.id }}"
+  register: _sha
+  changed_when: false
+  check_mode: false
+
+# No registry table = empty database, nothing executed yet
+- name: Query the changes registered in the database
+  ansible.builtin.command:
+    cmd: >-
+      psql -X -tA -d {{ dc_database }} -c
+      "SELECT change_id || ' ' || content_sha256 FROM {{ dc_registry }} ORDER BY change_id"
+  become_user: postgres
+  register: _applied_q
+  changed_when: false
+  failed_when:
+    - _applied_q.rc != 0
+    - "'relation \"' ~ dc_registry ~ '\" does not exist' not in _applied_q.stderr"
+  check_mode: false
+
+- name: Prepare the data for comparison
+  ansible.builtin.set_fact:
+    _repo_sha: "{{ dict(_sha.results | map(attribute='item.id') | zip(_sha.results | map(attribute='stdout'))) }}"
+    _applied: "{{ dict(_applied_q.stdout_lines | map('split', ' ')) if _applied_q.rc == 0 else {} }}"
+
+- name: Assert every executed change is still in the manifest
+  ansible.builtin.assert:
+    that:
+      - _applied.keys() | difference(_repo_sha.keys()) | length == 0
+    fail_msg: >-
+      The database has changes registered that are not in the manifest: {{ _applied.keys() | difference(_repo_sha.keys()) | join(' ') }}.
+      Executed changes must not be removed from {{ dc_manifest_name }} -- roll back with a new reverse change (LD-08 7.5).
+    success_msg: "{{ _applied | length }} changes registered in the database, all present in the manifest"
+
+# * The crux of the mechanism: if the files of an executed change were modified, stop here
+- name: Assert the files of executed changes are unmodified
+  ansible.builtin.assert:
+    that:
+      - _repo_sha[item.key] == item.value
+    fail_msg: |-
+      Change {{ item.key }} has been executed in the database, but its files were modified:
+        checksum registered in the database: {{ item.value }}
+        checksum of the files now:           {{ _repo_sha[item.key] }}
+      {% if dc_mutable | default(false) | bool %}
+      This database is still in the development phase (its changes are not frozen until the formal software
+      release), so the executed files may be rewritten -- but the database must then be rebuilt from scratch:
+      rerun with -e {{ dc_rebuild_var }}=true (drops and recreates the database; development only).
+      {% else %}
+      An executed change must not be modified. Restore the files (git log -p ddl/ shows which commit changed them)
+      and put the intended modification into a new change appended to the end of {{ dc_manifest_name }}.
+      {% endif %}
+    success_msg: "Change {{ item.key }}: executed, files unmodified"
+  loop: "{{ _applied | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Find the pending changes
+  ansible.builtin.set_fact:
+    _pending: "{{ dc_changes | rejectattr('id', 'in', _applied.keys() | list) | list }}"
+
+# Append only: if the database has executed up to 0005 and an unexecuted 0004 shows up in the manifest,
+# executing in id order would run 0004 after 0005 -- a different order from every other environment
+- name: Assert every pending change comes after the executed ones
+  ansible.builtin.assert:
+    that:
+      - _applied | length == 0 or _pending | length == 0 or
+        (_pending | map(attribute='id') | min) > (_applied.keys() | max)
+    fail_msg: >-
+      Among the pending changes {{ _pending | map(attribute='id') | join(' ') }} there are ids lower than the executed
+      {{ _applied.keys() | max if _applied else '' }}. New changes may only be appended to the end of the manifest.
+    success_msg: "Pending: {{ _pending | map(attribute='id') | join(' ') if _pending else 'none' }}"
+
+# Execute one by one and stop at the first failure (set -e) -- a loop will not do: after one item fails,
+# Ansible still runs the remaining items, so 0004 would run even though 0003 failed.
+# Each change: [SET LOCAL ROLE] + its files + the registry row, put into one transaction via psql -1;
+# an error part way rolls everything back, leaving neither half a structure nor a registry row.
+# PGOPTIONS stops the server from sending NOTICEs (the "already exists, skipping" of IF NOT EXISTS in 01),
+# keeping warnings and errors -- no client-side grep filtering: a filter at the end of the pipe would swallow psql's failure too.
+- name: Execute the pending structural changes
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      export PGOPTIONS='-c client_min_messages=warning'
+      {% for c in _pending %}
+      echo "==> structural change {{ c.id }} (run_as={{ c.run_as }}): {{ c.summary }}"
+      {
+      {% if c.run_as == 'owner' %}
+        echo "SET LOCAL ROLE {{ dc_owner_role }};"
+      {% endif %}
+        cat {{ c.files | join(' ') }}
+        echo
+        echo "INSERT INTO {{ dc_registry }} (change_id, files, content_sha256, summary) VALUES ('{{ c.id }}', '{{ '{' ~ (c.files | join(',')) ~ '}' }}', '{{ _repo_sha[c.id] }}', \$chg\${{ c.summary }}\$chg\$);"
+      } | psql -X -q -1 -v ON_ERROR_STOP=1 -d {{ dc_database }} -f -
+      echo "    done"
+      {% endfor %}
+    chdir: "{{ dc_target_dir }}"
+  args:
+    executable: /bin/bash
+  become_user: postgres
+  register: _exec
+  when: _pending | length > 0
+
+- name: Show the execution output
+  ansible.builtin.debug:
+    msg: "{{ _exec.stdout_lines }}"
+  when: _exec is not skipped
+
+- name: Re-check that the registry matches the manifest exactly
+  ansible.builtin.command:
+    cmd: >-
+      psql -X -tA -d {{ dc_database }} -c
+      "SELECT change_id || ' ' || content_sha256 FROM {{ dc_registry }} ORDER BY change_id"
+  become_user: postgres
+  register: _after
+  changed_when: false
+  check_mode: false
+
+- name: Assert every change has been executed with matching checksums
+  ansible.builtin.assert:
+    that:
+      - dict(_after.stdout_lines | map('split', ' ')) == _repo_sha
+    fail_msg: |-
+      After execution the registry does not match the manifest.
+        registry: {{ _after.stdout_lines | join(' / ') }}
+        manifest: {{ _repo_sha | dict2items | map(attribute='key') | join(' ') }}
+    success_msg: "Structural changes {{ _repo_sha.keys() | first }} to {{ _repo_sha.keys() | last }} executed, checksums match"

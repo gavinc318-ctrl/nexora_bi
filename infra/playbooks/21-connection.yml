@@ -244,9 +244,19 @@
             _probe_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters', 'digits']) }}"
           no_log: true
 
+        # The probe connects to {{ pg_database }}, where CONNECT is no longer public (40-schema, tasks/db_connect.yml):
+        # it gets an explicit grant, and a role holding a grant must give it up before it can be dropped
         - name: Drop a probe user possibly left over from a previous run
           ansible.builtin.command:
-            cmd: psql -X -tAc "DROP ROLE IF EXISTS pgb_probe"
+            cmd: psql -X -q -v ON_ERROR_STOP=1 -d postgres
+            stdin: |
+              DO $$
+              BEGIN
+                  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pgb_probe') THEN
+                      REVOKE ALL ON DATABASE {{ pg_database }} FROM pgb_probe;
+                      DROP ROLE pgb_probe;
+                  END IF;
+              END $$;
           become_user: postgres
           changed_when: false
 
@@ -257,6 +267,12 @@
             rp_password: "{{ _probe_password }}"
             rp_create: true
             rp_changed: false
+
+        - name: Let the probe user connect to {{ pg_database }}
+          ansible.builtin.command:
+            cmd: psql -X -q -v ON_ERROR_STOP=1 -d postgres -c "GRANT CONNECT ON DATABASE {{ pg_database }} TO pgb_probe"
+          become_user: postgres
+          changed_when: false
 
         - name: Connect once through pgBouncer as that user
           ansible.builtin.command:
@@ -273,7 +289,10 @@
 
         - name: Drop the probe user
           ansible.builtin.command:
-            cmd: psql -tAc "DROP ROLE IF EXISTS pgb_probe"
+            cmd: psql -X -q -v ON_ERROR_STOP=1 -d postgres
+            stdin: |
+              REVOKE ALL ON DATABASE {{ pg_database }} FROM pgb_probe;
+              DROP ROLE pgb_probe;
           become_user: postgres
           changed_when: false
 

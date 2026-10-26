@@ -1121,3 +1121,58 @@ graphviz 警告的屏蔽对 Airflow 服务生效、在命令行却不生效：�
 | t_dm_tzjcsj | t_alarmtriggerdictionary | zdxid | -> |
 - 两处已向 DS 追问：`t_dhhrjl` 主键 = CALLID 是否意味着 CAD 范围内 CALLID 唯一；`t_sld.sldbh`「event 数据时为首次受理单编号」是否会出现多行。
 
+
+## 2026-10-26  开发机：cad_mirror 已落为独立变更序列与剧本 41；生成器改了六处（Gavin 定由开发机改）；收回各库公开的 CONNECT
+
+> 对上节「Mac 侧：cad_mirror DDL 生成器与列目录，请开发机落为结构变更」的处理结果。Gavin 2026-10-26 定三件：
+> 一、另起一套变更序列，不进 ddl/changes.yml；二、开发阶段可改写已执行的变更，正式软件发布起才「执行过不能改」；
+> 三、生成器由开发机改，改完告知 Mac 侧。
+
+### 一、落在哪
+
+- `ddl/cad_mirror/changes.yml`：0000 登记表（schema `ddl`，写入账号碰不到——不能放 cad_meta，写入账号对那里有 INSERT），
+  0001 生成的 74 张表。全部 `run_as: owner`（属主拥有该库，能建 schema，这个序列没有超级用户变更）
+- 执行器从 40-schema 抽成 `infra/playbooks/tasks/ddl_changes.yml`，oss911 与 cad_mirror 共用一套规则；抽出后把参数代回去与原文
+  逐行比对，**只多了「开发阶段可重建」的提示**，40 的行为不变
+- `infra/playbooks/41-cad-mirror.yml`：两个角色（属主 NOLOGIN、写入账号 LOGIN 加两个超时）、建库、执行变更、按写入账号的权限
+  核对 19 条。开发阶段改了已执行的文件 → 提示 `-e cad_mirror_rebuild=true` 整库重建；inventory `cad_mirror_ddl_frozen: true`
+  之后拒绝重建。写入账号口令存 `/etc/oss911/cad_mirror_writer.env`（root 0600，交 DS），轮换写进 runbook/91
+- pgBouncer 加 `cad_mirror` session 池 5 个连接，全局上限 70 → 75
+- runbook/12
+
+### 二、生成器改的六处（`tools/cad_mirror_ddl.py`，均在临时集群实测）
+
+| # | 问题 | 改法 |
+| --- | --- | --- |
+| 1 | 21 个翻译列名是 PostgreSQL 保留字（`order` 19、`primary`、`collation`），**建表直接语法错误** | 改名而不加引号（加引号则 DS 与我们每条 SQL 永远要带）：`order` → `sort_order`，`primary` → `is_primary`，`collation` → `sort_rule`；**`t_dispatchplan.yxj`（优先级）原译 `order` 是翻译错误，改为 `priority`**。生成器内置 PG 16 的保留字表（取自 `pg_get_keywords()`），再出现即失败。列目录 CSV 随之改了 21 行 |
+| 2 | 触发器对原样重写也推 `mirror_updated_at`，还多一个行版本 | UPDATE 时内容不变即返回 NULL：不写新版本、不动时间戳。实测 xmin 不变。DS 重发一天或整表重写不再造成伪变更（DD-78） |
+| 3 | UPSERT 能冲掉 `mirror_inserted_at` | UPDATE 时两列一律沿用旧值，写入方写什么都无效 |
+| 4 | 水位列 BRIN | 改 B-tree：中间库的行被 UPSERT 原地改写，按 DD-78 不宜 BRIN |
+| 5 | `CREATE SCHEMA IF NOT EXISTS` | 去掉（执行与否由变更登记决定，DD-73）；触发器函数固定 `search_path`、收回 PUBLIC 的 EXECUTE |
+| 6 | 无默认权限 | 补 `ALTER DEFAULT PRIVILEGES`：日后新增的表自动授写入账号与 `oss911_ingest`。库级 CONNECT 改由剧本授（见下） |
+
+另：NOTES 那张主键表的「镜像列」一栏全是 `->`——取的是生成器标准错误输出里的分隔箭头，真正的列名在箭头后（如 `bh -> number`）。
+
+**请 Mac 侧把规范 v0.5 里写给 DS 的两点同步**：其一，原样重写的行 UPSERT 会回报「0 行受影响」，这是有意的，DS 的程序不得据此
+判定失败；其二，21 个改名的列（目录 CSV 里可查）。
+
+### 三、收回各库公开的 CONNECT（顺带发现，与中间库直接相关）
+
+PostgreSQL 默认把每个库的 CONNECT 授给 PUBLIC，**DS 的写入账号实测能连上 oss911**，读得到系统目录（全部表名、函数源码）。
+LD-07 2.1「对 oss911 零权限」原来做不到。现在由 `tasks/db_connect.yml` 在各库自己的剧本里收回、只授真正用它的角色：
+
+| 库 | CONNECT 给谁 | 剧本 |
+| --- | --- | --- |
+| oss911 | 四个权限角色（其登录用户继承）、pgbouncer（auth_query 在此库执行） | 40 |
+| cad_mirror | cad_mirror_writer、oss911_ingest | 41 |
+| airflow、keycloak | 只有属主 | 30、22 |
+| postgres、template1 | 只有超级用户 | 20 |
+
+21 的 auth_query 探测用户改为显式授 CONNECT、删除前先收回（带着授权的角色删不掉，实测）。临时集群实测：写入账号连其他五个库全部
+被拒，`ingest`、`pgbouncer`、探测用户照常连得上；41 的 19 条核对全过，改坏三处（给写入账号 DELETE、把 oss911 的 CONNECT 还给
+PUBLIC、删一个触发器）各自被查出。**请登记**（建议并入 LD-07 2.1 或新 DD）：各库 CONNECT 不对 PUBLIC 开放。
+
+### 四、暂未做
+
+- IF-02 契约与 pg_read 连接器（心跳围栏取数上界，DD-90）
+- 跳号的四张表、`t_dhhrjl` 主键 = CALLID、`t_sld.sldbh` 多行两处追问，等 DS

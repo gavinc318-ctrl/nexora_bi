@@ -17,6 +17,7 @@
 | Airflow `jwt_secret`（任务令牌的签名密钥） | `/etc/oss911/airflow.env` 的 `AIRFLOW__API_AUTH__JWT_SECRET` | scheduler 签、API server 验 | 30-python（**轮换不按「删文件」，见第四节**） |
 | Airflow `fernet_key`（元数据库里连接口令的加密密钥） | `/etc/oss911/airflow.env` 的 `AIRFLOW__CORE__FERNET_KEY` | Airflow 全部组件 | 30-python（**轮换不按「删文件」，见第四节**） |
 | ICP 服务工号 | `/etc/oss911/icp.env` | 接入程序、假接口启动脚本 | 开发机 30-python 生成；生产由运维手写，剧本只检查 |
+| `cad_mirror_writer`（DS 写中间库） | `/etc/oss911/cad_mirror_writer.env`（root 0600） | **DS 的同步程序**，本方不用 | 41-cad-mirror；轮换 = 删文件重跑，再经约定渠道把新口令交给 DS（不进任何文档、邮件正文或仓库） |
 
 **「唯一存放处」是轮换机制的基础**：剧本每次运行都先读这个文件——读得到就沿用，
 读不到就生成新口令并 `ALTER ROLE`。所以：

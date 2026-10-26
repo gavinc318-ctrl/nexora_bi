@@ -96,7 +96,8 @@ all:
     pgb_pool_size_keycloak: 10         # Keycloak's JDBC pool, also session mode
     pgb_reserve_pool: 5
     pgb_max_client_conn: 400           # the client side can be large; the backend is the scarce side
-    pgb_max_db_connections: 70         # global hard cap: 30 + 10 + 10 + 10 + 5, so many pools cannot silently exceed the limit
+    pgb_pool_size_cad_mirror: 5        # DS's sync program writing the CAD mirror, session mode (DD-90, LD-08 chapter 8)
+    pgb_max_db_connections: 75         # global hard cap: 30 + 10 + 10 + 10 + 5 + 5, so many pools cannot silently exceed the limit
     haproxy_listen_port: 5000          # pgBouncer's backends point here, not directly at the database
     haproxy_stats_port: 7000
     # The development machine has no Patroni, so the health check falls back to pgsql-check; production uses
@@ -213,6 +214,17 @@ all:
 
     airflow_db: airflow
     pgb_pool_size_airflow: 10
+
+    # ---- CAD mirror database (DD-90 · LD-08 chapter 8), 41-cad-mirror.yml ----
+    # A separate database that DS's sync program writes the CAD views into; we read it with oss911_ingest.
+    cad_mirror_db: cad_mirror
+    # false until the formal software release: the DDL may still change after DS's countersignature, and the
+    # development database is then rebuilt (-e cad_mirror_rebuild=true). Set true at the release: from then on an
+    # executed change is never modified (DD-73), as for oss911.
+    cad_mirror_ddl_frozen: false
+    # Role-level limits on DS's transactions (CAD mirror specification section 4)
+    cad_mirror_writer_statement_timeout: 120s
+    cad_mirror_writer_idle_timeout: 60s
 
     # ---- Database structure (step 8) ----
     # Structural change files are copied here from the repository and executed from here: postgres cannot read the

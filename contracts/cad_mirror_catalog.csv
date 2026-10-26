@@ -385,7 +385,7 @@ t_pjjh,t_dispatchplan,7,czsj,operatetime,datetime(8),timestamp,操作时间
 t_pjjh,t_dispatchplan,8,zt,state,nvarchar(40),text,状态
 t_pjjh,t_dispatchplan,9,jhrgh,planneraccount,nvarchar(40),text,计划人工号
 t_pjjh,t_dispatchplan,10,xprgh,senderaccount,nvarchar(40),text,下派人工号
-t_pjjh,t_dispatchplan,11,yxj,order,bigint(4),bigint,优先级
+t_pjjh,t_dispatchplan,11,yxj,priority,bigint(4),bigint,优先级
 t_fkd,t_feedbackrecord,1,fkdbh,feedbackid,nvarchar(40),text,反馈单编号
 t_fkd,t_feedbackrecord,2,xzqh,area,nvarchar(10),text,行政区划
 t_fkd,t_feedbackrecord,3,sjdbh,commoneventid,nvarchar(40),text,事件单号
@@ -466,7 +466,7 @@ t_bd_tzpzb,t_notificationconfiguration,15,cjsj,createtime,datetime(8),timestamp,
 t_bd_tzpzb,t_notificationconfiguration,16,sfzy,important,bigint(2),bigint,是否重要
 t_bd_tzpzb,t_notificationconfiguration,17,qd,channel,nvarchar(40),text,渠道
 t_bd_tzpzb,t_notificationconfiguration,18,sjc,lastupdatedtime,datetime(8),timestamp,时间戳
-t_bd_tzpzb,t_notificationconfiguration,19,px,order,nvarchar(20),text,排序
+t_bd_tzpzb,t_notificationconfiguration,19,px,sort_order,nvarchar(20),text,排序
 t_unitsxgdjb,t_unitlogonandlogoff,1,lsh,lsh,nvarchar(40),text,流水号
 t_unitsxgdjb,t_unitlogonandlogoff,2,zxh,agentnum,bigint(4),bigint,坐席号
 t_unitsxgdjb,t_unitlogonandlogoff,3,czrgh,operatorcode,nvarchar(40),text,操作人工号
@@ -486,7 +486,7 @@ t_unitsxgdjb,t_unitlogonandlogoff,16,czlx,operatetype,bigint(4),bigint,操作类
 t_rms_zzdy_cl,t_unitvehicle,1,id,lsh,nvarchar(40),text,流水号
 t_rms_zzdy_cl,t_unitvehicle,2,zzdy_id,unitid,nvarchar(40),text,unitId
 t_rms_zzdy_cl,t_unitvehicle,3,cl_id,vehicleid,nvarchar(40),text,车辆Id
-t_rms_zzdy_cl,t_unitvehicle,4,sfsy,primary,bigint(2),bigint,是否首要
+t_rms_zzdy_cl,t_unitvehicle,4,sfsy,is_primary,bigint(2),bigint,是否首要
 t_bd_aydwglb,t_agencyandeventtypemapping,1,lsh,lsh,nvarchar(40),text,流水号
 t_bd_aydwglb,t_agencyandeventtypemapping,2,ay,incidenttype,nvarchar(64),text,案由代码
 t_bd_aydwglb,t_agencyandeventtypemapping,3,agency,agencyorgcode,nvarchar(64),text,agency
@@ -527,9 +527,9 @@ t_jzsjd_ymszl,t_agencyeventcolumnsetting,3,lm,columnname,nvarchar(100),text,列�
 t_jzsjd_ymszl,t_agencyeventcolumnsetting,4,lx,type,nvarchar(20),text,类型
 t_jzsjd_ymszl,t_agencyeventcolumnsetting,5,cjrzh,systemname,nvarchar(40),text,创建人账号
 t_jzsjd_ymszl,t_agencyeventcolumnsetting,6,sjc,lastupdatedtime,datetime(8),timestamp,时间戳
-t_jzsjd_ymszl,t_agencyeventcolumnsetting,7,pxgz,collation,nvarchar(100),text,排序规则
+t_jzsjd_ymszl,t_agencyeventcolumnsetting,7,pxgz,sort_rule,nvarchar(100),text,排序规则
 t_jzsjd_ymszl,t_agencyeventcolumnsetting,8,sfyx,validstate,bigint(2),bigint,是否有效
-t_jzsjd_ymszl,t_agencyeventcolumnsetting,9,px,order,bigint(8),bigint,排序
+t_jzsjd_ymszl,t_agencyeventcolumnsetting,9,px,sort_order,bigint(8),bigint,排序
 t_jzsjd_ymszdx,t_agencyeventobjectsetting,1,id,agencyincidenttabobjectid,nvarchar(40),text,id
 t_jzsjd_ymszdx,t_agencyeventobjectsetting,2,ymszlid,agencyincidenttabcolumnid,nvarchar(40),text,页面设置列id
 t_jzsjd_ymszdx,t_agencyeventobjectsetting,3,ymszid,agencyincidenttabid,nvarchar(40),text,页面设置id
@@ -554,7 +554,7 @@ t_rms_zzdy,t_unitinfo,12,bm,unitnum,nvarchar(255),text,unit别名
 t_rms_zzdy,t_unitinfo,13,zd_id,stationid,nvarchar(40),text,站点id
 t_rms_zzdy,t_unitinfo,14,longitude,longitude,nvarchar(32),text,经度
 t_rms_zzdy,t_unitinfo,15,latitude,latitude,nvarchar(32),text,纬度
-t_rms_zzdy,t_unitinfo,16,px,order,bigint(8),bigint,排序
+t_rms_zzdy,t_unitinfo,16,px,sort_order,bigint(8),bigint,排序
 t_rms_zzdy,t_unitinfo,17,sfsc,deletestate,bigint(2),bigint,是否删除
 t_rms_zzdy,t_unitinfo,18,jn,skill,nvarchar(40),text,技能
 t_bd_aykzb,t_eventtypeextension,1,ay,causeactionnumber,nvarchar(40),text,案由编码
@@ -599,7 +599,7 @@ t_sjkzzd,t_eventextensionfields,6,ay,causeaction,nvarchar(400),text,案由
 t_sjkzzd,t_eventextensionfields,7,bq,tag,nvarchar(50),text,标签
 t_sjkzzd,t_eventextensionfields,8,zdid,fieldcode,nvarchar(400),text,字段ID
 t_sjkzzd,t_eventextensionfields,9,zdz,fieldvalue,nvarchar(4000),text,字段值
-t_sjkzzd,t_eventextensionfields,10,xh,order,bigint(12),bigint,序号
+t_sjkzzd,t_eventextensionfields,10,xh,sort_order,bigint(12),bigint,序号
 t_sjkzzd,t_eventextensionfields,11,sfyx,validstate,bigint(2),bigint,是否有效
 t_sjkzzd,t_eventextensionfields,12,sjc,lastupdatedtime,datetime(8),timestamp,时间戳
 t_rms_zzdy_sb,t_unitequipment,1,lsh,lsh,nvarchar(32),text,流水号
@@ -923,7 +923,7 @@ t_ycddsj,t_delayedevent,28,sjc,updatetimestamp,datetime(8),timestamp,时间戳
 t_dm_cllx,t_calldispositiondictionary,1,bh,number,nvarchar(64),text,编号
 t_dm_cllx,t_calldispositiondictionary,2,dm,code,nvarchar(64),text,代码
 t_dm_cllx,t_calldispositiondictionary,3,mc,name,nvarchar(200),text,名称
-t_dm_cllx,t_calldispositiondictionary,4,xh,order,bigint(4),bigint,序号
+t_dm_cllx,t_calldispositiondictionary,4,xh,sort_order,bigint(4),bigint,序号
 t_dm_cllx,t_calldispositiondictionary,5,yxbz,validstate,bigint(2),bigint,有效标志
 t_dm_cllx,t_calldispositiondictionary,6,scbz,deletestate,bigint(4),bigint,删除标志
 t_dm_cllx,t_calldispositiondictionary,7,clbz,processstate,nvarchar(10),text,处理标志
@@ -934,7 +934,7 @@ t_dm_cllx,t_calldispositiondictionary,11,zdxid,id,nvarchar(64),text,字典项id
 t_dm_yxj,t_prioritydictionary,1,bh,number,nvarchar(64),text,编号
 t_dm_yxj,t_prioritydictionary,2,dm,code,nvarchar(64),text,代码
 t_dm_yxj,t_prioritydictionary,3,mc,name,nvarchar(200),text,名称
-t_dm_yxj,t_prioritydictionary,4,xh,order,bigint(4),bigint,序号
+t_dm_yxj,t_prioritydictionary,4,xh,sort_order,bigint(4),bigint,序号
 t_dm_yxj,t_prioritydictionary,5,yxbz,validstate,bigint(2),bigint,有效标志
 t_dm_yxj,t_prioritydictionary,6,scbz,deletestate,bigint(4),bigint,删除标志
 t_dm_yxj,t_prioritydictionary,7,ys,color,nvarchar(40),text,颜色
@@ -945,7 +945,7 @@ t_dm_yxj,t_prioritydictionary,11,zdxid,id,nvarchar(64),text,字典项id
 t_dm_jqjb,t_alarmleveldictionary,1,bh,number,nvarchar(64),text,编号
 t_dm_jqjb,t_alarmleveldictionary,2,dm,code,nvarchar(64),text,代码
 t_dm_jqjb,t_alarmleveldictionary,3,mc,name,nvarchar(200),text,名称
-t_dm_jqjb,t_alarmleveldictionary,4,xh,order,bigint(4),bigint,序号
+t_dm_jqjb,t_alarmleveldictionary,4,xh,sort_order,bigint(4),bigint,序号
 t_dm_jqjb,t_alarmleveldictionary,5,yxbz,validstate,bigint(2),bigint,有效标志
 t_dm_jqjb,t_alarmleveldictionary,6,scbz,deletestate,bigint(4),bigint,删除标志
 t_dm_jqjb,t_alarmleveldictionary,7,sjc,updatetimestamp,datetime(8),timestamp,时间戳
@@ -964,11 +964,11 @@ t_dm_xtdm,t_eventstatusdictionary,6,scbz,deletestate,bigint(4),bigint,删除标�
 t_dm_xtdm,t_eventstatusdictionary,7,zdxid,id,nvarchar(64),text,字典项id
 t_dm_xtdm,t_eventstatusdictionary,8,color,color,nvarchar(64),text,系统代码颜色
 t_dm_xtdm,t_eventstatusdictionary,9,xsmc,displaynum,nvarchar(200),text,显示名称
-t_dm_xtdm,t_eventstatusdictionary,10,px,order,bigint(4),bigint,排序
+t_dm_xtdm,t_eventstatusdictionary,10,px,sort_order,bigint(4),bigint,排序
 t_dm_wgczlx,t_violationtypedictionary,1,bh,number,nvarchar(64),text,编号
 t_dm_wgczlx,t_violationtypedictionary,2,dm,code,nvarchar(64),text,代码
 t_dm_wgczlx,t_violationtypedictionary,3,mc,name,nvarchar(200),text,名称
-t_dm_wgczlx,t_violationtypedictionary,4,xh,order,bigint(4),bigint,序号
+t_dm_wgczlx,t_violationtypedictionary,4,xh,sort_order,bigint(4),bigint,序号
 t_dm_wgczlx,t_violationtypedictionary,5,yxbz,validstate,bigint(2),bigint,有效标志
 t_dm_wgczlx,t_violationtypedictionary,6,scbz,deletestate,bigint(4),bigint,删除标志
 t_dm_wgczlx,t_violationtypedictionary,7,sjc,updatetimestamp,datetime(8),timestamp,时间戳
@@ -976,7 +976,7 @@ t_dm_wgczlx,t_violationtypedictionary,8,zdxid,id,nvarchar(64),text,字典项id
 t_dm_remark_yxj,t_remarkprioritydictionary,1,bh,number,nvarchar(64),text,编号
 t_dm_remark_yxj,t_remarkprioritydictionary,2,dm,code,nvarchar(64),text,代码
 t_dm_remark_yxj,t_remarkprioritydictionary,3,mc,name,nvarchar(200),text,名称
-t_dm_remark_yxj,t_remarkprioritydictionary,4,xh,order,bigint(4),bigint,序号
+t_dm_remark_yxj,t_remarkprioritydictionary,4,xh,sort_order,bigint(4),bigint,序号
 t_dm_remark_yxj,t_remarkprioritydictionary,5,yxbz,validstate,bigint(2),bigint,有效标志
 t_dm_remark_yxj,t_remarkprioritydictionary,6,scbz,deletestate,bigint(4),bigint,删除标志
 t_dm_remark_yxj,t_remarkprioritydictionary,7,ys,color,nvarchar(200),text,颜色
@@ -985,7 +985,7 @@ t_dm_remark_yxj,t_remarkprioritydictionary,9,zdxid,id,nvarchar(64),text,字典�
 t_dm_cjlx,t_eventdispositiondictionary,1,bh,number,nvarchar(64),text,编号
 t_dm_cjlx,t_eventdispositiondictionary,2,dm,code,nvarchar(64),text,代码
 t_dm_cjlx,t_eventdispositiondictionary,3,mc,name,nvarchar(200),text,名称
-t_dm_cjlx,t_eventdispositiondictionary,4,xh,order,bigint(4),bigint,序号
+t_dm_cjlx,t_eventdispositiondictionary,4,xh,sort_order,bigint(4),bigint,序号
 t_dm_cjlx,t_eventdispositiondictionary,5,yxbz,validstate,bigint(2),bigint,有效标志
 t_dm_cjlx,t_eventdispositiondictionary,6,scbz,deletestate,bigint(4),bigint,删除标志
 t_dm_cjlx,t_eventdispositiondictionary,7,sjc,updatetimestamp,datetime(8),timestamp,时间戳
@@ -993,7 +993,7 @@ t_dm_cjlx,t_eventdispositiondictionary,8,zdxid,id,nvarchar(64),text,字典项id
 t_dm_offline_reason,t_offlinereasondictionary,1,bh,number,nvarchar(64),text,编号
 t_dm_offline_reason,t_offlinereasondictionary,2,dm,code,nvarchar(64),text,代码
 t_dm_offline_reason,t_offlinereasondictionary,3,mc,name,nvarchar(200),text,名称
-t_dm_offline_reason,t_offlinereasondictionary,4,xh,order,bigint(4),bigint,序号
+t_dm_offline_reason,t_offlinereasondictionary,4,xh,sort_order,bigint(4),bigint,序号
 t_dm_offline_reason,t_offlinereasondictionary,5,yxbz,validstate,bigint(2),bigint,有效标志
 t_dm_offline_reason,t_offlinereasondictionary,6,scbz,deletestate,bigint(4),bigint,删除标志
 t_dm_offline_reason,t_offlinereasondictionary,7,alarmtime,offlinetime,nvarchar(200),text,离线时长(分钟)
@@ -1002,7 +1002,7 @@ t_dm_offline_reason,t_offlinereasondictionary,9,zdxid,id,nvarchar(64),text,字�
 t_dm_czlx,t_operationtypedictionary,1,bh,number,nvarchar(64),text,编号
 t_dm_czlx,t_operationtypedictionary,2,dm,code,nvarchar(64),text,代码
 t_dm_czlx,t_operationtypedictionary,3,mc,name,nvarchar(200),text,名称
-t_dm_czlx,t_operationtypedictionary,4,xh,order,bigint(4),bigint,序号
+t_dm_czlx,t_operationtypedictionary,4,xh,sort_order,bigint(4),bigint,序号
 t_dm_czlx,t_operationtypedictionary,5,yxbz,validstate,bigint(2),bigint,有效标志
 t_dm_czlx,t_operationtypedictionary,6,scbz,deletestate,bigint(4),bigint,删除标志
 t_dm_czlx,t_operationtypedictionary,7,sjc,updatetimestamp,datetime(8),timestamp,时间戳
@@ -1010,7 +1010,7 @@ t_dm_czlx,t_operationtypedictionary,8,zdxid,id,nvarchar(64),text,字典项id
 t_dm_bjfs,t_alarmmethoddictionary,1,bh,number,nvarchar(64),text,编号
 t_dm_bjfs,t_alarmmethoddictionary,2,dm,code,nvarchar(64),text,代码
 t_dm_bjfs,t_alarmmethoddictionary,3,mc,name,nvarchar(200),text,名称
-t_dm_bjfs,t_alarmmethoddictionary,4,xh,order,bigint(4),bigint,序号
+t_dm_bjfs,t_alarmmethoddictionary,4,xh,sort_order,bigint(4),bigint,序号
 t_dm_bjfs,t_alarmmethoddictionary,5,yxbz,validstate,bigint(2),bigint,有效标志
 t_dm_bjfs,t_alarmmethoddictionary,6,scbz,deletestate,bigint(4),bigint,删除标志
 t_dm_bjfs,t_alarmmethoddictionary,7,sjc,updatetimestamp,datetime(8),timestamp,时间戳
@@ -1018,14 +1018,14 @@ t_dm_bjfs,t_alarmmethoddictionary,8,zdxid,id,nvarchar(64),text,字典项id
 t_dm_unitskill,t_unitskilldictionary,1,bh,number,nvarchar(64),text,编号
 t_dm_unitskill,t_unitskilldictionary,2,dm,code,nvarchar(64),text,代码
 t_dm_unitskill,t_unitskilldictionary,3,mc,name,nvarchar(200),text,名称
-t_dm_unitskill,t_unitskilldictionary,4,xh,order,bigint(4),bigint,序号
+t_dm_unitskill,t_unitskilldictionary,4,xh,sort_order,bigint(4),bigint,序号
 t_dm_unitskill,t_unitskilldictionary,5,yxbz,validstate,bigint(2),bigint,有效标志
 t_dm_unitskill,t_unitskilldictionary,6,scbz,deletestate,bigint(4),bigint,删除标志
 t_dm_unitskill,t_unitskilldictionary,7,sjc,updatetimestamp,datetime(8),timestamp,时间戳
 t_dm_unitztlx,t_unitstatusdictionary,1,bh,number,nvarchar(64),text,编号
 t_dm_unitztlx,t_unitstatusdictionary,2,dm,code,nvarchar(64),text,代码
 t_dm_unitztlx,t_unitstatusdictionary,3,mc,name,nvarchar(200),text,名称
-t_dm_unitztlx,t_unitstatusdictionary,4,xh,order,bigint(4),bigint,序号
+t_dm_unitztlx,t_unitstatusdictionary,4,xh,sort_order,bigint(4),bigint,序号
 t_dm_unitztlx,t_unitstatusdictionary,5,yxbz,validstate,bigint(2),bigint,有效标志
 t_dm_unitztlx,t_unitstatusdictionary,6,scbz,deletestate,bigint(4),bigint,删除标志
 t_dm_unitztlx,t_unitstatusdictionary,7,sjc,updatetimestamp,datetime(8),timestamp,时间戳
@@ -1033,7 +1033,7 @@ t_dm_unitztlx,t_unitstatusdictionary,8,zdxid,id,nvarchar(64),text,字典项id
 t_dm_unitlxtb,t_unittypedictionary,1,bh,number,nvarchar(64),text,编号
 t_dm_unitlxtb,t_unittypedictionary,2,dm,code,nvarchar(64),text,代码
 t_dm_unitlxtb,t_unittypedictionary,3,mc,name,nvarchar(200),text,名称
-t_dm_unitlxtb,t_unittypedictionary,4,xh,order,bigint(4),bigint,序号
+t_dm_unitlxtb,t_unittypedictionary,4,xh,sort_order,bigint(4),bigint,序号
 t_dm_unitlxtb,t_unittypedictionary,5,yxbz,validstate,bigint(2),bigint,有效标志
 t_dm_unitlxtb,t_unittypedictionary,6,scbz,deletestate,bigint(4),bigint,删除标志
 t_dm_unitlxtb,t_unittypedictionary,7,sjc,updatetimestamp,datetime(8),timestamp,时间戳
@@ -1058,4 +1058,4 @@ t_dm_tzjcsj,t_alarmtriggerdictionary,17,glxzlx,filtertype,nvarchar(200),text,过
 t_dm_tzjcsj,t_alarmtriggerdictionary,18,sfcjh,persistence,nvarchar(10),text,是否持久化
 t_dm_tzjcsj,t_alarmtriggerdictionary,19,yxj,priority,nvarchar(10),text,优先级
 t_dm_tzjcsj,t_alarmtriggerdictionary,20,sfzy,important,nvarchar(10),text,是否重要
-t_dm_tzjcsj,t_alarmtriggerdictionary,21,px,order,bigint(4),bigint,排序
+t_dm_tzjcsj,t_alarmtriggerdictionary,21,px,sort_order,bigint(4),bigint,排序

@@ -6,6 +6,7 @@
 ;;   oss911_etl   session, Airflow / dbt / manual operations
 ;;   keycloak     session, Keycloak's JDBC pool (prepared statements need the same backend connection)
 ;;   airflow      session, Airflow's metadata database
+;;   cad_mirror   session, DS's sync program writing the CAD mirror (DD-90)
 ;;
 ;; Backends always point to the local HAProxy, never directly to PostgreSQL.
 ;; pgBouncer cannot elect a primary; Patroni knows which node is primary, and HAProxy reads its health check.
@@ -15,6 +16,7 @@
 {{ pg_database }}_etl = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ pg_database }} pool_mode=session     pool_size={{ pgb_pool_size_session }}
 {{ keycloak_db }}     = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ keycloak_db }} pool_mode=session     pool_size={{ pgb_pool_size_keycloak }}
 {{ airflow_db }}      = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ airflow_db }}  pool_mode=session     pool_size={{ pgb_pool_size_airflow }}
+{{ cad_mirror_db }}   = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ cad_mirror_db }} pool_mode=session pool_size={{ pgb_pool_size_cad_mirror }}
 
 [pgbouncer]
 listen_addr = 0.0.0.0

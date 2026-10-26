@@ -665,6 +665,13 @@
           become_user: postgres
           when: _afrole.stdout | trim != '1'
 
+        # Only its owner (airflow) connects; not every login of the cluster (tasks/db_connect.yml)
+        - name: Restrict CONNECT on {{ airflow_db }}
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/db_connect.yml"
+          vars:
+            dbc_database: "{{ airflow_db }}"
+            dbc_grantees: []
+
         - name: Deploy the Airflow env file
           ansible.builtin.template:
             src: ../files/airflow.env.j2

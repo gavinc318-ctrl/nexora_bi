@@ -1,0 +1,241 @@
+# 41-cad-mirror -- the database cad_mirror that DS writes the CAD views into (DD-90)
+#
+# Basis: DD-90 · LD-07 2.1 · LD-08 chapter 8 · CAD mirror database specification (queries/, v0.5)
+# Prerequisites: 21-connection (pgBouncer, with the cad_mirror pool) · 40-schema (the role oss911_ingest, which reads
+#                the mirror)
+#
+# * A separate database on the same cluster, with its own structural change sequence (ddl/cad_mirror/changes.yml)
+#   executed by the same executor as oss911 (tasks/ddl_changes.yml).
+# * Two cluster roles:
+#     cad_mirror_owner   NOLOGIN; owns the database and every object in it
+#     cad_mirror_writer  LOGIN, used by DS's sync program; reads, inserts and updates the mirror tables, inserts
+#                        heartbeat and daily counts -- nothing else (LD-07 2.1). Statement and idle-in-transaction
+#                        timeouts on the role bound how long a DS transaction can stay open (specification section 4).
+#                        Its password is generated here and handed to DS through the agreed channel (runbook/91);
+#                        it is kept in /etc/oss911/cad_mirror_writer.env, root 0600 -- nothing on our side logs in with it
+# * CONNECT on cad_mirror only for the writer and oss911_ingest; the writer cannot connect to any other database
+#   (tasks/db_connect.yml in 20 / 22 / 30 / 40). Verified at the end as the writer's privileges, not as superuser.
+# * Development phase: until the formal software release (cad_mirror_ddl_frozen false) the DDL may still change
+#   after DS's countersignature; a changed executed file then asks for -e cad_mirror_rebuild=true, which drops and
+#   recreates the database. Refused once frozen.
+#
+# Not done on the development machine: TLS for DS's connection and the inbound network path (IR-52, LD-08 chapter 8).
+
+- name: CAD mirror database
+  hosts: all
+  gather_facts: false   # no facts used (same reasoning as 40-schema.yml)
+  become: true
+
+  vars:
+    oss911_etc: /etc/oss911
+    repo_cm: "{{ playbook_dir }}/../../ddl/cad_mirror"
+    cm_changes: "{{ lookup('ansible.builtin.file', repo_cm ~ '/changes.yml') | from_yaml }}"
+    cm_env: "{{ oss911_etc }}/cad_mirror_writer.env"
+    cad_mirror_rebuild: false
+
+  tasks:
+
+    # ================= 1. Preconditions =================
+    - name: Assert the cad_mirror change manifest is valid
+      ansible.builtin.assert:
+        that:
+          - (cm_changes | map(attribute='id') | list) == (cm_changes | map(attribute='id') | sort | unique | list)
+          - (cm_changes | map(attribute='id') | map('int') | list) == range(cm_changes | length) | list
+          - cm_changes | rejectattr('run_as', 'equalto', 'owner') | list | length == 0
+        fail_msg: >-
+          ddl/cad_mirror/changes.yml is invalid. Required: ids consecutive from 0000, in order, no duplicates; run_as
+          owner for every change. Current ids: {{ cm_changes | map(attribute='id') | join(' ') }}
+        success_msg: "cad_mirror manifest valid: {{ cm_changes | length }} changes"
+
+    - name: Assert a rebuild is only asked for in the development phase
+      ansible.builtin.assert:
+        that:
+          - not (cad_mirror_rebuild | bool) or not (cad_mirror_ddl_frozen | bool)
+        fail_msg: >-
+          cad_mirror_rebuild=true is refused: cad_mirror_ddl_frozen is true (the formal software release has been
+          made). The structure can only be changed by a new change appended to ddl/cad_mirror/changes.yml.
+
+    # ================= 2. Roles =================
+    # The owner role: created when missing, otherwise its attributes are asserted -- a same-named role that can log
+    # in or holds privileges is more dangerous than none (same rule as change 0002)
+    - name: Create or check the owner role cad_mirror_owner
+      ansible.builtin.command:
+        cmd: psql -X -q -tA -v ON_ERROR_STOP=1 -d postgres
+        stdin: |
+          DO $$
+          DECLARE r pg_roles%ROWTYPE;
+          BEGIN
+              SELECT * INTO r FROM pg_roles WHERE rolname = 'cad_mirror_owner';
+              IF NOT FOUND THEN
+                  CREATE ROLE cad_mirror_owner NOLOGIN;
+                  RAISE NOTICE 'created';
+              ELSIF r.rolcanlogin OR r.rolsuper OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.rolbypassrls THEN
+                  RAISE EXCEPTION 'Role cad_mirror_owner exists but its attributes are wrong: it must be NOLOGIN without special attributes';
+              END IF;
+          END $$;
+      become_user: postgres
+      register: _cmowner
+      changed_when: "'created' in _cmowner.stderr"
+
+    - name: Read back the writer's env file
+      ansible.builtin.slurp:
+        src: "{{ cm_env }}"
+      register: _cmenv
+      failed_when: false
+      no_log: true
+
+    - name: Keep or generate the writer's password
+      ansible.builtin.set_fact:
+        _cm_pw: >-
+          {{ ((_cmenv.content | b64decode) | regex_search('(?m)^CAD_MIRROR_WRITER_PASSWORD=(.+)$', '\1') | first)
+             if _cmenv.content is defined
+             else lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters', 'digits']) }}
+        _cm_pw_is_new: "{{ _cmenv.content is not defined }}"
+      no_log: true
+
+    - name: Query the writer role
+      ansible.builtin.command:
+        cmd: >-
+          psql -X -tA -d postgres -c
+          "SELECT rolcanlogin::text || '|' || (rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls)::text
+           FROM pg_roles WHERE rolname = 'cad_mirror_writer'"
+      become_user: postgres
+      register: _cmrole
+      changed_when: false
+      check_mode: false
+
+    - name: Assert the attributes of an existing writer role
+      ansible.builtin.assert:
+        that:
+          - _cmrole.stdout | trim in ['', 'true|false']
+        fail_msg: >-
+          Role cad_mirror_writer exists but its attributes do not match (can login|has privileges = {{ _cmrole.stdout | trim }});
+          expected true|false. Check: sudo -u postgres psql -c '\du cad_mirror_writer'
+        success_msg: "cad_mirror_writer: {{ 'does not exist yet, will be created' if _cmrole.stdout | trim == '' else 'exists, attributes correct' }}"
+
+    - name: Create the writer role, or set a new password for it
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/role_password.yml"
+      vars:
+        rp_role: cad_mirror_writer
+        rp_password: "{{ _cm_pw }}"
+        rp_create: "{{ _cmrole.stdout | trim == '' }}"
+      when: _cmrole.stdout | trim == '' or (_cm_pw_is_new | bool)
+
+    - name: Write the writer's env file (handed to DS; nothing on our side uses it)
+      ansible.builtin.copy:
+        dest: "{{ cm_env }}"
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          # Managed by infra/playbooks/41-cad-mirror.yml, do not edit by hand
+          # Login of DS's sync program into the database {{ cad_mirror_db }} (DD-90). Delivered to DS through the
+          # agreed channel, never by e-mail or in a document (runbook/91). Rotation: delete this file and rerun.
+          CAD_MIRROR_WRITER_USER=cad_mirror_writer
+          CAD_MIRROR_WRITER_PASSWORD={{ _cm_pw }}
+      no_log: true
+
+    # Role-level settings bound DS's transactions (specification section 4); set only when they differ
+    - name: Set the writer's statement and idle-in-transaction timeouts
+      ansible.builtin.command:
+        cmd: psql -X -q -tA -v ON_ERROR_STOP=1 -d postgres
+        stdin: |
+          SELECT 'before ' || coalesce(array_to_string(rolconfig, ','), '') FROM pg_roles WHERE rolname = 'cad_mirror_writer';
+          ALTER ROLE cad_mirror_writer SET statement_timeout = '{{ cad_mirror_writer_statement_timeout }}';
+          ALTER ROLE cad_mirror_writer SET idle_in_transaction_session_timeout = '{{ cad_mirror_writer_idle_timeout }}';
+          SELECT 'after ' || coalesce(array_to_string(rolconfig, ','), '') FROM pg_roles WHERE rolname = 'cad_mirror_writer';
+      become_user: postgres
+      register: _cmto
+      changed_when: >-
+        (_cmto.stdout_lines | select('match', '^before ') | first) | regex_replace('^before ', '')
+        != (_cmto.stdout_lines | select('match', '^after ') | first) | regex_replace('^after ', '')
+
+    # ================= 3. The database =================
+    - name: Drop the database for a rebuild (development phase only)
+      ansible.builtin.command:
+        cmd: psql -X -q -v ON_ERROR_STOP=1 -d postgres -c "DROP DATABASE IF EXISTS {{ cad_mirror_db }} WITH (FORCE)"
+      become_user: postgres
+      when: cad_mirror_rebuild | bool
+
+    - name: Query whether the database exists
+      ansible.builtin.command:
+        cmd: psql -X -tA -d postgres -c "SELECT count(*) FROM pg_database WHERE datname = '{{ cad_mirror_db }}'"
+      become_user: postgres
+      register: _cmdb
+      changed_when: false
+      check_mode: false
+
+    - name: Create the database, owned by cad_mirror_owner
+      ansible.builtin.command:
+        cmd: createdb --owner=cad_mirror_owner --template=template0 --locale=C --encoding=UTF8 {{ cad_mirror_db }}
+      become_user: postgres
+      when: _cmdb.stdout | trim == '0'
+
+    - name: Restrict CONNECT on {{ cad_mirror_db }}
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/db_connect.yml"
+      vars:
+        dbc_database: "{{ cad_mirror_db }}"
+        dbc_grantees: [cad_mirror_writer, oss911_ingest]
+
+    # ================= 4. Structural changes =================
+    - name: Execute the structural changes of the database {{ cad_mirror_db }}
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/ddl_changes.yml"
+      vars:
+        dc_repo_dir: "{{ repo_cm }}"
+        dc_changes: "{{ cm_changes }}"
+        dc_manifest_name: ddl/cad_mirror/changes.yml
+        dc_target_dir: "{{ venv_root }}/ddl-cad-mirror"
+        dc_database: "{{ cad_mirror_db }}"
+        dc_registry: ddl.ddl_change
+        dc_owner_role: cad_mirror_owner
+        dc_mutable: "{{ not (cad_mirror_ddl_frozen | bool) }}"
+        dc_rebuild_var: cad_mirror_rebuild
+
+    # ================= 5. Verification, as the writer's privileges =================
+    # has_*_privilege() answers for the role, including what it inherits and what PUBLIC has: exactly the question
+    # "what can DS's login do", without logging in as it
+    - name: Check what the writer and our ingestion can and cannot do
+      ansible.builtin.command:
+        cmd: psql -X -q -tA -F '|' -v ON_ERROR_STOP=1 -d {{ cad_mirror_db }}
+        stdin: |
+          WITH c(check_name, want, got) AS (VALUES
+            ('writer connects to {{ cad_mirror_db }}',     true,  has_database_privilege('cad_mirror_writer', '{{ cad_mirror_db }}', 'CONNECT')),
+            ('writer connects to {{ pg_database }}',       false, has_database_privilege('cad_mirror_writer', '{{ pg_database }}', 'CONNECT')),
+            ('writer connects to {{ airflow_db }}',        false, has_database_privilege('cad_mirror_writer', '{{ airflow_db }}', 'CONNECT')),
+            ('writer connects to {{ keycloak_db }}',       false, has_database_privilege('cad_mirror_writer', '{{ keycloak_db }}', 'CONNECT')),
+            ('writer connects to postgres',                false, has_database_privilege('cad_mirror_writer', 'postgres', 'CONNECT')),
+            ('writer creates in schema cad',               false, has_schema_privilege('cad_mirror_writer', 'cad', 'CREATE')),
+            ('writer reaches schema ddl',                  false, has_schema_privilege('cad_mirror_writer', 'ddl', 'USAGE')),
+            ('writer inserts into cad tables',             true,  has_table_privilege('cad_mirror_writer', 'cad.t_agencyevent', 'INSERT')),
+            ('writer updates cad tables',                  true,  has_table_privilege('cad_mirror_writer', 'cad.t_agencyevent', 'UPDATE')),
+            ('writer deletes from cad tables',             false, has_table_privilege('cad_mirror_writer', 'cad.t_agencyevent', 'DELETE')),
+            ('writer truncates cad tables',                false, has_table_privilege('cad_mirror_writer', 'cad.t_agencyevent', 'TRUNCATE')),
+            ('writer adds triggers to cad tables',         false, has_table_privilege('cad_mirror_writer', 'cad.t_agencyevent', 'TRIGGER')),
+            ('writer inserts heartbeats',                  true,  has_table_privilege('cad_mirror_writer', 'cad_meta.sync_heartbeat', 'INSERT')),
+            ('writer updates heartbeats',                  false, has_table_privilege('cad_mirror_writer', 'cad_meta.sync_heartbeat', 'UPDATE')),
+            ('ingestion connects to {{ cad_mirror_db }}',  true,  has_database_privilege('oss911_ingest', '{{ cad_mirror_db }}', 'CONNECT')),
+            ('ingestion reads cad tables',                 true,  has_table_privilege('oss911_ingest', 'cad.t_agencyevent', 'SELECT')),
+            ('ingestion writes cad tables',                false, has_table_privilege('oss911_ingest', 'cad.t_agencyevent', 'INSERT')),
+            ('every cad table has the mirror trigger',     true,  NOT EXISTS (
+                SELECT 1 FROM pg_tables t WHERE t.schemaname = 'cad' AND NOT EXISTS (
+                    SELECT 1 FROM pg_trigger g WHERE g.tgrelid = format('cad.%I', t.tablename)::regclass
+                      AND g.tgname LIKE 'trg_%_mirror_ts'))),
+            ('every object belongs to cad_mirror_owner',   true,  NOT EXISTS (
+                SELECT 1 FROM pg_class k JOIN pg_namespace n ON n.oid = k.relnamespace
+                 WHERE n.nspname IN ('cad', 'cad_meta', 'ddl') AND k.relowner <> 'cad_mirror_owner'::regrole))
+          )
+          SELECT check_name || '|' || CASE WHEN want = got THEN 'ok' ELSE 'FAIL' END FROM c;
+      become_user: postgres
+      register: _cmcheck
+      changed_when: false
+      check_mode: false
+
+    - name: Assert all privilege checks pass
+      ansible.builtin.assert:
+        that:
+          - _cmcheck.stdout_lines | select('search', '[|]FAIL$') | list | length == 0
+          - _cmcheck.stdout_lines | select('search', '[|]ok$') | list | length == 19
+        fail_msg: |-
+          cad_mirror privilege checks:
+          {{ _cmcheck.stdout }}
+        success_msg: "cad_mirror: all {{ _cmcheck.stdout_lines | length }} privilege checks pass"

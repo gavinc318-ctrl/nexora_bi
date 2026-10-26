@@ -251,6 +251,16 @@
           changed_when: _createdb.rc == 0
           failed_when: _createdb.rc != 0 and 'already exists' not in _createdb.stderr
 
+        # The maintenance databases: only superusers connect to them (the playbooks' psql, HAProxy's health check).
+        # Their CONNECT is not left public either: a login held by another party (the DS writer of cad_mirror) could
+        # otherwise read the cluster's catalogs there (tasks/db_connect.yml)
+        - name: Restrict CONNECT on the maintenance databases
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/db_connect.yml"
+          vars:
+            dbc_database: "{{ item }}"
+            dbc_grantees: []
+          loop: [postgres, template1]
+
         # CREATE EXTENSION IF NOT EXISTS returns the command tag "CREATE EXTENSION" even when it did
         # nothing, so stdout cannot tell whether anything changed -- query first, then create.
         - name: Query enabled extensions

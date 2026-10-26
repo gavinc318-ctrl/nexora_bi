@@ -146,6 +146,13 @@
           become_user: postgres
           when: _kcrole.stdout | trim != '1'
 
+        # Only its owner (keycloak) connects; not every login of the cluster (tasks/db_connect.yml)
+        - name: Restrict CONNECT on {{ keycloak_db }}
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/db_connect.yml"
+          vars:
+            dbc_database: "{{ keycloak_db }}"
+            dbc_grantees: []
+
         - name: Deploy the Keycloak env file
           ansible.builtin.copy:
             dest: "{{ oss911_etc }}/keycloak.env"

@@ -1,0 +1,30 @@
+# Who may connect to a database: take CONNECT away from PUBLIC and give it to the roles that use the database.
+# Included by 20-database (postgres, template1), 22-containers (keycloak), 30-python (airflow), 40-schema (oss911)
+# and 41-cad-mirror (cad_mirror).
+#
+# Why: PostgreSQL grants CONNECT on every database to PUBLIC by default, so any login could connect to any database
+# and read its catalogs (table names, function source). With the DS writer of cad_mirror -- a login held by another
+# party -- "no privileges on oss911" (LD-07 2.1) only holds once CONNECT is no longer public. Owners and superusers
+# keep their access without a grant. TEMP is left as it is.
+#
+# Variables:
+#   dbc_database  the database
+#   dbc_grantees  roles that need CONNECT (privilege roles are enough: their login members inherit it)
+#
+# changed: only when the database's ACL text differs afterwards; repeated GRANT / REVOKE leave it as it is.
+
+- name: "{{ dbc_database }}: CONNECT only for {{ dbc_grantees | join(', ') if dbc_grantees else 'its owner and superusers' }}"
+  ansible.builtin.command:
+    cmd: psql -X -q -tA -v ON_ERROR_STOP=1 -d postgres
+    stdin: |
+      SELECT 'before ' || coalesce(datacl::text, '(default)') FROM pg_database WHERE datname = '{{ dbc_database }}';
+      REVOKE CONNECT ON DATABASE {{ dbc_database }} FROM PUBLIC;
+      {% for g in dbc_grantees %}
+      GRANT CONNECT ON DATABASE {{ dbc_database }} TO {{ g }};
+      {% endfor %}
+      SELECT 'after ' || coalesce(datacl::text, '(default)') FROM pg_database WHERE datname = '{{ dbc_database }}';
+  become_user: postgres
+  register: _dbc
+  changed_when: >-
+    (_dbc.stdout_lines | select('match', '^before ') | first | regex_replace('^before ', ''))
+    != (_dbc.stdout_lines | select('match', '^after ') | first | regex_replace('^after ', ''))
