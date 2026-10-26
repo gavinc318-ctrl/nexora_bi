@@ -17,20 +17,27 @@
 #
 # Sets: rel_id, rel_dir, rel_names (the names inside the directory).
 
+# The repository path as given ("{{ playbook_dir }}/../..") still contains "..", while fileglob and find return
+# normalized paths; stripping the prefix from them only works with the normalized form. (The first version used the
+# given path and turned every dbt file name into a full path -- tested only with an already-normalized path.)
+- name: Normalize the repository path (control node)
+  ansible.builtin.set_fact:
+    _repo: "{{ repo_root | realpath }}"
+
 - name: List the files of this release (control node)
   ansible.builtin.set_fact:
     _rel_sources: >-
       {{ dict(['contracts/release.yml', 'contracts/pools.yml', 'contracts/resweep.yml']
-              | zip([repo_root ~ '/contracts/release.yml', repo_root ~ '/contracts/pools.yml',
-                     repo_root ~ '/contracts/resweep.yml']))
-         | combine(dict(((lookup('ansible.builtin.file', repo_root ~ '/contracts/release.yml') | from_yaml).release)
+              | zip([_repo ~ '/contracts/release.yml', _repo ~ '/contracts/pools.yml',
+                     _repo ~ '/contracts/resweep.yml']))
+         | combine(dict(((lookup('ansible.builtin.file', _repo ~ '/contracts/release.yml') | from_yaml).release)
                         | map('regex_replace', '^', 'contracts/') | list
-                        | zip(((lookup('ansible.builtin.file', repo_root ~ '/contracts/release.yml') | from_yaml).release)
-                              | map('regex_replace', '^', repo_root ~ '/contracts/') | list)))
-         | combine(dict(query('ansible.builtin.fileglob', repo_root ~ '/src/dags/*.py') | map('basename')
+                        | zip(((lookup('ansible.builtin.file', _repo ~ '/contracts/release.yml') | from_yaml).release)
+                              | map('regex_replace', '^', _repo ~ '/contracts/') | list)))
+         | combine(dict(query('ansible.builtin.fileglob', _repo ~ '/src/dags/*.py') | map('basename')
                         | map('regex_replace', '^', 'dags/') | list
-                        | zip(query('ansible.builtin.fileglob', repo_root ~ '/src/dags/*.py'))))
-         | combine(dict(_dbt_files | map('regex_replace', '^' ~ (repo_root ~ '/src/') | regex_escape, '') | list
+                        | zip(query('ansible.builtin.fileglob', _repo ~ '/src/dags/*.py'))))
+         | combine(dict(_dbt_files | map('regex_replace', '^' ~ (_repo ~ '/src/') | regex_escape, '') | list
                         | zip(_dbt_files))) }}
   vars:
     # The dbt project's files, by the fixed layout of src/dbt. fileglob neither recurses nor expands a wildcard in a
@@ -40,15 +47,15 @@
     # Generated directories -- target, logs, dbt_packages -- are never part of a release
     _dbt_files: >-
       {{ query('ansible.builtin.fileglob',
-               repo_root ~ '/src/dbt/*.yml', repo_root ~ '/src/dbt/macros/*.sql', repo_root ~ '/src/dbt/tests/*.sql',
-               repo_root ~ '/src/dbt/models/staging/*.sql', repo_root ~ '/src/dbt/models/staging/*.yml',
-               repo_root ~ '/src/dbt/models/core/*.sql', repo_root ~ '/src/dbt/models/core/*.yml') | sort }}
+               _repo ~ '/src/dbt/*.yml', _repo ~ '/src/dbt/macros/*.sql', _repo ~ '/src/dbt/tests/*.sql',
+               _repo ~ '/src/dbt/models/staging/*.sql', _repo ~ '/src/dbt/models/staging/*.yml',
+               _repo ~ '/src/dbt/models/core/*.sql', _repo ~ '/src/dbt/models/core/*.yml') | sort }}
 
 # fileglob cannot be told "everything under src/dbt"; this check can. A file the list above misses fails the
 # deployment instead of silently leaving a model out of the release
 - name: Find every file of the dbt project (control node)
   ansible.builtin.find:
-    paths: "{{ repo_root }}/src/dbt"
+    paths: "{{ _repo }}/src/dbt"
     recurse: true
     file_type: file
     excludes: ["*.pyc"]
@@ -69,7 +76,7 @@
     _dbt_missing: >-
       {{ _dbt_all.files | map(attribute='path')
          | reject('search', '/src/dbt/(target|logs|dbt_packages)/')
-         | map('regex_replace', '^' ~ (repo_root ~ '/src/') | regex_escape, '')
+         | map('regex_replace', '^' ~ (_repo ~ '/src/') | regex_escape, '')
          | reject('in', _rel_sources.keys() | list) | list }}
 
 - name: Hash the release content (control node)
@@ -86,8 +93,8 @@
 - name: Read the source revision (control node)
   ansible.builtin.shell:
     cmd: |
-      printf 'commit %s\n' "$(git -C {{ repo_root }} rev-parse HEAD 2>/dev/null || echo unknown)"
-      if [ -n "$(git -C {{ repo_root }} status --porcelain -- contracts src/dags src/dbt 2>/dev/null)" ]; then
+      printf 'commit %s\n' "$(git -C {{ _repo }} rev-parse HEAD 2>/dev/null || echo unknown)"
+      if [ -n "$(git -C {{ _repo }} status --porcelain -- contracts src/dags src/dbt 2>/dev/null)" ]; then
         echo "working tree: modified (contracts/, src/dags/ or src/dbt/ differ from the commit)"
       else
         echo "working tree: clean"
