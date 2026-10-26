@@ -1,5 +1,5 @@
 -- =====================================================================
--- Verification of database roles and grants (structural changes 0002 to 0005 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
+-- Verification of database roles and grants (structural changes 0002 to 0006 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
 --
 -- It verifies the five privilege roles themselves: inside a transaction the script creates one temporary
 -- login user per role, the superuser session does SET ROLE to that login user, and then runs statements
@@ -88,6 +88,7 @@ VALUES ('zz_check', 'rest_api', 'raw.icp_cdr_voice', 1, '{}');
 -- ---------- Orchestration (transform): create partitions ----------
 SET ROLE :"transform_user";
 SELECT pg_temp.expect_ok($$SELECT meta.ensure_monthly_partitions('core.fact_call', current_date, current_date)$$);
+SELECT pg_temp.expect_ok($$SELECT meta.ensure_monthly_partitions('core.fact_call_leg', current_date, current_date)$$);
 SELECT pg_temp.expect_ok($$SELECT meta.ensure_monthly_partitions('audit.access_log', current_date, current_date)$$);
 SELECT pg_temp.expect_error($$SELECT meta.ensure_monthly_partitions('meta.srid_config', current_date, current_date)$$,
                             :'err_partition_scope');
@@ -225,6 +226,10 @@ SELECT pg_temp.expect_error ($$INSERT INTO meta.staging_batch_state (model, run_
                                VALUES ('Bad Name', '00000000-0000-0000-0000-0000000000c1', 2)$$, '%staging_batch_state_model_check%');
 SELECT pg_temp.expect_denied($$UPDATE meta.staging_batch_state SET staged_at = now()$$);
 SELECT pg_temp.expect_ok    ($$DELETE FROM meta.staging_batch_state WHERE model = 'stg_icp_cdr_voice'$$);
+-- dbt raises clarification items (0006, the 24-hour guard of DD-91 item 9), but does not decide them
+SELECT pg_temp.expect_ok    ($$INSERT INTO meta.clarification_queue (source_id, src_column, src_value, impacted_rows)
+                               VALUES ('zz_check', 'CALLID', 'x', 1)$$);
+SELECT pg_temp.expect_denied($$UPDATE meta.clarification_queue SET status = 'closed' WHERE false$$);
 SELECT pg_temp.expect_denied($$INSERT INTO raw.zz_roles_check VALUES (2, 'x')$$);
 SELECT pg_temp.expect_denied($$INSERT INTO meta.ingest_batch (run_id, batch_seq, source_id, mode, window_from, window_to,
                                    row_count, rows_written, contract_version)
@@ -315,6 +320,32 @@ SELECT pg_temp.expect_denied($$INSERT INTO meta.ingest_batch (run_id, batch_seq,
                                    row_count, rows_written, contract_version)
                                VALUES (gen_random_uuid(), 1, 'zz_check', 'backfill', 'a', 'b', 0, 0, 1)$$);
 RESET ROLE;
+
+-- ---------- Core load rules (0006, DD-91) ----------
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM core.dim_site WHERE site_code = 'MKK' AND site_sk = core.site_namespace('MKK')) THEN
+        RAISE EXCEPTION 'FAIL dim_site has no MKK row keyed by its namespace';
+    END IF;
+    RAISE NOTICE 'PASS site MKK';
+END $$;
+SELECT pg_temp.expect_error($$INSERT INTO core.fact_call_leg (call_leg_sk, date_key, site_sk, call_sk, src_natural_key, call_id,
+                               leg_seq, is_last_leg, device_type_code, wait_begin, src_system, run_id, contract_version,
+                               src_observed_at, direction)
+                              VALUES (gen_random_uuid(), to_char(current_date, 'YYYYMMDD')::int, gen_random_uuid(),
+                                      gen_random_uuid(), 'x', 'x', 1, false, 1, now(), 'icp', gen_random_uuid(), 1, now(),
+                                      'other')$$, '%ck_fact_call_leg_direction%');
+SELECT pg_temp.expect_ok   ($$INSERT INTO core.fact_call_leg (call_leg_sk, date_key, site_sk, call_sk, src_natural_key, call_id,
+                               leg_seq, is_last_leg, device_type_code, wait_begin, src_system, run_id, contract_version,
+                               src_observed_at, direction, release_source)
+                              VALUES (gen_random_uuid(), to_char(current_date, 'YYYYMMDD')::int, gen_random_uuid(),
+                                      gen_random_uuid(), 'x', 'x', 1, false, 1, now(), 'icp', gen_random_uuid(), 1, now(),
+                                      'unmapped', 'unmapped')$$);
+SELECT pg_temp.expect_error($$INSERT INTO core.fact_call_leg (call_leg_sk, date_key, site_sk, call_sk, src_natural_key, call_id,
+                               leg_seq, is_last_leg, device_type_code, wait_begin, src_system, run_id, contract_version)
+                              VALUES (gen_random_uuid(), to_char(current_date, 'YYYYMMDD')::int, gen_random_uuid(),
+                                      gen_random_uuid(), 'x', 'x', 1, false, 1, now(), 'icp', gen_random_uuid(), 1)$$,
+                            '%src_observed_at%');
 
 -- ---------- Ownership and PUBLIC ----------
 DO $$

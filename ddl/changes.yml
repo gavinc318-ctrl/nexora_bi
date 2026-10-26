@@ -60,3 +60,9 @@
   summary: Staging batch registry meta.staging_batch_state (DD-89), re-sweep as a third batch mode
   files:
     - changes/0005_staging_batch_state.sql
+
+- id: "0006"
+  run_as: owner
+  summary: Core load rules for ICP call legs (DD-91) -- site MKK, src_observed_at, unmapped as a value, offset as a convention, dbt may raise clarification items
+  files:
+    - changes/0006_core_load_rules.sql
