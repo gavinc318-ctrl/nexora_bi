@@ -1345,3 +1345,35 @@ LD-07 2.1、DD-74 注、CLAUDE.md 硬约束（第十三条）；Gavin 定的三�
 - fact_call（等 Mac 侧补 LD-03 与 metrics 的规则）
 - caller_number_hash（DD-92，密钥进 dbt 的路径随 LD-07 那批定）
 - `value_profile`、`reference_value`、mapping_registry 逐列登记的写入方
+
+## 2026-10-27  开发机：dbt 在真机上首次构建失败——pgBouncer 库别名与真实库名不同；须改 DD-67 的池命名，请 Mac 侧定
+
+**现象**（Gavin 真机，runbook/13 第一次构建）：
+
+```
+Database Error in model stg_icp_cdr_voice
+  cross-database references are not implemented: "oss911_etl.staging.stg_icp_cdr_voice"
+```
+
+**原因**：dbt 的 profile 连 `oss911_etl`——pgBouncer 上 session 池的**别名**，进了 PostgreSQL 是 `oss911` 库（DD-67「按库名选池模式」）。
+dbt 生成 SQL 时把每个表写成三段式 `库名.schema.表名`，库名取 profile 的 `dbname`；PostgreSQL 见到 `oss911_etl.…` 与当前库 `oss911`
+不同，当作跨库引用拒绝。**开发机的临时库测试直连真实库名，没经过 pgBouncer 别名，所以没测出来**——测试的连接路径与真实部署不同
+（CLAUDE.md 第 5 节第二条）。已在开发机起一个本地 pgBouncer、别名 `oss911_etl` 指向 `oss911`，原样复现。
+
+**dbt 内部绕不过去**（已逐一试过）：dbt-postgres 没有「渲染用库名」与「连接用库名」之分；它还校验每个关系的库名必须等于 profile 的
+`dbname`（`verify_database`），所以把库名覆盖成 `oss911` 会被 dbt 自己拒绝，覆盖成空则 dbt 报错。**唯一的办法是 dbt 连接时用的库名就是
+真实库名。** 本地 pgBouncer 上把 session 池改名为 `oss911` 后，同一项目 18 项全过，且仍经 pgBouncer 连接。
+
+**须定：pgBouncer 的池怎么命名**（DD-67 · LD-08 第 3 章）
+
+| 方案 | 做法 | 代价 |
+| --- | --- | --- |
+| A（开发机建议） | 两个池互换名字：session 池叫 `oss911`（= 真实库名），transaction 池改叫 `oss911_txn` | 仍按库名选池模式，DD-67 的做法不变、只改名字。现在用 transaction 池的只有 21 的探测用户；要改 21 的模板与 inventory、`ingest.conf`、dbt profile、40 的登录核对、runbook 05 / 08；重跑 21 / 30 / 40，pgBouncer 重启一次。服务层（尚未建）将来连 `oss911_txn` |
+| B | 只留一个名字 `oss911`，默认 transaction；在 pgBouncer 的 `[users]` 段把 dbt、ingest 等登录用户设为 session | 改动少，但池模式从「按库名」变成「按登录用户」——DD-67 做法的改变；以后每加一个登录用户都要记得设模式，忘了不报错、只是偶发失败 |
+| C | dbt 绕过 pgBouncer 直连 HAProxy | 违反 DD-67「应用一律经连接池」，dbt 的连接数不再受 pgBouncer 全局上限约束 |
+
+另一点（不论选哪个）：`ingest` 的 psycopg 连接没有这个问题（不生成三段式名字），但若选 A，`ingest.conf` 的库名随之改为 `oss911`，
+免得两个接入组件各用一个名字。
+
+真机现状：0005、0006 已执行，dbt 项目已部署；构建在 staging 第一步失败、未写入任何数据（事务回滚）。`build_icp_cdr_voice` 处于暂停，
+不要开启，等这件事定了再说。
