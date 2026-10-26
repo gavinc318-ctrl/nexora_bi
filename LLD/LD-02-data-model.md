@@ -91,6 +91,8 @@ ICP 的话单是「呼叫每经过一个设备一行」，一通电话走 IVR、
 
 随之补上两处原本缺失的落点。core.dim_queue 是技能队列维（SCD2，双语名）——此前话务事实只有队列编码而无维度，报表按技能队列分组时拿不到名字，改名后历史报表也会跟着变。需要强调的是技能队列是路由能力标签，不是组织结构，更不是 CAD 的警种：技能队列决定这通电话由谁接，警种决定接完之后派谁去，二者禁止一对一映射。另有 meta.reference_value 作为小码表的统一落点（休息原因、业务类型、等待与离开原因），行数少、无需 SCD2、不值得各建一张维度表；源端删除时置为非当前而不删行，因为历史事实仍引用它。
 
+【2026-10-27 补充，DD-91：core 装载规则——写 dbt 前定下的十二处】一、src_system 按系统不按源取值：icp（话单、参照数据、坐席会话共用）、cad（中间库）、cad_archive（归档迁入，与 cad 分开，割接并行期的合并在 staging 做）；它是代理键的一部分，上线后不可改。二、站点 site_code = MKK，dim_site 那一行以结构变更写入（部署常量，不是接入数据）。三、维度迟到：dim_agent / dim_queue 到齐之前 agent_sk / queue_sk 留空、原值留在 device_no / queue_code，维度接入后由同一模型重算填上；不造推断成员。四、direction 与 release_source 的 CHECK 增加 unmapped（DD-06）：值表内但不属呼入呼出集合 → internal，值表外 → unmapped；未映射行数在 M-03 可见。五、释放原因归类表进契约 enums.release_cause.classes，由脚本自 CSV 生成并比对，运行期只读库。六、core 行带 src_observed_at（所选观测在 raw 的 ingested_at，即收到时刻，不是 staging 时刻）；写入条件：观测更新且 core 行派生内容哈希不同，或同一观测而派生内容变了（归类表更正、维度补齐）——内容按 core 行算，不按源端原文。七、同键 date_key 变化：按 sk 跨分区先删后插，只对判定为变了的行；WAITBEGIN 相差超过 24 小时的进待澄清、不写。八、oss911_transform 获 meta.clarification_queue 的 INSERT。九、source_tz_offset 写契约 source_timezone 的偏移，列注释注明「来自契约约定，非源端事实」（DD-60 先例）。十、core 分区由每日维护任务往后预建三个月，补数前先建其覆盖的月份，缺分区告警（DD-77）。十一、dbt 的运行：staging 与 core 的构建是独立 DAG，与增量 DAG 同频（5 分钟）、进 pool dbt_build、按 staging_batch_state 取可处理批次；不接在增量 DAG 的后面——同一 DAG 内 max_active_runs = 1 时 dbt 失败重试会堵住下一次接入。十二、caller_number_hash 见 DD-92。
+
 ## 4  代理键：确定性 UUID，不用自增序列
 
 全部 core 事实与维度的代理键由 core.sk(站点, 源系统, 自然键) 生成，是基于站点命名空间的 UUID v5。缓变维用 core.sk_scd()，把生效时间纳入计算，使同一实体的每个版本得到各自的键。
@@ -156,7 +158,7 @@ RFP 2.7.7.5 要求迁移数据保持百分之百保真，明确包括带原始�
 
 raw 表只能由结构变更建，接入程序不得在运行时自建。理由在属主：对象的属主天然拥有 DELETE 与 TRUNCATE，接入程序若自建 raw 表即成其属主，「只追加」随之退回靠约定（DD-02）。由结构变更建表、归属主角色，接入角色只被授予 SELECT 与 INSERT，只追加就由数据库授权执行。因此每一份接入契约的 target_raw 都对应一个结构变更（DD-73 · DD-74）。
 
-raw 表按月分区，分区键为落地时间 ingested_at（2026-10-18 补充，DD-88）。raw 是按落地时间消费的——staging 按批次消费：以 ingested_at 为第一水位，以隔离放行时间为第二水位（见下段）——不按业务时间，故与 DD-79 的归日依据规则不冲突。现在分区是一行配置，日后对数亿行只追加的表拷贝重建是以周计的窗口（DD-77 的同一论证）。索引按 DD-78：ingested_at 用 BRIN（只追加）；(run_id, batch_seq) 与幂等键加 content_hash 用 B-tree，不建唯一约束。去重的 NOT EXISTS 不带分区键，须查遍各分区的索引，八年不足一百个分区；耗时须以预计历史量与单批量实测（LD-10 TC-ING-01），此处不预先宣布可接受。
+raw 表按月分区，分区键为落地时间 ingested_at（2026-10-18 补充，DD-88）。raw 是按落地时间消费的——staging 按批次消费：以 ingested_at 为第一水位，以隔离放行时间为第二水位（见下段）——不按业务时间，故与 DD-79 的归日依据规则不冲突。现在分区是一行配置，日后对数亿行只追加的表拷贝重建是以周计的窗口（DD-77 的同一论证）。索引按 DD-78：ingested_at 用 BRIN（只追加）；(run_id, batch_seq) 与幂等键加 content_hash 用 B-tree，不建唯一约束。去重的 NOT EXISTS 不带分区键，须查遍各分区的索引，八年不足一百个分区；耗时须以预计历史量与单批量实测（LD-10 TC-DISC-20），此处不预先宣布可接受。
 
 staging 对 raw 的消费以批次为单位，正确性依据是批次处理登记，不是时间水位（DD-89，2026-10-19 评审更正）。新表 meta.staging_batch_state（model、run_id、batch_seq、staged_at）记录每个消费模型已成功处理的批次；每次运行取「当前可处理且本模型尚未登记」的批次——可处理指未被隔离、或 meta.quarantine_batch 中 state = released——处理完成后在同一事务内登记（dbt 的 post-hook 默认与模型写入同一事务）。只按时间推进会漏：周一入 raw 被隔离、staging 推进到周三、周四放行周一那批，它的 ingested_at 仍是周一；而以 staging 自己的完成时刻作位置同样会漏——查询在 10:00、管理员 10:01 放行、staging 10:02 完成并记位置，下次只取 10:02 之后的放行，10:01 那批永远跳过。时间水位（ingested_at、handled_at）只用于缩小扫描范围，不作为「是否处理过」的判据。放行因此是一次显式的补处理入口，M-03 放行界面已要求显示会重算哪些指标与日期（LD-06 第 3 章）。
 

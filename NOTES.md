@@ -622,7 +622,7 @@ troubleshooting 中的历史记录保留原样。
 > - 契约同步三支（同版同内容不动 / 同版不同内容失败 / 低版本拒绝）；新版本前校验既有热调值，**不兼容则部署失败**，不自动作废。
 > - staging 以放行时间为第二水位，staging 行记 `staged_at`；接入程序分 incremental / backfill 两模式，backfill 不动水位（DD-89）。
 > - 哈希覆盖实际收到的完整字段名与原值。
-> - 分区去重性能 → LD-10 TC-ING-01 待验证。CALLID 唯一范围**维持待答复**（IR-45 第五项 / ICP 问题单 Q21），未确认过；
+> - 分区去重性能 → LD-10 TC-DISC-20 待验证。CALLID 唯一范围**维持待答复**（IR-45 第五项 / ICP 问题单 Q21），未确认过；
 >   CALLIDNUM 稳定登记 AS-33，A→B→A 登记 AS-34，均为源端行为假设。
 
 ## 2026-10-19  Mac 侧：DS 对 CAD 问题单的答复已到，第二轮追问已发
@@ -653,7 +653,7 @@ troubleshooting 中的历史记录保留原样。
 > - staging 消费 raw 改为**按批次登记**：`meta.staging_batch_state (model, run_id, batch_seq, staged_at)`，取「可处理且本模型未登记」，
 >   登记与模型写入同一事务；时间水位只缩小扫描。0004 之后的结构变更里加这张表（ingest 不写它，transform 角色写）。
 > - 触发器时间戳不是提交时间：`cad_mirror` 取数上界 = 最新心跳 `started_at`（规范要求 DS 周期串行、心跳后写）；writer 角色设
->   `statement_timeout` / `idle_in_transaction_session_timeout`；**回扫维持必需项**；LD-10 加 TC-ING-02。
+>   `statement_timeout` / `idle_in_transaction_session_timeout`；**回扫维持必需项**；LD-10 加 TC-DISC-21。
 > - `cad_mirror` 属主为 NOLOGIN `cad_mirror_owner`；`cad_mirror_writer` 只 CONNECT / USAGE / cad.* SELECT+INSERT+UPDATE / cad_meta.* INSERT。
 > - 哈希段措辞改准：原批次已放行才去重命中；pending / discarded 不阻挡重新落地。
 > - 规范升 v0.2（账号权限、周期串行、事务时长、心跳后写）。
@@ -1270,3 +1270,35 @@ LD-07 2.1、DD-74 注、CLAUDE.md 硬约束（第十三条）；Gavin 定的三�
 - AS-33 引用的问题单编号应为 Q21（写成了 Q22）；CALLID 唯一范围是 Q20
 - M-C11、M-C13 依赖 mapped_unverified 的列，却标 `depends_unverified: false`（与 DD-06、LD-03 不符）
 - AS-32 说核实结果回写 if03a 的 `integration_checks` 段，该段不存在
+
+## 2026-10-27  Mac 侧：dbt 层十二处需定——全部已定（DD-91、DD-92），八处拟全部同意
+
+### 一、需定（编号同开发机那节）
+
+| # | 决定 |
+| --- | --- |
+| 1 | `src_system = icp`，按系统不按源；CAD 用 `cad`，归档迁入用 `cad_archive`（与 cad 分开，割接并行期合并在 staging 做） |
+| 2 | `MKK`，以结构变更写入 dim_site。**名称待 Gavin 定**，Mac 侧建议 name_en = `Makkah`、name_ar = `مكة المكرمة`（MOI 文件用法） |
+| 3 | 同意：留空、不造成员；维度接入后同一模型重算填上 |
+| 4 | 同意：两列 CHECK 加 `unmapped`；值表内非呼入呼出 → internal，值表外 → unmapped；M-03 计数 |
+| 5 | 同意：进 if03a `enums.release_cause.classes`，升 v4，脚本从 CSV 生成并比对 |
+| 6 | **本步留空**。算法已定为 HMAC-SHA256（DD-92）：密钥只存 /etc/oss911、不入库；规范化规则见 DD-92；core 留有明文列，可整体重算，故不急。密钥进 dbt 的路径随 LD-07 那批定 |
+| 7 | 同意：加 `src_observed_at`（取 raw.ingested_at）；写入条件与「内容按 core 行算」照开发机建议 |
+| 8 | 同意：按 sk 跨分区先删后插，只对变了的行；>24h 进待澄清 |
+| 9 | 同意：授 transform 对 clarification_queue 的 INSERT |
+| 10 | **改为独立 DAG** `build_icp_cdr_voice`：与增量同频 5 分钟、pool dbt_build、按 staging_batch_state 取可处理批次。不接在增量 DAG 后面——同一 DAG 的 max_active_runs=1 会让 dbt 失败重试堵住接入 |
+| 11 | 同意：每日维护任务预建 3 个月；补数前先建；缺分区告警 |
+| 12 | 写契约 `source_timezone` 的偏移，列注释注明「来自契约约定，非源端事实」 |
+
+### 二、拟：八处全部同意。补一句第 6 条：`DEVICETYPE = 1` 即技能队列请对照 `3rd API/icp_device_type.csv` 再确认一次。
+
+### 三、fact_call 的规则缺口：Mac 侧下一轮在 LD-03 与 metrics 里补（call_result 派生、direction / call_type 取首腿、
+首末腿缺失时的处理、is_transferred 的原因码归类、M-C07 两种平均二选一、M-C11 改用末腿）。写完再开 fact_call。
+
+### 四、文档问题五条
+- ddl/02 文件头：开发机自己改（dev 文件）。
+- LD-10 三条编号与 cases_seed 冲突：已改为 TC-DISC-19 / 20 / 21（DD-79 / 88 / 90 注与 LD-01、LD-02 引用同步改）。
+- AS-33 → Q21，已改；CALLID 唯一范围是 Q20，NOTES 早先几处写 Q21 的以问题单为准，不改历史记录。
+- M-C11、M-C13 的 `depends_unverified` 应为 true：请开发机改 metrics.yaml（口径文件在开发机，规则 DD-06 / LD-03 不变）。
+- AS-32：已改为「if03a 须按 if03d 同一格式增设 integration_checks 段后回写」——请开发机在 if03a v4 一并加该段。
+
