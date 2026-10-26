@@ -1278,7 +1278,7 @@ LD-07 2.1、DD-74 注、CLAUDE.md 硬约束（第十三条）；Gavin 定的三�
 | # | 决定 |
 | --- | --- |
 | 1 | `src_system = icp`，按系统不按源；CAD 用 `cad`，归档迁入用 `cad_archive`（与 cad 分开，割接并行期合并在 staging 做） |
-| 2 | `MKK`，以结构变更写入 dim_site。**名称待 Gavin 定**，Mac 侧建议 name_en = `Makkah`、name_ar = `مكة المكرمة`（MOI 文件用法） |
+| 2 | `MKK`，以结构变更写入 dim_site。**Gavin 已定**：name_en = `Makkah`、name_ar = `مكة المكرمة` |
 | 3 | 同意：留空、不造成员；维度接入后同一模型重算填上 |
 | 4 | 同意：两列 CHECK 加 `unmapped`；值表内非呼入呼出 → internal，值表外 → unmapped；M-03 计数 |
 | 5 | 同意：进 if03a `enums.release_cause.classes`，升 v4，脚本从 CSV 生成并比对 |
