@@ -1,10 +1,13 @@
-# 50-dags -- deploy the Airflow DAGs from src/dags/ into the DAG folder
+# 50-dags -- deploy the Airflow DAGs of the release into the DAG folder
 #
 # Basis: DD-84 · DD-85 · LD-01 2.5 · LD-06 2.4
 # Prerequisites: 30-python (Airflow, the pools, venv-ingest) · 45-contracts (the DAG manifest
 #                /opt/oss911/release/dags.json, the only thing the DAGs read -- LD-01 2.1)
 #
-# * The DAG folder holds exactly the .py files of src/dags/. A file deleted from the repository is deleted here
+# * The DAG files come from the release directory 45-contracts created and rehearsed them in
+#   (/opt/oss911/releases/<content hash>/dags, tasks/release_dir.yml), verified again by hash here -- never straight
+#   from the repository, which may have changed since. No release directory for the current content: run 45 first.
+# * The DAG folder holds exactly the .py files of the release. A file deleted from the repository is deleted here
 #   too: unlike most leftovers (CLAUDE.md section 5, item four), a stale DAG file is not harmless -- the scheduler
 #   keeps running it.
 # * After copying, the DAGs are parsed and written to the metadata database at once (airflow dags reserialize)
@@ -19,24 +22,32 @@
 
   vars:
     oss911_etc: /etc/oss911
-    repo_dags: "{{ playbook_dir }}/../../src/dags"
+    repo_root: "{{ playbook_dir }}/../.."
     dags_dir: "{{ airflow_home }}/dags"
     af_venv: "{{ venv_root }}/venv-airflow"
-    # Read on the control node: the DAG files of this release
-    dag_files: "{{ query('ansible.builtin.fileglob', repo_dags ~ '/*.py') | map('basename') | sort }}"
 
   tasks:
 
-    - name: Assert the repository has DAG files
+    - name: Find and verify the release directory (created by 45-contracts)
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/release_dir.yml"
+      vars:
+        rel_create: false
+
+    - name: Take the DAG files of the release
+      ansible.builtin.set_fact:
+        dag_files: "{{ rel_names | select('match', '^dags/') | map('regex_replace', '^dags/', '') | list }}"
+
+    - name: Assert the release has DAG files
       ansible.builtin.assert:
         that:
           - dag_files | length > 0
-        fail_msg: "No .py files in {{ repo_dags }}"
-        success_msg: "DAG files in this release: {{ dag_files | join(', ') }}"
+        fail_msg: "No DAG files in release {{ rel_id }}"
+        success_msg: "DAG files in release {{ rel_id }}: {{ dag_files | join(', ') }}"
 
-    - name: Copy the DAG files
+    - name: Install the DAG files from the release directory
       ansible.builtin.copy:
-        src: "{{ repo_dags }}/{{ item }}"
+        src: "{{ rel_dir }}/dags/{{ item }}"
+        remote_src: true
         dest: "{{ dags_dir }}/{{ item }}"
         owner: airflow
         group: airflow

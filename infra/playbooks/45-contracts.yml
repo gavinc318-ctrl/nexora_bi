@@ -8,7 +8,8 @@
 # * contracts/ in the repository is the authority; meta.source_contract is a read-only copy (LD-01 2.1).
 #   Only the files listed in contracts/release.yml are synced, and every one of them must have its raw table.
 # * Order, all on the target, over one copy of the files:
-#     1. copy the released contracts and contracts/pools.yml to contracts_dir
+#     1. the release directory /opt/oss911/releases/<content hash>/ (tasks/release_dir.yml): contracts, pools.yml,
+#        resweep.yml and the DAG files, immutable and verified by hash. Every later step reads this one copy
 #     2. check each with `oss911-ingest validate-contract --with-overrides` -- the single set of contract rules,
 #        run as the airflow account with the ingest database user, the identity the ingestion program really has.
 #        It also checks the hot-tuned values now in the database against the new contract
@@ -32,39 +33,26 @@
   become: true
 
   vars:
-    repo_contracts: "{{ playbook_dir }}/../../contracts"
-    contracts_dir: "{{ venv_root }}/contracts"
+    repo_root: "{{ playbook_dir }}/../.."
     ingest_venv: "{{ venv_root }}/venv-ingest"
     af_venv: "{{ venv_root }}/venv-airflow"
     oss911_etc: /etc/oss911
-    release_dir: "{{ venv_root }}/release"             # the DAG manifest; read by the DAGs (src/dags)
-    candidate_dir: "{{ venv_root }}/release/candidate"  # step 3's rehearsal: candidate manifest and DAG files
+    release_dir: "{{ venv_root }}/release"              # the DAG manifest dags.json, rewritten by airflow (rename)
+    rehearsal_dir: "{{ venv_root }}/release/rehearsal"  # step 3's candidate manifest, rewritten every deployment
+    keep_releases: 10                                   # release directories kept (the current one always)
     # release.yml holds file names only, so reading it on the control node is safe; the contracts themselves are
     # never read by Ansible's YAML parser (it would template their literal "{{ window_from }}" placeholders)
-    contracts_release: "{{ (lookup('ansible.builtin.file', repo_contracts ~ '/release.yml') | from_yaml).release }}"
+    contracts_release: "{{ (lookup('ansible.builtin.file', repo_root ~ '/contracts/release.yml') | from_yaml).release }}"
 
   tasks:
 
-    # Files dropped from release.yml stay in contracts_dir (incremental directories accumulate history, CLAUDE.md
-    # section 5, item four). Harmless: only the files in release.yml are validated, converted and synced.
-    - name: Create the contracts directory
-      ansible.builtin.file:
-        path: "{{ contracts_dir }}"
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
+    # ---------- 1. The release directory ----------
+    - name: Create and verify the release directory
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/release_dir.yml"
+      vars:
+        rel_create: true
 
-    - name: Copy the release list, the pool mapping and the released contracts
-      ansible.builtin.copy:
-        src: "{{ repo_contracts }}/{{ item }}"
-        dest: "{{ contracts_dir }}/{{ item }}"
-        owner: root
-        group: root
-        mode: "0644"
-      loop: "{{ ['release.yml', 'pools.yml'] + contracts_release }}"
-
-    - name: Create the release and rehearsal directories
+    - name: Create the manifest and rehearsal directories
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
@@ -73,15 +61,25 @@
         mode: "0755"
       loop:
         - "{{ release_dir }}"
-        - "{{ candidate_dir }}"
-        - "{{ candidate_dir }}/dags"
+        - "{{ rehearsal_dir }}"
 
+    # The previous way of deploying left copies that could be mistaken for the release (CLAUDE.md section 5, item
+    # four): the contracts copy that every deployment overwrote, and the rehearsal folder that held DAG files
+    - name: Remove the copies the previous deployment method left behind
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ venv_root }}/contracts"
+        - "{{ release_dir }}/candidate"
+
+    # ---------- 2. Validate ----------
     - name: Validate the contracts and the hot-tuned values in the database
       ansible.builtin.command:
         argv:
           - "{{ ingest_venv }}/bin/oss911-ingest"
           - validate-contract
-          - "{{ contracts_dir }}/{{ item }}"
+          - "{{ rel_dir }}/contracts/{{ item }}"
           - --with-overrides
       become_user: airflow
       register: _valid
@@ -110,11 +108,13 @@
           - "{{ ingest_venv }}/bin/oss911-ingest"
           - dag-manifest
           - --candidate
-          - "{{ contracts_dir }}"
+          - "{{ rel_dir }}/contracts"
           - --pools
-          - "{{ contracts_dir }}/pools.yml"
+          - "{{ rel_dir }}/contracts/pools.yml"
+          - --resweep
+          - "{{ rel_dir }}/contracts/resweep.yml"
           - --out
-          - "{{ candidate_dir }}/dags.json"
+          - "{{ rehearsal_dir }}/dags.json"
       become_user: airflow
       register: _cand
       changed_when: false
@@ -130,15 +130,6 @@
           {{ _cand.stderr }}
         success_msg: "Candidate manifest: {{ (_cand.stdout_lines | last | from_json).sources | join(', ') }}"
 
-    - name: Copy the DAG files of this release for the rehearsal
-      ansible.builtin.copy:
-        src: "{{ item }}"
-        dest: "{{ candidate_dir }}/dags/"
-        owner: airflow
-        group: airflow
-        mode: "0640"
-      with_fileglob: "{{ playbook_dir }}/../../src/dags/*.py"
-
     # Airflow's own parser decides whether the DAGs (and their schedules) are acceptable. Only the parse: the
     # rehearsal folder is not the scheduler's, nothing is written to the metadata database. Each file of this release
     # is parsed by name, so a file left in the rehearsal folder by an earlier release cannot sway the verdict
@@ -146,7 +137,7 @@
       ansible.builtin.shell:
         cmd: |
           set -a; . {{ oss911_etc }}/airflow.env; set +a
-          OSS911_DAG_MANIFEST={{ candidate_dir }}/dags.json {{ af_venv }}/bin/python -c '
+          OSS911_DAG_MANIFEST={{ rehearsal_dir }}/dags.json {{ af_venv }}/bin/python -c '
           import json, sys
           from airflow.dag_processing.dagbag import DagBag
           errors, dags = {}, []
@@ -155,7 +146,7 @@
               errors.update({k: v.strip().splitlines()[-1] for k, v in bag.import_errors.items()})
               dags += bag.dag_ids
           print(json.dumps({"errors": errors, "dags": sorted(dags)}))
-          ' {% for f in query('ansible.builtin.fileglob', playbook_dir ~ '/../../src/dags/*.py') %}{{ candidate_dir }}/dags/{{ f | basename }} {% endfor %}
+          ' {% for n in rel_names | select('match', '^dags/') %}{{ rel_dir }}/{{ n }} {% endfor %}
       args:
         executable: /bin/bash
       become_user: airflow
@@ -185,7 +176,7 @@
           - "{{ ingest_venv }}/bin/python"
           - -c
           - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/contracts_to_json.py') }}"
-          - "{{ contracts_dir }}"
+          - "{{ rel_dir }}/contracts"
       register: _contracts
       changed_when: false
       check_mode: false
@@ -227,7 +218,9 @@
           - "{{ ingest_venv }}/bin/oss911-ingest"
           - dag-manifest
           - --pools
-          - "{{ contracts_dir }}/pools.yml"
+          - "{{ rel_dir }}/contracts/pools.yml"
+          - --resweep
+          - "{{ rel_dir }}/contracts/resweep.yml"
           - --out
           - "{{ release_dir }}/dags.json"
       become_user: airflow
@@ -256,3 +249,18 @@
       when:
         - _sync is not skipped
         - _sync.stdout_lines | select('search', '[|]not_in_release[|]') | list | length > 0
+
+    # ---------- Keep the last release directories ----------
+    - name: List the release directories
+      ansible.builtin.find:
+        paths: "{{ venv_root }}/releases"
+        file_type: directory
+      register: _releases
+
+    - name: Remove release directories beyond the last {{ keep_releases }} (never the current one)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: >-
+        {{ (_releases.files | sort(attribute='mtime', reverse=true) | map(attribute='path') | list)[keep_releases:]
+           | reject('equalto', rel_dir) | list }}

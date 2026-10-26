@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(INGEST, "src"))
 from oss911_ingest import cli                                          # noqa: E402
 from oss911_ingest.manifest import ManifestError, build, serialize, write_atomic   # noqa: E402
 
-CDR_DEF = {"window": {"schedule": "*/5 * * * *", "max_span_hours": 24, "lookback_minutes": 15}}
+CDR_DEF = {"window": {"schedule": "*/5 * * * *", "max_span_hours": 24, "lookback_minutes": 15, "source_timezone": "UTC"}}
 DAY_DEF = {"window": {"schedule": "0 * * * *", "grain": "day"}}
 
 
@@ -45,10 +45,18 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(day["pool"], "icp_cms")
 
     def test_fields(self):
-        cdr = build(managed(), POOLS)["sources"][1]
+        cdr = build(managed(), POOLS, {"icp_cdr_voice": "2026-10-25"})["sources"][1]
         self.assertEqual(cdr, {"source_id": "icp_cdr_voice", "contract_version": 3, "enabled": True,
-                               "schedule": "*/5 * * * *", "pool": "icp_cms", "resweep": True})
-        self.assertFalse(build(managed(), POOLS)["sources"][0]["resweep"])   # no time window, no re-sweep
+                               "schedule": "*/5 * * * *", "pool": "icp_cms", "resweep": True,
+                               "resweep_from": "2026-10-25", "timezone": "UTC"})
+
+    def test_resweep_needs_time_window_and_date(self):
+        doc = build(managed(), POOLS, {"icp_agent_day": "2026-10-25"})["sources"]
+        self.assertFalse(doc[0]["resweep"])          # icp_agent_day: date given, but no time window
+        self.assertFalse(doc[1]["resweep"])          # icp_cdr_voice: time window, but no date -- not live yet
+        self.assertIsNone(doc[1]["resweep_from"])
+        with self.assertRaises(ManifestError):
+            build(managed(), POOLS, {"icp_cdr_voice": "25/10/2026"})
 
     def test_missing_pool_fails(self):
         with self.assertRaises(ManifestError) as ctx:
@@ -102,12 +110,14 @@ class RunUsageTest(unittest.TestCase):
                 return exc.code
 
     def test_resweep_usage(self):
-        self.assertEqual(self.code("run", "--source", "x", "--mode", "resweep", "--window",
-                                   "2026-10-01T00:00:00/2026-10-02T00:00:00"), 2)
-        self.assertEqual(self.code("run", "--source", "x", "--mode", "resweep", "--start-at", "2026-10-01T00:00:00"), 2)
-        self.assertEqual(self.code("run", "--source", "x", "--mode", "resweep", "--days", "0"), 2)
-        self.assertEqual(self.code("run", "--source", "x", "--mode", "resweep", "--days", "31"), 2)
-        self.assertEqual(self.code("run", "--source", "x", "--days", "2"), 2)              # --days only for resweep
+        self.assertEqual(self.code("run", "--source", "x", "--mode", "resweep"), 2)                      # no --day
+        self.assertEqual(self.code("run", "--source", "x", "--mode", "resweep", "--day", "2026-10-01",
+                                   "--window", "2026-10-01T00:00:00/2026-10-02T00:00:00"), 2)
+        self.assertEqual(self.code("run", "--source", "x", "--mode", "resweep", "--day", "2026-10-01",
+                                   "--start-at", "2026-10-01T00:00:00"), 2)
+        self.assertEqual(self.code("run", "--source", "x", "--mode", "resweep", "--day", "2026-10-32"), 2)
+        self.assertEqual(self.code("run", "--source", "x", "--mode", "resweep", "--day", "26-10-01"), 2)
+        self.assertEqual(self.code("run", "--source", "x", "--day", "2026-10-01"), 2)               # --day only for resweep
 
     def test_manifest_bad_pools_file(self):
         with tempfile.TemporaryDirectory() as d:

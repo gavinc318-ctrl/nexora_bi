@@ -11,7 +11,11 @@
 | `oss911-ingest validate-contract` | **契约规则只有这一套**（DD-88 注十四）：在接入程序里，部署与 M-01 都调它。连同库里现有的热调值一起校验 |
 | `infra/files/contracts_to_json.py` | 只做转换：把清单里的契约转成 JSON，不再校验 |
 | `infra/files/contract_sync.sql` | 在库里按版本规则写入，一个事务，以属主角色执行，加咨询锁串行 |
-| `infra/playbooks/45-contracts.yml` | 把上面串起来：复制到部署机 → 校验 → 转换 → 同步，四步都在部署机上、对同一份文件 |
+| `infra/playbooks/45-contracts.yml` | 把上面串起来：建发布目录 → 校验 → 预演 → 转换 → 同步 → 写 DAG 清单，全都读同一份发布目录 |
+
+**发布目录** `/opt/oss911/releases/<内容哈希前 12 位>/`（`tasks/release_dir.yml`）：本次发布的契约、`pools.yml`、`resweep.yml`
+与 DAG 文件，按内容哈希命名、只复制不覆盖、每次部署在目标机上重算哈希核对——被改过就失败。内容相同就是同一个目录。
+`SOURCE` 里记着 git 提交号与工作区是否干净。保留最近 10 个。50-dags 安装的 DAG 文件也从这里取。
 
 前提：30-python 已装好含 `validate-contract` 的接入程序并生成了 `/etc/oss911/ingest.conf`；40-schema 已建好
 `ingest` 库用户与 `ingest.env`。校验以 `airflow` 账号、`ingest` 库用户执行——接入程序真实运行的就是这个身份。

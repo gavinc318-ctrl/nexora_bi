@@ -1,0 +1,123 @@
+# The release directory: one immutable directory per release content (LD-08 7.2 · DD-85 note).
+# Included by 45-contracts.yml (rel_create: true -- creates it) and 50-dags.yml (rel_create: false -- only finds and
+# verifies the one 45 created for the same content).
+#
+#   /opt/oss911/releases/<first 12 hex digits of the content hash>/      (root, read-only for everyone else;
+#   not /opt/oss911/release/, which holds the DAG manifest that airflow rewrites by rename)
+#       contracts/  release.yml, pools.yml, resweep.yml and the released contracts
+#       dags/       the DAG files of src/dags
+#       SOURCE      git commit and whether the working tree was clean, for tracing (not part of the hash)
+#
+# Every step of a deployment reads this one copy -- validation, the DagBag rehearsal, conversion, pools, re-sweep
+# dates, the DAG files 50 installs -- so a second deployment or an edit in the repository between two steps cannot
+# make them disagree. The name is the content hash: the same content is the same directory, other content is
+# another directory. Files are copied without overwriting, and the content is re-hashed on the target and compared
+# every time: a directory that was changed afterwards fails the deployment instead of being used.
+#
+# Sets: rel_id, rel_dir, rel_names (the names inside the directory).
+
+- name: List the files of this release (control node)
+  ansible.builtin.set_fact:
+    _rel_sources: >-
+      {{ dict(['contracts/release.yml', 'contracts/pools.yml', 'contracts/resweep.yml']
+              | zip([repo_root ~ '/contracts/release.yml', repo_root ~ '/contracts/pools.yml',
+                     repo_root ~ '/contracts/resweep.yml']))
+         | combine(dict(((lookup('ansible.builtin.file', repo_root ~ '/contracts/release.yml') | from_yaml).release)
+                        | map('regex_replace', '^', 'contracts/') | list
+                        | zip(((lookup('ansible.builtin.file', repo_root ~ '/contracts/release.yml') | from_yaml).release)
+                              | map('regex_replace', '^', repo_root ~ '/contracts/') | list)))
+         | combine(dict(query('ansible.builtin.fileglob', repo_root ~ '/src/dags/*.py') | map('basename')
+                        | map('regex_replace', '^', 'dags/') | list
+                        | zip(query('ansible.builtin.fileglob', repo_root ~ '/src/dags/*.py')))) }}
+
+- name: Hash the release content (control node)
+  ansible.builtin.command:
+    argv: "{{ ['python3', playbook_dir ~ '/../files/release_hash.py']
+              + (_rel_sources | dict2items | map(attribute='key') | zip(_rel_sources | dict2items | map(attribute='value'))
+                 | map('join', '=') | list) }}"
+  delegate_to: localhost
+  become: false
+  register: _rel_hash_src
+  changed_when: false
+  check_mode: false
+
+- name: Read the source revision (control node)
+  ansible.builtin.shell:
+    cmd: |
+      printf 'commit %s\n' "$(git -C {{ repo_root }} rev-parse HEAD 2>/dev/null || echo unknown)"
+      if [ -n "$(git -C {{ repo_root }} status --porcelain -- contracts src/dags 2>/dev/null)" ]; then
+        echo "working tree: modified (contracts/ or src/dags/ differ from the commit)"
+      else
+        echo "working tree: clean"
+      fi
+  delegate_to: localhost
+  become: false
+  register: _rel_git
+  changed_when: false
+  check_mode: false
+
+- name: Set the release identity
+  ansible.builtin.set_fact:
+    rel_id: "{{ (_rel_hash_src.stdout | trim)[:12] }}"
+    rel_dir: "{{ venv_root }}/releases/{{ (_rel_hash_src.stdout | trim)[:12] }}"
+    rel_names: "{{ _rel_sources.keys() | list | sort }}"
+
+- name: Create the release directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ venv_root }}/releases"
+    - "{{ rel_dir }}"
+    - "{{ rel_dir }}/contracts"
+    - "{{ rel_dir }}/dags"
+  when: rel_create | bool
+
+# force: false -- a file already in the directory is never overwritten; whether it is still this release's file is
+# decided by the hash below
+- name: Copy the release files (never overwriting)
+  ansible.builtin.copy:
+    src: "{{ _rel_sources[item] }}"
+    dest: "{{ rel_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+  loop: "{{ rel_names }}"
+  when: rel_create | bool
+
+- name: Record where the release came from
+  ansible.builtin.copy:
+    dest: "{{ rel_dir }}/SOURCE"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+    content: |
+      release {{ _rel_hash_src.stdout | trim }}
+      {{ _rel_git.stdout }}
+  when: rel_create | bool
+
+- name: Hash the release directory (target)
+  ansible.builtin.command:
+    argv: "{{ ['python3', '-c', lookup('ansible.builtin.file', playbook_dir ~ '/../files/release_hash.py')]
+              + (rel_names | map('regex_replace', '^(.*)$', '\\1=' ~ rel_dir ~ '/\\1') | list) }}"
+  register: _rel_hash_dst
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert the release directory holds exactly this release
+  ansible.builtin.assert:
+    that:
+      - _rel_hash_dst.rc == 0
+      - (_rel_hash_dst.stdout | trim) == (_rel_hash_src.stdout | trim)
+    fail_msg: >-
+      {{ rel_dir }} does not hold this release
+      ({{ 'missing or unreadable: ' ~ _rel_hash_dst.stderr if _rel_hash_dst.rc != 0 else 'its content was changed after it was created' }}).
+      {% if not (rel_create | bool) %}Run 45-contracts.yml first: it creates the release directory.{% else %}A release
+      directory is never modified; move it aside (it is evidence of what was there) and run again.{% endif %}
+    success_msg: "Release {{ rel_id }}: {{ rel_names | length }} files, content verified ({{ _rel_git.stdout_lines | last }})"

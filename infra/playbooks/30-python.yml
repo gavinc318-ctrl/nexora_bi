@@ -651,6 +651,62 @@
           when: _af_fernet_new is not skipped
           no_log: true
 
+        # The keys above are only what each node would have on its own. The AUTHORITY is one file on the control node
+        # (DD-85 note, Mac review round 8): if it exists, every node takes the keys from it; if not, it is created once,
+        # from the first node's keys (adopted, so existing ciphertext stays readable) -- never per node. Adopting node
+        # by node would leave two ETL nodes with two keys. The file is outside the repository, root 0600.
+        - name: Create the control node's secrets directory
+          ansible.builtin.file:
+            path: "{{ control_secrets_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+          delegate_to: localhost
+          run_once: true
+
+        - name: Read the authoritative Airflow keys (control node)
+          ansible.builtin.slurp:
+            src: "{{ control_secrets_dir }}/airflow_keys.env"
+          delegate_to: localhost
+          run_once: true
+          register: _af_keys_ctl
+          failed_when: false
+          no_log: true
+
+        - name: Create the authoritative Airflow keys from the first node (only when the control node has none)
+          ansible.builtin.copy:
+            dest: "{{ control_secrets_dir }}/airflow_keys.env"
+            owner: root
+            group: root
+            mode: "0600"
+            content: |
+              # The one authoritative copy of Airflow's shared keys (DD-85 note). Distributed by 30-python.yml to every
+              # node's /etc/oss911/airflow.env; never edited on a node. Rotation: runbook/91, section four -- edit here.
+              AIRFLOW__API_AUTH__JWT_SECRET={{ hostvars[ansible_play_hosts_all[0]]._af_jwt_secret }}
+              AIRFLOW__CORE__FERNET_KEY={{ hostvars[ansible_play_hosts_all[0]]._af_fernet_key }}
+          delegate_to: localhost
+          run_once: true
+          when: _af_keys_ctl.content is not defined
+          no_log: true
+
+        - name: Read the authoritative Airflow keys again (control node)
+          ansible.builtin.slurp:
+            src: "{{ control_secrets_dir }}/airflow_keys.env"
+          delegate_to: localhost
+          run_once: true
+          register: _af_keys_ctl
+          no_log: true
+
+        # run_once with set_fact applies the facts to every host of the play: all nodes get the same two values
+        - name: Take the keys from the authoritative copy, on every node
+          ansible.builtin.set_fact:
+            _af_jwt_secret: "{{ (_af_keys_ctl.content | b64decode) | regex_search('(?m)^AIRFLOW__API_AUTH__JWT_SECRET=(\\S+)$', '\\1') | first }}"
+            _af_fernet_key: "{{ (_af_keys_ctl.content | b64decode) | regex_search('(?m)^AIRFLOW__CORE__FERNET_KEY=(\\S+)$', '\\1') | first }}"
+            _af_keys_sha: "{{ (_af_keys_ctl.content | b64decode) | regex_findall('(?m)^AIRFLOW__(?:API_AUTH__JWT_SECRET|CORE__FERNET_KEY)=\\S+$') | join('\n') | hash('sha256') }}"
+          run_once: true
+          no_log: true
+
         - name: Create the Airflow database user, or set a new password for it
           ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/role_password.yml"
           vars:
@@ -681,6 +737,26 @@
             mode: "0600"
           register: _afenv_w
           no_log: true
+
+        # Before Airflow starts: every node's env file must carry exactly the control node's two keys. Compared as a
+        # hash, so nothing secret reaches the output. (On one machine this cannot fail; it is the two-node check.)
+        - name: Read back the two keys from the node's env file
+          ansible.builtin.slurp:
+            src: "{{ oss911_etc }}/airflow.env"
+          register: _afenv_back
+          no_log: true
+
+        - name: Assert the node's Airflow keys equal the authoritative copy
+          ansible.builtin.assert:
+            that:
+              - >-
+                ((_afenv_back.content | b64decode)
+                 | regex_findall('(?m)^AIRFLOW__(?:API_AUTH__JWT_SECRET|CORE__FERNET_KEY)=\\S+$') | join('\n') | hash('sha256'))
+                == _af_keys_sha
+            fail_msg: >-
+              {{ oss911_etc }}/airflow.env on {{ inventory_hostname }} does not carry the authoritative Airflow keys
+              ({{ control_secrets_dir }}/airflow_keys.env on the control node). Airflow is not (re)started with them.
+            success_msg: "Airflow keys on {{ inventory_hostname }} equal the authoritative copy"
 
         # The password goes neither on the command line nor into Ansible's environment -- it is read on the spot
         # from the 0600 env file. Then no_log is not needed and a failure shows the real error; the output also

@@ -9,8 +9,12 @@ is scheduled. A missing or unreadable manifest is an import error: nothing is sc
 Per source in the manifest (every source managed in the database, disabled ones too -- start / stop is
 meta.source_contract.enabled; a disabled source's run does nothing and ends with 0):
   ingest_<source>    every <schedule>: oss911-ingest run --source <source>                  (incremental)
-  resweep_<source>   daily at 02:00 UTC: oss911-ingest run --source <source> --mode resweep  (sources with a
-                     time window and lookback only; catches calls longer than the lookback, LD-01 4.4)
+  resweep_<source>   daily at 02:00 in the source's time zone: oss911-ingest run --source <source> --mode resweep
+                     --day <the previous day>. Only for sources with a time window and lookback AND a first day in
+                     contracts/resweep.yml (no date, no re-sweep: the date is decided at go-live). Catches calls
+                     longer than the lookback (LD-01 4.4). The day comes from the run's logical date, never from
+                     "now": a retry sweeps the same day, and catchup=True sweeps the days missed while stopped,
+                     from resweep_from on (DD-89 note)
 Both go through the source's pool, so they never download at the same time; the advisory lock in the program
 covers manual runs outside Airflow.
 
@@ -22,8 +26,10 @@ Rules carried by every task here; the ingestion program and its exit codes depen
     logged by the program) loses only the batch in progress, and every run makes net progress
   - env is set explicitly, without the Airflow process environment: the worker's environment holds the
     metadata database connection string, and the program reads its own credentials from /etc/oss911
-  - one run at a time per DAG, no catch-up: an incremental run always starts from the watermark, so catching up
-    is the program's job, not the scheduler's
+  - one run at a time per DAG. Incremental: no catch-up -- an incremental run always starts from the watermark, so
+    catching up is the program's job. Re-sweep: catch-up on -- each run is one specific day
+  - a manually triggered re-sweep needs a logical date (af dags trigger resweep_<source> -l <date>T02:00:00+00:00):
+    without one there is no day to sweep
 New DAGs start paused; enabling them is the first-go-live acceptance step (runbook/11), and redeployment never
 changes the pause state.
 """
@@ -40,11 +46,10 @@ from airflow.sdk import DAG
 
 MANIFEST = os.environ.get("OSS911_DAG_MANIFEST", "/opt/oss911/release/dags.json")
 INGEST_BIN = "/opt/oss911/venv-ingest/bin/oss911-ingest"
-# The re-sweep runs in UTC whatever the scheduler's default time zone: it follows the source's day (the ICP
-# contract's source_timezone is UTC), not the reporting day
+# The re-sweep runs at 02:00 in the source's own time zone (manifest "timezone", from the contract): it follows the
+# source's day, not the reporting day. Its range is one day per run; to be revisited after ICP questions Q19 / Q20
 RESWEEP_SCHEDULE = "0 2 * * *"
-RESWEEP_TZ = pendulum.timezone("UTC")
-RESWEEP_DAYS = 1                       # first value (DD-84 note); range to be set after ICP questions Q19 / Q20
+UTC = pendulum.timezone("UTC")
 
 DEFAULT_ARGS = {
     "owner": "oss911",
@@ -55,10 +60,10 @@ DEFAULT_ARGS = {
 TASK_ENV = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
 
 
-def _dag(dag_id: str, description: str, schedule, tags: list[str]) -> DAG:
-    return DAG(dag_id=dag_id, description=description, schedule=schedule,
-               start_date=datetime(2026, 10, 1, tzinfo=RESWEEP_TZ), catchup=False, max_active_runs=1,
-               default_args=DEFAULT_ARGS, tags=tags)
+def _dag(dag_id: str, description: str, schedule, tags: list[str], start_date: datetime,
+         catchup: bool) -> DAG:
+    return DAG(dag_id=dag_id, description=description, schedule=schedule, start_date=start_date,
+               catchup=catchup, max_active_runs=1, default_args=DEFAULT_ARGS, tags=tags)
 
 
 def _task(task_id: str, command: str, pool: str) -> BashOperator:
@@ -71,15 +76,22 @@ with open(MANIFEST, encoding="utf-8") as _fh:
 
 for _s in _sources:
     _sid, _pool = _s["source_id"], _s["pool"]
+    # Incremental: the cron expression is read in UTC; no catch-up, so the start date only has to lie in the past
     with _dag(f"ingest_{_sid}", f"Incremental ingestion of {_sid} (contract v{_s['contract_version']})",
-              _s["schedule"], ["ingest", _sid]) as _d:
+              _s["schedule"], ["ingest", _sid], datetime(2026, 10, 1, tzinfo=UTC), catchup=False) as _d:
         _task("incremental", f"{INGEST_BIN} run --source {_sid}", _pool)
     globals()[_d.dag_id] = _d
 
     if _s["resweep"]:
         from airflow.timetables.trigger import CronTriggerTimetable
 
-        with _dag(f"resweep_{_sid}", f"Daily re-sweep of {_sid}: the last {RESWEEP_DAYS} day(s) plus the lookback",
-                  CronTriggerTimetable(RESWEEP_SCHEDULE, timezone=RESWEEP_TZ), ["ingest", "resweep", _sid]) as _d:
-            _task("resweep", f"{INGEST_BIN} run --source {_sid} --mode resweep --days {RESWEEP_DAYS}", _pool)
+        _tz = pendulum.timezone(_s["timezone"])
+        # The run at 02:00 on day D sweeps day D-1 (ds is D, in the DAG's time zone). The first run is the one on
+        # resweep_from + 1, which sweeps resweep_from itself
+        _first = pendulum.parse(_s["resweep_from"], tz=_tz).add(days=1)
+        with _dag(f"resweep_{_sid}", f"Daily re-sweep of {_sid}: the previous day plus the lookback, "
+                                     f"from {_s['resweep_from']}",
+                  CronTriggerTimetable(RESWEEP_SCHEDULE, timezone=_tz), ["ingest", "resweep", _sid],
+                  _first, catchup=True) as _d:
+            _task("resweep", f"{INGEST_BIN} run --source {_sid} --mode resweep --day {{{{ macros.ds_add(ds, -1) }}}}", _pool)
         globals()[_d.dag_id] = _d

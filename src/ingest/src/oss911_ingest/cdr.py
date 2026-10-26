@@ -98,8 +98,12 @@ def check_cdr(header: list[str], rows: list[list[str]], definition: dict) -> Che
 
 
 def open_calls(conn, definition: dict, window, tz) -> str:
-    """After a re-sweep: how many calls with legs beginning in the window still have no CALLIDNUM = -1 leg.
+    """After a re-sweep: calls with legs beginning in the window that still lack a final leg, counted two ways.
 
+      received  no CALLIDNUM = -1 leg in raw at all
+      usable    no CALLIDNUM = -1 leg outside pending and discarded batches -- the one that decides whether the call
+                can be closed: staging only reads released or unquarantined batches (DD-76), so a final leg held in a
+                quarantined batch does not finish the call (DD-89 note)
     The measure of whether the re-sweep reaches far enough (LD-01 4.4). The final leg is looked for among all of the
     call's legs, not only those beginning in the window: a call starting at 23:50 may have its last leg after
     midnight. Legs of a window cannot have been ingested before the window began, which bounds the scan to the
@@ -112,10 +116,16 @@ def open_calls(conn, definition: dict, window, tz) -> str:
 
     query = sql.SQL(
         "WITH w AS (SELECT DISTINCT callid FROM {t} WHERE waitbegin >= %s AND waitbegin < %s AND ingested_at >= %s) "
-        "SELECT count(*) FROM w WHERE NOT EXISTS "
-        "(SELECT 1 FROM {t} r WHERE r.callid = w.callid AND r.callidnum = '-1')"
+        "SELECT count(*) FILTER (WHERE NOT EXISTS ("
+        "         SELECT 1 FROM {t} r WHERE r.callid = w.callid AND r.callidnum = '-1')), "
+        "       count(*) FILTER (WHERE NOT EXISTS ("
+        "         SELECT 1 FROM {t} r WHERE r.callid = w.callid AND r.callidnum = '-1' "
+        "            AND NOT EXISTS (SELECT 1 FROM meta.quarantine_batch q WHERE q.run_id = r.run_id "
+        "                            AND q.batch_seq = r.batch_seq AND q.state IN ('pending', 'discarded')))) "
+        "FROM w"
     ).format(t=sql.Identifier(schema, name))
-    n = conn.execute(query, (start.strftime(TIME_FORMAT), end.strftime(TIME_FORMAT),
-                             start.replace(tzinfo=tz))).fetchone()[0]
-    return (f"open calls after re-sweep: {n} CALLID(s) with legs beginning in "
-            f"{start:%Y-%m-%d %H:%M:%S} / {end:%Y-%m-%d %H:%M:%S} have no CALLIDNUM = -1 leg yet (LD-01 4.4)")
+    received, usable = conn.execute(query, (start.strftime(TIME_FORMAT), end.strftime(TIME_FORMAT),
+                                            start.replace(tzinfo=tz))).fetchone()
+    return (f"open calls after re-sweep of {start:%Y-%m-%d %H:%M:%S} / {end:%Y-%m-%d %H:%M:%S}: "
+            f"{received} CALLID(s) without a CALLIDNUM = -1 leg received, "
+            f"{usable} without a usable one (outside pending / discarded batches) (LD-01 4.4)")

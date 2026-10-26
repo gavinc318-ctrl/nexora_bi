@@ -10,7 +10,10 @@
 | DAG | 何时 | 做什么 |
 | --- | --- | --- |
 | `ingest_icp_cdr_voice` | 每 5 分钟（契约 `window.schedule`） | `oss911-ingest run --source icp_cdr_voice`——第 10 步手工跑的那条 |
-| `resweep_icp_cdr_voice` | 每天 02:00 UTC | `… --mode resweep --days 1`：前一天整天再往前多一个回看长度，补长于回看的通话（LD-01 4.4）；不动水位；跑完报告「至今没有 -1 腿的 CALLID 数」，记在 run_log 的 message 里 |
+| `resweep_icp_cdr_voice` | 每天 02:00（源端时区，ICP 为 UTC） | `… --mode resweep --day <前一天>`：那一整天再往前多一个回看长度，补长于回看的通话（LD-01 4.4）；不动水位；跑完报告两个数——没收到末腿的、没有**可用**末腿的（末腿在待处理或已丢弃批次里不算），记在 run_log 的 message 里 |
+
+回扫的那一天来自这次运行的**逻辑日期**，不来自「现在」：失败重试扫的还是同一天；DAG 开着补跑（catchup），停了几天再开，
+漏掉的每一天按顺序补上。从哪一天开始补，写在 `contracts/resweep.yml`——**首次上线时由人填**；没填的源没有回扫 DAG。
 
 两个 DAG 走同一个 pool，不会同时下载。**顺序上 45-contracts 在前、50-dags 在后**：没有清单，DAG 文件报导入错误。
 
@@ -42,6 +45,13 @@ Airflow 新建的 DAG 默认暂停，50-dags **重复部署不改变暂停状态
 1. 人工执行一次增量，带 `--start-at` 建立水位（runbook/10 第二步）。没有水位时增量以退出码 2 结束，不会自己起算
 2. 开启 `ingest_<源>` 与 `resweep_<源>`
 3. 确认第一个自动任务 `success`，run_log 里它的 `watermark_from` 接着第 1 步的 `watermark_to`
+4. 在 `contracts/resweep.yml` 填上这个源的回扫起始日（通常就是上线那天），重新部署 45 与 50，再开启 `resweep_<源>`
+
+手工触发一次回扫要带逻辑日期，否则没有「哪一天」可扫：
+
+```bash
+af dags trigger resweep_icp_cdr_voice -l 2026-10-26T02:00:00+00:00     # 扫 2026-10-25
+```
 
 **源的启停**是 `meta.source_contract.enabled`（M-01），DAG 的暂停是运维用的，不是第二个开关。
 

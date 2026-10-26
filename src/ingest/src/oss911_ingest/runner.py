@@ -17,11 +17,13 @@ Modes (DD-89):
   incremental  start = watermark - lookback, end = now in the source's time zone; the watermark moves forward
                after each batch. The first run of a source has no watermark; it needs --start-at, given once
   backfill     explicit window; batches are marked backfill; the watermark is not touched
-  resweep      the daily re-sweep (LD-01 4.4): the last N whole days in the source's time zone, extended back by the
-               lookback; a backfill in every respect (batches marked backfill, watermark untouched) except that the
-               window is computed. It catches calls longer than the lookback, which incremental runs never see end.
-               After it, the number of calls in the window still without a final leg is reported -- the measure of
-               whether the re-sweep reaches far enough
+  resweep      the daily re-sweep (LD-01 4.4) of one day, given by the DAG from its logical date (--day): that whole
+               day in the source's time zone, extended back by the effective lookback (the lookback is resolved
+               here, from the contract and the hot-tuned value, so the DAG passes only the day -- DD-89 note). A
+               backfill in every respect (batches marked backfill, watermark untouched); never derived from "now",
+               so a retry sweeps the same day and a missed day is swept when the DAG catches up. It catches calls
+               longer than the lookback, which incremental runs never see end. After it, the calls in the window
+               still without a final leg are reported, received and usable (OBSERVE_AFTER_RESWEEP)
 
 Termination: SIGTERM (Airflow's execution timeout, or a task stopped by hand) is turned into an exception, so the
 current batch is rolled back and the run ends like any failed run -- run_log written, exit code 1 -- instead of
@@ -101,10 +103,10 @@ def lock_key(source_id: str) -> str:
 
 class Runner:
     def __init__(self, source_id: str, mode: str, window: tuple[datetime, datetime] | None,
-                 start_at: datetime | None, out=sys.stdout, resweep_days: int = 1):
+                 start_at: datetime | None, out=sys.stdout, resweep_day: datetime | None = None):
         self.source_id = source_id
         self.mode = mode
-        self.resweep_days = resweep_days
+        self.resweep_day = resweep_day
         self.window = window
         self.start_at = start_at
         self.out = out
@@ -202,10 +204,13 @@ class Runner:
                 # source_timezone; fetching would ask for a window that has not happened
                 raise ConfigError(f"watermark {fmt(watermark)} is later than now ({fmt(end)}, {tz.key})")
         elif self.mode == "resweep":
-            # Whole days in the source's time zone, ending at today's midnight, extended back by the lookback so
-            # the legs around the first midnight are fetched once more as well
-            end = datetime.now(tz).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
-            start = end - timedelta(days=self.resweep_days, minutes=lookback)
+            # The given day in the source's time zone, extended back by the lookback so the legs around its first
+            # midnight are fetched once more as well
+            start = self.resweep_day - timedelta(minutes=lookback)
+            end = self.resweep_day + timedelta(days=1)
+            if end > datetime.now(tz).replace(tzinfo=None):
+                raise ConfigError(f"--day {self.resweep_day:%Y-%m-%d} has not ended yet in {tz.key}; "
+                                  "a re-sweep covers a whole past day")
             self.window = (start, end)
             self.wm_from = None
         else:

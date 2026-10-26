@@ -2,7 +2,7 @@
 
     oss911-ingest run --source <contract id> [--start-at <time>]                     incremental (DAG)
     oss911-ingest run --source <contract id> --mode backfill --window <start>/<end>  manual backfill
-    oss911-ingest run --source <contract id> --mode resweep [--days N]               daily re-sweep (DAG)
+    oss911-ingest run --source <contract id> --mode resweep --day <YYYY-MM-DD>       daily re-sweep (DAG)
     oss911-ingest dag-manifest --pools <pools.yml> --out <dags.json> [--candidate <contracts dir>]
     oss911-ingest validate-contract <contract.yaml> [--overrides <json> | --with-overrides [--source <id>]]
 
@@ -74,8 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
                     "time zone (contract window.source_timezone).")
     run.add_argument("--source", required=True, help="source_id from the contract, e.g. icp_cdr_voice")
     run.add_argument("--mode", choices=["incremental", "backfill", "resweep"], default="incremental")
-    run.add_argument("--days", type=int, default=1,
-                     help="resweep only: how many whole days back from today's midnight (source time zone); default 1")
+    run.add_argument("--day", metavar="YYYY-MM-DD",
+                     help="resweep only: the day to sweep, in the source's time zone (the DAG passes its logical date)")
     run.add_argument("--window", help="backfill only: <start>/<end>, e.g. 2026-10-14T00:00:00/2026-10-15T00:00:00")
     run.add_argument("--start-at", metavar="TIME",
                      help="incremental, first run of a source only (no watermark yet): where the watermark starts, "
@@ -104,6 +104,8 @@ def build_parser() -> argparse.ArgumentParser:
     man.add_argument("--pools", required=True, help="contracts/pools.yml: source_id -> Airflow pool")
     man.add_argument("--out", required=True, help="the manifest to write, e.g. /opt/oss911/release/dags.json")
     man.add_argument("--candidate", metavar="DIR", help="a contracts directory (release.yml and the released files)")
+    man.add_argument("--resweep", metavar="FILE",
+                     help="contracts/resweep.yml: the first re-sweep day per source; without it no source is re-swept")
     return parser
 
 
@@ -124,6 +126,12 @@ def cmd_dag_manifest(args: argparse.Namespace) -> int:
         if not (isinstance(pools, dict) and all(isinstance(k, str) and isinstance(v, str) and v for k, v in pools.items())):
             print(f"{args.pools}: 'pools' must map source_id to a pool name", file=sys.stderr)
             return EXIT_FAILED
+        resweep_from = {}
+        if args.resweep:
+            resweep_from = _load_mapping(args.resweep, "re-sweep dates").get("resweep_from") or {}
+            if not isinstance(resweep_from, dict):
+                print(f"{args.resweep}: 'resweep_from' must map source_id to a date", file=sys.stderr)
+                return EXIT_FAILED
         candidates = {}
         if args.candidate:
             release = _load_mapping(os.path.join(args.candidate, "release.yml"), "release list").get("release") or []
@@ -151,7 +159,7 @@ def cmd_dag_manifest(args: argparse.Namespace) -> int:
                                 "enabled": managed.get(sid, {}).get("enabled", doc.get("enabled")),
                                 "definition": {k: v for k, v in doc.items() if k != "enabled"}}
             try:
-                data = manifest.serialize(manifest.build(managed, pools))
+                data = manifest.serialize(manifest.build(managed, pools, resweep_from))
             except manifest.ManifestError as exc:
                 for line in exc.problems:
                     print(f"manifest: {line}", file=sys.stderr)
@@ -222,14 +230,18 @@ def cmd_validate_contract(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     from .runner import RunFailed, Runner
 
-    window = start_at = None
-    if args.mode != "resweep" and args.days != 1:
-        raise UsageError("--days is for --mode resweep")
+    window = start_at = day = None
+    if args.mode != "resweep" and args.day is not None:
+        raise UsageError("--day is for --mode resweep")
     if args.mode == "resweep":
         if args.window is not None or args.start_at is not None:
-            raise UsageError("--mode resweep computes its own window; it takes no --window or --start-at")
-        if not 1 <= args.days <= 30:
-            raise UsageError("--days must be from 1 to 30")
+            raise UsageError("--mode resweep takes --day, not --window or --start-at")
+        if args.day is None:
+            raise UsageError("--mode resweep needs --day (the DAG passes its logical date)")
+        try:
+            day = datetime.strptime(args.day, "%Y-%m-%d")
+        except ValueError as exc:
+            raise UsageError(f"--day must have the format YYYY-MM-DD: {exc}") from None
     elif args.mode == "backfill":
         if args.window is None or args.start_at is not None:
             raise UsageError("--mode backfill needs --window and takes no --start-at")
@@ -243,7 +255,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             except ValueError as exc:
                 raise UsageError(f"--start-at must have the format {WINDOW_FORMAT}: {exc}") from None
     try:
-        return Runner(args.source, args.mode, window, start_at, resweep_days=args.days).run()
+        return Runner(args.source, args.mode, window, start_at, resweep_day=day).run()
     except RunFailed as exc:
         print(f"run failed: {exc}", file=sys.stderr)
         return EXIT_FAILED

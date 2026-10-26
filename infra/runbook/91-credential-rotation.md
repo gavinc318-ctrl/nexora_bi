@@ -199,43 +199,45 @@ ssh -L 8080:127.0.0.1:8080 nexora-bi
 ## 第四节  Airflow 的两把密钥
 
 两把密钥是**各节点共享的配置**，不是节点自己的状态（DD-85 注 · LD-08 3.3）：生产上 ETL-1、ETL-2 与 API server
-必须用同一把，否则任务在另一台机器上汇报会被拒、连接口令在另一台上解不开，而且时好时坏。30-python 把它们存在
-`/etc/oss911/airflow.env`，各节点同一份。来源的优先次序：env 文件里已有的 → Airflow 首次启动时自己写进
-`airflow.cfg` 的 → 都没有才生成。
+必须用同一把，否则任务在另一台机器上汇报会被拒、连接口令在另一台上解不开，而且时好时坏。
 
-**所以「删掉文件重跑」对这两把不是轮换**：删了 `airflow.env`，剧本会从 `airflow.cfg` 把旧密钥又纳管回来。
-轮换要按下面的步骤显式地换。
+**权威只有一份：控制节点上的 `/etc/oss911/control/airflow_keys.env`**（root 0600，不进仓库；开发机自己就是控制节点）。
+30-python 把它分发到每台节点的 `/etc/oss911/airflow.env`，并在 Airflow 启动前断言每台的两把都与它一致，不一致即失败。
+这份权威第一次是怎么来的：控制节点上没有时，从第一台节点**纳管一次**（它 env 文件里已有的 → Airflow 首次启动时自己写进
+`airflow.cfg` 的 → 都没有才生成），之后只认这一份。逐台纳管不构成「共享」——两台各纳管各的，就是两把。
+
+**所以轮换只改控制节点上那一份，然后重跑 30-python**；不要在节点上改 `airflow.env`（下次部署会被权威覆盖回去），
+也不要删它（会从权威重新分发同样的值，不是轮换）。双节点下的分发与一致性断言，开发机单台验不了，留到双节点测试。
 
 ### jwt_secret
 
 它只用于签发与校验任务运行期间的短期令牌，库里没有用它加密的数据，换掉无需迁移。
 
 1. 选一个没有任务在跑的时刻（`af dags list-runs <dag> --state running` 为空），或接受正在跑的任务失败一次、按重试再跑
-2. 生成新值，替换 `airflow.env` 里 `AIRFLOW__API_AUTH__JWT_SECRET=` 那一行（**各节点同时换成同一个值**）：
+2. 在**控制节点**上生成新值，替换权威文件里那一行：
 
    ```bash
    NEW=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
-   sudo sed -i "s|^AIRFLOW__API_AUTH__JWT_SECRET=.*|AIRFLOW__API_AUTH__JWT_SECRET=$NEW|" /etc/oss911/airflow.env; unset NEW
+   sudo sed -i "s|^AIRFLOW__API_AUTH__JWT_SECRET=.*|AIRFLOW__API_AUTH__JWT_SECRET=$NEW|" /etc/oss911/control/airflow_keys.env; unset NEW
    ```
 
-3. 同时重启四个组件：`sudo systemctl restart airflow-scheduler airflow-api-server airflow-dag-processor airflow-triggerer`
-4. 重跑 30-python：应为 `changed=0`（它读到 env 里的新值并沿用）
+3. 重跑 30-python：分发到每台节点、断言一致、重启四个组件（env 文件变了即重启）
+4. 再跑一遍 30-python：应为 `changed=0`
 
 ### fernet_key
 
 它加密了元数据库里的连接口令与变量，**直接换掉，旧密文就再也解不开**。Airflow 支持多把并存（逗号分隔，第一把用于加密，
 其余只用于解密），按三步换：
 
-1. 生成新密钥，把这一行改成「新,旧」，各节点同一份，重启四个组件：
+1. 在**控制节点**上生成新密钥，把权威文件里这一行改成「新,旧」，然后重跑 30-python（分发并重启）：
 
    ```bash
    NEW=$(sudo -u airflow /opt/oss911/venv-airflow/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')
-   OLD=$(sudo sed -n 's/^AIRFLOW__CORE__FERNET_KEY=//p' /etc/oss911/airflow.env)
-   sudo sed -i "s|^AIRFLOW__CORE__FERNET_KEY=.*|AIRFLOW__CORE__FERNET_KEY=$NEW,$OLD|" /etc/oss911/airflow.env; unset NEW OLD
-   sudo systemctl restart airflow-scheduler airflow-api-server airflow-dag-processor airflow-triggerer
+   OLD=$(sudo sed -n 's/^AIRFLOW__CORE__FERNET_KEY=//p' /etc/oss911/control/airflow_keys.env)
+   sudo sed -i "s|^AIRFLOW__CORE__FERNET_KEY=.*|AIRFLOW__CORE__FERNET_KEY=$NEW,$OLD|" /etc/oss911/control/airflow_keys.env; unset NEW OLD
    ```
 
 2. 用新密钥重新加密库里的全部密文：`af rotate-fernet-key`（`af` 函数见 runbook/11）
-3. 把这一行改成只剩新密钥（删掉「,旧」），再重启四个组件；重跑 30-python 应为 `changed=0`
+3. 把权威文件里这一行改成只剩新密钥（删掉「,旧」），再重跑 30-python；第二遍应为 `changed=0`
 
 开发机上目前元数据库里没有任何加密的连接或变量，但步骤照做，生产上不会是这样。

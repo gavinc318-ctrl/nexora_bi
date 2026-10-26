@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 
 LOCK_KEY = "oss911.contract_sync"     # the key contract_sync.sql locks with pg_advisory_xact_lock(hashtext(...))
@@ -45,8 +46,13 @@ def has_time_window(definition: dict) -> bool:
     return "max_span_hours" in win and "lookback_minutes" in win
 
 
-def build(managed: dict[str, dict], pools: dict[str, str]) -> dict:
-    """managed: source_id -> {"contract_version", "enabled", "definition"}. Returns the manifest document."""
+def build(managed: dict[str, dict], pools: dict[str, str], resweep_from: dict[str, str] | None = None) -> dict:
+    """managed: source_id -> {"contract_version", "enabled", "definition"}. Returns the manifest document.
+
+    resweep_from (contracts/resweep.yml): the first day each source is re-swept. A time-window source without a date
+    gets no re-sweep DAG yet -- the date is a decision made at go-live, never a default (Gavin, 2026-10-26).
+    """
+    resweep_from = resweep_from or {}
     problems, sources = [], []
     for sid in sorted(managed):
         m = managed[sid]
@@ -55,13 +61,20 @@ def build(managed: dict[str, dict], pools: dict[str, str]) -> dict:
             problems.append(f"{sid}: contract v{m['contract_version']} has no window.schedule")
         if sid not in pools:
             problems.append(f"{sid}: no pool in contracts/pools.yml (DD-85)")
+        day = resweep_from.get(sid)
+        if day is not None and not (isinstance(day, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", day)):
+            problems.append(f"{sid}: resweep_from must be a date YYYY-MM-DD, got {day!r}")
+        resweep = has_time_window(m["definition"]) and day is not None
         sources.append({
             "source_id": sid,
             "contract_version": m["contract_version"],
             "enabled": m["enabled"],
             "schedule": schedule,
             "pool": pools.get(sid),
-            "resweep": has_time_window(m["definition"]),
+            "resweep": resweep,
+            "resweep_from": day if resweep else None,
+            # The zone the re-sweep's days are counted in: the source's own (contract window.source_timezone)
+            "timezone": ((m["definition"].get("window") or {}).get("source_timezone")) if resweep else None,
         })
     if problems:
         raise ManifestError(problems)

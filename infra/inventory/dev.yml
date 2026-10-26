@@ -215,6 +215,12 @@ all:
     airflow_db: airflow
     pgb_pool_size_airflow: 10
 
+    # ---- Secrets kept on the control node (outside the repository) ----
+    # The authoritative copy of secrets that every node must share (Airflow's jwt_secret and fernet_key, DD-85 note),
+    # distributed by the playbooks. On the development machine the control node is this machine. In production: on
+    # the control node chosen in LD-08's deployment inventory, root 0700, backed up with it.
+    control_secrets_dir: /etc/oss911/control
+
     # ---- CAD mirror database (DD-90 · LD-08 chapter 8), 41-cad-mirror.yml ----
     # A separate database that DS's sync program writes the CAD views into; we read it with oss911_ingest.
     cad_mirror_db: cad_mirror
