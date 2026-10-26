@@ -54,7 +54,7 @@ format: converted from docx, content unchanged
 
 运行结构与事务粒度（2026-10-18 补充，DD-87 · DD-88；同日评审更正外键与模式，见下）。一次运行（run_id）把 [窗口起点 − 回看, 窗口终点] 按接口单次上限切成若干批（batch_seq，话单为 ≤ 24 小时一片），串行取数。事务以批为粒度：一批的 meta.ingest_batch 登记、写 raw、隔离登记与水位推进在同一事务提交，失败只回滚本批；不以整个运行为一个事务——补 30 天数据在第 29 天失败时回滚全部，且事务挂数小时，都不可接受。meta.run_log 只在运行结束时写一行，outcome 取 success、partial（部分批次成功）或 failed；因此 meta.quarantine_batch 的外键不能再指向 run_log（0003 原设计，批次与运行同一事务时成立），0004 改为指向 meta.ingest_batch (run_id, batch_seq)，与批次同一事务提交，来源 source_id 亦从 ingest_batch 取。运行中途崩溃会留下有 run_id 而无 run_log 的批次，M-01 从 ingest_batch 列出这类孤儿批次。
 
-两种运行模式与水位（DD-89）。增量模式：窗口起点恒为当前水位减回看，按批前推，每批提交后水位推进到该批窗口终点，水位只前进；窗口由构造连续，不会跳过缺口。手工补数模式：带显式起止，批次标 mode = backfill，不动水位——补历史不得把水位调回去，补未来某段也不得越过中间缺口把水位推过去。两种模式写同一张 raw、同一套去重与隔离规则，只在 ingest_batch.mode 上可区分。
+两种运行模式与水位（DD-89）。增量模式：窗口起点恒为当前水位减回看，按批前推，每批提交后水位推进到该批窗口终点，水位只前进；窗口由构造连续，不会跳过缺口。手工补数模式：带显式起止，批次标 mode = backfill，不动水位——补历史不得把水位调回去，补未来某段也不得越过中间缺口把水位推过去。两种模式写同一张 raw、同一套去重与隔离规则，只在 ingest_batch.mode 上可区分。 第三种模式 resweep（每日回扫）：窗口由 DAG 以逻辑日期（data_interval）显式传入，不由程序按执行当天计算——延迟到次日执行或跨日重试都必须扫原定的那一天；回扫 DAG 开 catchup = true 并限 max_active_runs = 1，停机漏掉的日期按逻辑日期逐个补跑；增量 DAG 维持 catchup = false，两者相反是有意的。回扫不动水位。回扫结束统计「至今无末腿的 CALLID 数」分两个口径：已收到末腿（不论批次状态）与已有可用末腿（排除 pending 与 discarded 批次），判断收尾是否完成用后者。
 
 批次登记 meta.ingest_batch。每批一行：run_id、batch_seq、source_id、mode（incremental · backfill）、窗口起止、行数、收到的原文件 sha256 与字节数、归档对象键、contract_version、effective_params（本次运行解析出的热调项快照，jsonb，不含任何敏感项）、提交时间。这张表是 5.1 要求的校验和的存放处，是归档对象与 raw 行之间的链接，是隔离登记的外键父表，是「昨天那次运行用了什么配置」的直接答案，也是孤儿批次唯一能被看见的地方。
 

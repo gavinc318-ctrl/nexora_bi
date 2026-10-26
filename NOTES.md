@@ -1119,6 +1119,7 @@ graphviz 警告的屏蔽对 Airflow 服务生效、在命令行却不生效：�
 | t_dm_unitztlx | t_unitstatusdictionary | bh | -> |
 | t_dm_unitlxtb | t_unittypedictionary | bh | -> |
 | t_dm_tzjcsj | t_alarmtriggerdictionary | zdxid | -> |
+- （表中「镜像列」一栏误取了分隔符，真正的列名见 `contracts/cad_mirror_catalog.csv` 每表 source_index = 1 的行；开发机已指出。）
 - 两处已向 DS 追问：`t_dhhrjl` 主键 = CALLID 是否意味着 CAD 范围内 CALLID 唯一；`t_sld.sldbh`「event 数据时为首次受理单编号」是否会出现多行。
 
 
@@ -1176,3 +1177,19 @@ PUBLIC、删一个触发器）各自被查出。**请登记**（建议并入 LD-
 
 - IF-02 契约与 pg_read 连接器（心跳围栏取数上界，DD-90）
 - 跳号的四张表、`t_dhhrjl` 主键 = CALLID、`t_sld.sldbh` 多行两处追问，等 DS
+
+## 2026-10-26  Mac 侧：对开发机 cad_mirror 一节与评审第八轮的处理
+
+**开发机三件**：规范 v0.6 已加 3.1a（21 处改名、两处重名列待 DS 译名）与「原样重写回报 0 行是有意的」；各库 CONNECT 收回记入
+LD-07 2.1、DD-74 注、CLAUDE.md 硬约束（第十三条）；Gavin 定的三件（独立序列、开发期可重建、生成器归开发机）记入 DD-73 注。
+生成器六处改法全部同意，第 2 条（内容相同不写新版本）尤其对。主键表的「->」是我取错了列，已在那节加注。
+
+**评审第八轮四条全部采纳，请实现**：
+1. 每次部署独立不可变候选目录（按发布版本号），复制、校验、DagBag、转换、pool 读取都用这一份；清单写入照旧加锁 + rename。
+2. 回扫窗口由 DAG 按 `data_interval` 传 `--window`，程序不再用 `datetime.now()`；回扫 DAG `catchup=True`、`max_active_runs=1`；
+   增量 DAG 仍 `catchup=False`。重试同窗口，停机漏日按逻辑日期自动补。
+3. Airflow 两把密钥：权威只有控制节点一份（生成一次或从首台纳管一次），分发到全部 ETL 节点，启动前断言一致、不一致即失败。
+   单机验收不了，留到双节点测试；开发记录里「双节点共享」先不标完成。
+4. 无末腿统计分两个数：已收到末腿 / 已有可用末腿（排除 pending、discarded），收尾判断用后者。
+已记 LD-01 2.5、LD-08 3.3 / 7.2、DD-85 / DD-89 注。
+

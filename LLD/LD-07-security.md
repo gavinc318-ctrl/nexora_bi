@@ -33,6 +33,8 @@ format: converted from docx, content unchanged
 
 ### 【2026-10-19 补充，DD-90；同日评审更正】中间库 cad_mirror 与其全部对象（表、触发器、函数）由 NOLOGIN 角色 cad_mirror_owner 持有，与 LD-02 第 13 章的属主模式一致。DS 的写入账号 cad_mirror_writer 是 LOGIN 角色，只有：CONNECT；cad 与 cad_meta 两个 schema 的 USAGE；cad.* 的 SELECT、INSERT、UPDATE（UPSERT 所需）；cad_meta.* 的 INSERT。不授予 CREATE、DELETE、TRUNCATE、TRIGGER、REFERENCES，不得 SUPERUSER、CREATEDB、REPLICATION；对 oss911 库无任何权限。角色级设置 statement_timeout 与 idle_in_transaction_session_timeout（取值写在中间库规范），限制单事务时长。「DS 交付 DDL」与「DS 账号有 DDL 权限」是两件事：DDL 由本方以属主身份执行。凭据由本方生成与轮换（runbook/91 的流程），经双方约定的渠道交付 DS，不进入任何文档与仓库。本方的 oss911_ingest 对 cad_mirror 只有 SELECT。
 
+### 【2026-10-26 补充】PostgreSQL 默认把每个库的 CONNECT 授予 PUBLIC，开发机实测 cad_mirror_writer 能连上 oss911 并读系统目录——「对 oss911 零权限」原来做不到。各库的 CONNECT 一律从 PUBLIC 收回、只授真正使用它的角色：oss911 给四个权限角色与 pgbouncer（auth_query）；cad_mirror 给 cad_mirror_writer 与 oss911_ingest；airflow、keycloak 只给属主；postgres、template1 只给超级用户。由各库自己的剧本执行并核对。
+
 | 角色 | 界面范围 | 是否受部门过滤 |
 | --- | --- | --- |
 | 接警员 | 与本人相关的话务与警情视图、个人绩效 | 否（接所有来电） |
