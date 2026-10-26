@@ -21,6 +21,8 @@ format: converted from docx, content unchanged
 
 ### 2.1  自建外壳，Superset 只做查询引擎
 
+### 【2026-10-27 补充，DD-93】Superset 连接仓库经 pgBouncer 事务池 oss911_txn（别名，真实库为 oss911）。Superset 自 4.1 起把 PostgreSQL 的库当作 catalog：默认 catalog 取连接串库名，catalog 列表查 pg_database，切换 catalog 时改写连接串库名重连——与别名不一致。数据库连接 extra 的 allow_multi_catalog 必须保持 false（默认值），不开放多 catalog；安装后按实际版本经 pgBouncer 实测 SQL Lab 与数据集预览。
+
 门户采用自建外壳，Superset 作为后端查询引擎，不直接暴露给用户。这比直接交付 Superset 多出两到三周工作量，换来三件事：界面风格与阿语本地化不必迁就第三方产品的约定；权限模型不必在两套体系之间做映射；门户、仪表板、大屏与移动端共用同一套视觉与交互体系。
 
 第二条是决定性的。本系统的权限是三层的——角色、字段级可见性矩阵、部门行过滤（LD-07）——而把这三层映射到另一个产品自带的权限模型上，映射本身就会成为一个持续的缺陷来源，且任何一次产品升级都可能改变映射的行为。让 Superset 只负责执行查询，权限判定完全留在本方服务层，这个问题就不存在。
