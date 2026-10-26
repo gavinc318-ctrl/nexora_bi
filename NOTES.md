@@ -1027,3 +1027,97 @@ graphviz 警告的屏蔽对 Airflow 服务生效、在命令行却不生效：�
 - 拟：Mac 侧写 `tools/cad_mirror_ddl.py`（不交付）从结构表生成 74 张建表 SQL，输出交开发机审类型映射后按结构变更流程放进
   `ddl/cad_mirror/`；主键以 `-- PK: TBD` 占位，DS 答复前不执行。待 Gavin 定。
 
+## 2026-10-26  Mac 侧：cad_mirror DDL 生成器与列目录，请开发机落为结构变更
+
+- DS 答复：**每张表第一列即主键**。`tools/cad_mirror_ddl.py` 据此从结构表生成 74 张表的 DDL（schema `cad`），
+  `contracts/cad_mirror_catalog.csv` 是 1060 列的目录（源表、镜像表、源字段、镜像列、源类型、映射类型、中文说明）——
+  中文说明只进 CSV，不进 SQL（check_no_cjk）。类型宽映射：text 720、bigint 204、timestamp 136，无未映射类型。
+- 请开发机：`python3 tools/cad_mirror_ddl.py > ddl/changes/0005_cad_mirror.sql`，审一遍类型映射与列名（翻译列小写，
+  同表重名加序号后缀——实测无重名），按结构变更流程登记。注意：
+  1. `cad_mirror` 是**另一个 database**，不在 oss911 的 0000–0004 序列里：建库、`cad_mirror_owner`（NOLOGIN）与
+     `cad_mirror_writer`（LOGIN，超时参数）是集群级，放剧本（建议 41-cad-mirror），DDL 以 owner 身份在该库执行；
+     角色超时 `statement_timeout = 120s`、`idle_in_transaction_session_timeout = 60s`（规范第 4 节）。
+  2. 生成的 SQL 末尾的 GRANT 只授表级权限，不含 CREATE / DELETE / TRUNCATE / TRIGGER（LD-07 2.1）。
+  3. pgBouncer 为 `cad_mirror` 加 session 模式单独池（LD-08 第 8 章）。
+  4. 结构表 Source Index 跳号的四张表（t_sld 17、t_gb 5、t_rms_xyjhjz 5、t_rms_zzdy_sb 3）按现状生成，已问 DS。
+  5. **暂不执行到真机**，等 DS 会签规范与 DDL（IR-51）。开发库可先建，便于写 IF-02 契约与 pg_read 连接器。
+- 主键清单（源表 · 镜像表 · 源字段 · 镜像列），请过一眼，有疑问的标出来：
+
+| 源表 | 镜像表 | 主键源字段 | 镜像列 |
+| --- | --- | --- | --- |
+| t_rms_bmgz | t_coderules | id | -> |
+| t_rms_xyjhjz | t_responseplanagency | lsh | -> |
+| t_gb | t_broadcast | id | -> |
+| t_gb_group | t_broadcastgroup | id | -> |
+| t_dxdwfqjl | t_smslocation | id | -> |
+| t_zjb | t_evidence | lsh | -> |
+| t_bd_tzjsfz | t_notificationrole | xlbm | -> |
+| t_sjczjl | t_chronology | lsh | -> |
+| t_rz_tysjrz | t_auditlog | lsh | -> |
+| t_sfdzkzb | t_eventaddressextension | lsh | -> |
+| t_jqfpjl | t_eventdistribution | lsh | -> |
+| t_jzsjd | t_agencyevent | jzsjdbh | -> |
+| t_jqfpzjl | t_eventdistributiongroup | lsh | -> |
+| t_sxgdjb | t_loginandlogoutlog | lsh | -> |
+| t_jajl | t_eventclosure | lsh | -> |
+| t_bjlxr | t_callerinfo | id | -> |
+| t_sjd | t_commonevent | sjdbh | -> |
+| t_unitczjl | t_unitoperation | lsh | -> |
+| t_cjd | t_dispatchrecord | cjdbh | -> |
+| t_pjjh | t_dispatchplan | pjjhbh | -> |
+| t_fkd | t_feedbackrecord | fkdbh | -> |
+| t_yhdqqx | t_userpermission | lsh | -> |
+| t_bd_tzglb | t_notificationassociation | lsh | -> |
+| t_bd_tzpzb | t_notificationconfiguration | lsh | -> |
+| t_unitsxgdjb | t_unitlogonandlogoff | lsh | -> |
+| t_rms_zzdy_cl | t_unitvehicle | id | -> |
+| t_bd_aydwglb | t_agencyandeventtypemapping | lsh | -> |
+| t_rms_zzdy_zbz | t_logonunitgroup | id | -> |
+| t_grpzx | t_personalsetting | lsh | -> |
+| t_hw_hjdxjl | t_callrecord | lsh | -> |
+| t_rms_cl_zbz | t_vehicledutygroup | id | -> |
+| t_rms_cl | t_vehicle | id | -> |
+| t_jzsjd_ymszl | t_agencyeventcolumnsetting | id | -> |
+| t_jzsjd_ymszdx | t_agencyeventobjectsetting | id | -> |
+| t_rms_zzdy | t_unitinfo | id | -> |
+| t_bd_aykzb | t_eventtypeextension | ay | -> |
+| t_zzdy_zt | t_unitstatus | id | -> |
+| t_sjkzzd | t_eventextensionfields | lsh | -> |
+| t_rms_zzdy_sb | t_unitequipment | lsh | -> |
+| t_rms_zzdy_ry | t_unitperson | lsh | -> |
+| t_dhhr_sld | t_callrecordlinkedwithcontactevent | lsh | -> |
+| t_sop_czjl | t_sopoperationlog | lsh | -> |
+| t_agency_temp | t_opencontactevent | lsh | -> |
+| t_zzdy_ymsz | t_unitsettings | lsh | -> |
+| t_bd_tzjsglb | t_notificationroleassociation | lsh | -> |
+| t_jzsjd_ymsz | t_agencyeventwebpagesetting | id | -> |
+| t_rms_zbz | t_lineupgroup | id | -> |
+| t_rms_gw | t_lineuprole | id | -> |
+| t_cjzlzf | t_cancellationinstructionlog | zfbh | -> |
+| t_rms_zzdy_lx | t_unittype | id | -> |
+| t_coverage | t_collection | lsh | -> |
+| t_jqxgjl | t_eventupdatelog | lsh | -> |
+| t_zjjl | t_transferlog | lsh | -> |
+| t_rms_zd | t_station | id | -> |
+| t_sld | t_contactevent | sldbh | -> |
+| t_dhhrjl | t_callnotify | hrbh | -> |
+| t_wgczjl | t_violationoperation | lsh | -> |
+| t_remark | t_remark | lsh | -> |
+| t_unitddzld | t_unitinstruction | unitddzlbh | -> |
+| t_ycddsj | t_delayedevent | ycddsjbh | -> |
+| t_dm_cllx | t_calldispositiondictionary | bh | -> |
+| t_dm_yxj | t_prioritydictionary | bh | -> |
+| t_dm_jqjb | t_alarmleveldictionary | bh | -> |
+| t_dm_xtdm | t_eventstatusdictionary | dm | -> |
+| t_dm_wgczlx | t_violationtypedictionary | bh | -> |
+| t_dm_remark_yxj | t_remarkprioritydictionary | bh | -> |
+| t_dm_cjlx | t_eventdispositiondictionary | bh | -> |
+| t_dm_offline_reason | t_offlinereasondictionary | bh | -> |
+| t_dm_czlx | t_operationtypedictionary | bh | -> |
+| t_dm_bjfs | t_alarmmethoddictionary | bh | -> |
+| t_dm_unitskill | t_unitskilldictionary | bh | -> |
+| t_dm_unitztlx | t_unitstatusdictionary | bh | -> |
+| t_dm_unitlxtb | t_unittypedictionary | bh | -> |
+| t_dm_tzjcsj | t_alarmtriggerdictionary | zdxid | -> |
+- 两处已向 DS 追问：`t_dhhrjl` 主键 = CALLID 是否意味着 CAD 范围内 CALLID 唯一；`t_sld.sldbh`「event 数据时为首次受理单编号」是否会出现多行。
+
