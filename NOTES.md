@@ -1218,3 +1218,55 @@ LD-07 2.1、DD-74 注、CLAUDE.md 硬约束（第十三条）；Gavin 定的三�
 第 2 条原文是「DAG 按 data_interval 传 `--window`」。两处改动：一，回扫 DAG 用的 CronTriggerTimetable 的 data_interval 长度为 0
 （起止都是触发时刻），只能用逻辑日期；二，DAG 只传**日期**，窗口由程序算——回看可热调，只有程序启动时才知道有效值，由 DAG 拼
 窗口等于回看有了第二个来源。手工触发回扫因此须带逻辑日期：`af dags trigger resweep_<源> -l <日期>T02:00:00+00:00`。
+
+## 2026-10-26  开发机：第 2 批 dbt 层（raw → staging → core.fact_call_leg）的实现方案，请 Mac 侧确认
+
+结构变更 0005（`meta.staging_batch_state`、`ingest_batch.mode` 增 `resweep`）已提交（8041c59），未上真机。下一步 dbt。把设计里约束
+这一层的条文逐条查过（LD-02 第 3、4、6、9、12、13 章，DD-06 / 66 / 74 / 77 / 78 / 79 / 82 / 89，契约 if03a，指标定义，HD-03），
+**有十二处须先定**——不少是一经上线就改不动的（代理键）。开发机不替设计做这些决定。
+
+**本步范围**：staging `stg_icp_cdr_voice` 与 `core.fact_call_leg`。`core.fact_call`（通话级聚合）规则缺口更多（见第三节），放下一步。
+
+### 一、需定
+
+| # | 问题 | 依据 / 现状 | 开发机建议 |
+| --- | --- | --- | --- |
+| 1 | **ICP 的 `src_system` 取什么值**。`core.sk(站点, src_system, 自然键)` 的一部分——**上线后改它等于全部主键重算** | 两张事实表 NOT NULL，任何文档、契约、DDL 都没给值 | `icp`：按「系统」而不按「源」（`icp_cdr_voice`）取，同一系统的话单、参照数据、坐席会话共用一个命名空间，坐席工号在 dim_agent 与 fact_call_leg 上算出同一个键 |
+| 2 | **站点**：`site_code` 与 `core.dim_site` 那一行由谁写 | DDL 注释 `'MKK'`；dim_site 无写入方；if03d 把 vdn 数据集指向 dim_site，但 if03d 未发布 | `MKK`；以结构变更写入这一行（站点是部署常量，不是接入数据）。**name_ar / name_en 请给定**，开发机不编 |
+| 3 | **坐席与技能队列维度是空的**（if03d 未接入），而 `agent_sk` / `queue_sk` 有外键 | 只有接入侧的「维度迟到进待澄清、不隔离」（LD-01），core 侧没有规则；dim 的 name、role_code NOT NULL，造不出占位成员 | 维度到之前 `agent_sk` / `queue_sk` 留空，原值在 `device_no` / `queue_code` 里；维度接入后由同一模型重算填上（按第 7 条它属于「派生内容变了」，会被写入）。不造推断成员 |
+| 4 | **DD-06 与两个 CHECK 冲突**：`direction` 只许 inbound / outbound / internal，`release_source` 只许 agent / caller / system——**没有「未映射」可写** | DD-06「未映射不得归入其他」。契约把两个集合以外的 CALLTYPE 一律当 internal——已知的内部呼叫与「值表里根本没有」的码被混在一起 | 新结构变更给两列 CHECK 加 `unmapped`。值表内、但不在呼入 / 呼出集合 → `internal`；**值表外 → `unmapped`**；release_cause 不在归类表 → `unmapped`。未映射行数作为 M-03 可见的计数 |
+| 5 | **释放原因归类表（429 个码）运行时放哪** | 在 `3rd API/icp_release_cause.csv`，不随系统部署（与当初 CALLTYPE 值表同一问题）；M-C03、M-C11 压在它上面 | 进契约 if03a 的 `enums.release_cause.classes`（码 → agent / caller / system），升 v4。理由同 CALLTYPE：LD-01 4.3「取值集合登记在契约 definition 中」，运行期唯一读取点是库。须与 CSV 一致，由生成脚本写入并比对 |
+| 6 | **主叫号码哈希 `caller_number_hash`** | DD-35 敏感字段；没有算法、盐、规范化；CALLERNO 可为邮件或网址；不加盐的电话号码哈希可被穷举还原 | 本步先**留空**，不建议现在定一个将来要改的算法（改算法 = 历史哈希全变，R-06 的分组断档）。若要现在做：HMAC-SHA256，密钥只存 `/etc/oss911`、不入库，规范化规则另定。请定 |
+| 7 | **DD-82「版本更大」在 core 里没法比**：core 没有存版本的列 | 契约 `core_version: from: observed_at`；observed_at 不是任何表的列 | 新结构变更给 `fact_call_leg` 加 `src_observed_at timestamptz`（取所选观测的 `raw.ingested_at`——必须是**收到**的时刻，不是 staging 的时刻：周一的批次周四放行，不得覆盖周二的新数据）。写入条件：观测更新 **且** core 行的派生内容哈希不同；或同一观测、派生内容变了（归类表更正、维度补齐）。「内容」按 core 行算而不按源端原文——否则第 3、5 条的重算永远写不进去 |
+| 8 | **一行的 `date_key` 变了怎么办**（同一 CALLID+CALLIDNUM 的 WAITBEGIN 变了） | 无规则。主键 (sk, date_key)，跨分区唯一只靠测试 | 写入按 sk 先删后插（任何分区里的旧行一并删），只对第 7 条判定为「变了」的行做——等价于一次 UPDATE，不违反 DD-78。WAITBEGIN 相差超过 24 小时则按第 9 条进待澄清、不写 |
+| 9 | **24 小时防线**（Mac 侧 2026-10-13 定：同键两次观测 WAITBEGIN 相差 >24h 视为键可能重复，进待澄清、不写 core）——**dbt 对 `meta.clarification_queue` 没有写权限** | 0004 只授了 ingest | 新结构变更授 `oss911_transform` 对 `clarification_queue` 的 INSERT（同一值只开一条，同接入的做法）。`value_profile`、`reference_value` 的写入不在本步，暂不授 |
+| 10 | **dbt 什么时候跑** | 任何文档都没写；DD-08 三档（准实时约 1 分钟 / 当日临时 / 日切封账）；LD-02「夜间构建」指 mart | 接在增量后面：`ingest_icp_cdr_voice` 增加第二个任务 `dbt build --select stg_icp_cdr_voice+ fact_call_leg`，进 pool `dbt_build`。即每 5 分钟一次，core 话单比 raw 晚一个周期以内。mart 的夜间构建另起 DAG，到时再定 |
+| 11 | **core 分区只往前建了一个月**：补数早于此会因无分区失败；之后也没有任何东西按月预建 | 40-schema 初始窗口；DD-77「分区缺失属必须监控项」 | 每天一次的维护任务调 `meta.ensure_monthly_partitions` 往后建 3 个月（dbt 身份，已有 EXECUTE）；补数前由补数步骤先建它覆盖的月份 |
+| 12 | **`source_tz_offset`**：ICP 不给偏移 | LD-02 第 6 章要求记录原始偏移；DD-60 / LD-01 6.3 的先例：「保留并在元数据中说明它是约定而非源端事实」 | 写入契约 `source_timezone` 的偏移（UTC 即 0），并在列注释与契约里写明「来自契约约定，非源端事实」。也可以留空——请定 |
+
+### 二、拟（开发机的实现选择，无异议即按此）
+
+| # | 选择 |
+| --- | --- |
+| 1 | dbt 项目放 `src/dbt/`，随发布目录部署（同 DAG 文件）；profile 沿用 30-python 生成的那份（`role: oss911_transform`，session 池）。**不引入任何 dbt 包**（dbt_utils 之类）：离网、许可、八年维护都多一件事，需要的几个宏自己写 |
+| 2 | `stg_icp_cdr_voice`：增量，取「可处理（未隔离或已放行）且本模型未登记」的批次（DD-89）；post-hook 在同一事务内登记这些批次。每个原始观测一行，不在 staging 去掉版本——选哪一版是 core 的事 |
+| 3 | staging 的类型化：空串 → NULL；时间 `to_timestamp(text, 'YYYY-MM-DD HH24:MI:SS')` 再按契约 `source_timezone` 解释为 timestamptz（读库内契约，不读会话时区）；格式不符的值接入时已整批隔离，放行的批次里若仍有，置空并计入「未映射」计数而不让模型失败 |
+| 4 | `direction` 的呼入 / 呼出集合从库内契约 `definition` 读（LD-01 4.3），不写死在模型里 |
+| 5 | `date_key` = wait_begin 在 Asia/Riyadh 的日历日（LD-02 第 6 章「日切以 00:00 AST 为界」）。**AS-12 / IR-35 仍是「拟」**：日切若改，date_key 要重算 |
+| 6 | 通话键 `call_sk = core.sk(MKK, icp, core.nk(CALLID))`，腿键 `call_leg_sk = core.sk(MKK, icp, core.nk(CALLID, CALLIDNUM))`；`queue_code` 取 DEVICETYPE = 1 时的 DEVICENO（DDL 有此列、契约没有映射） |
+| 7 | `correction_seq` 本层恒为 0（修正与 close_version 属 mart，LD-02 第 10 章）；`last_change_at` 只在内容真变时更新，`built_at` 每次写入时更新——两者的 DEFAULT 只对 INSERT 生效，写入时显式给值 |
+| 8 | dbt 测试：sk 跨分区唯一（TC-DISC-13）、键非空、`direction` / `release_source` 取值、`is_last_leg` 与 `leg_seq` 一致、每个 CALLID 至多一个 -1；都随构建运行、失败即失败 |
+
+### 三、下一步（fact_call）要先补的规则
+
+`call_result_sk` 无派生规则；`call_type_code` / `direction` 取哪条腿；首腿或末腿缺失（进行中、或在待处理批次里）时怎么办；
+`is_transferred` 的原因码没有归类表；M-C07 定义「按坐席腿逐条平均」而 source_tables 写的是 `fact_call`（其 talk_seconds 是按通话的合计），
+两种平均不是一个数；M-C11 用坐席腿的 RELEASECAUSE，而文档说它只在末腿有意义（Q23）。这些在写 fact_call 前请定。
+
+### 四、顺带发现的文档问题（供 Mac 侧顺手更正）
+
+- ddl/02 文件头说每张 core 表都有 `ingested_at`，事实表 DDL 里没有
+- LD-10 的 TC-DISC-04、TC-ING-01/02 与 `test/cases_seed.csv` 的编号含义不一致
+- AS-33 引用的问题单编号应为 Q21（写成了 Q22）；CALLID 唯一范围是 Q20
+- M-C11、M-C13 依赖 mapped_unverified 的列，却标 `depends_unverified: false`（与 DD-06、LD-03 不符）
+- AS-32 说核实结果回写 if03a 的 `integration_checks` 段，该段不存在
