@@ -19,8 +19,8 @@ Modes (DD-89):
   backfill     explicit window; batches are marked backfill; the watermark is not touched
   resweep      the daily re-sweep (LD-01 4.4) of one day, given by the DAG from its logical date (--day): that whole
                day in the source's time zone, extended back by the effective lookback (the lookback is resolved
-               here, from the contract and the hot-tuned value, so the DAG passes only the day -- DD-89 note). A
-               backfill in every respect (batches marked backfill, watermark untouched); never derived from "now",
+               here, from the contract and the hot-tuned value, so the DAG passes only the day -- DD-89 note). Like a
+               backfill it leaves the watermark untouched; its batches are marked resweep (0005); never from "now",
                so a retry sweeps the same day and a missed day is swept when the DAG catches up. It catches calls
                longer than the lookback, which incremental runs never see end. After it, the calls in the window
                still without a final leg are reported, received and usable (OBSERVE_AFTER_RESWEEP)
@@ -222,8 +222,8 @@ class Runner:
                  f"{fmt(start)} / {fmt(end)}, {len(slices)} batch(es), lookback {lookback} min")
 
         client = self._icp_client(definition)
-        # ingest_batch.mode knows incremental and backfill (0004); a re-sweep is a backfill with a computed window
-        batch_mode = "incremental" if self.mode == "incremental" else "backfill"
+        # ingest_batch.mode: incremental, backfill, resweep (0005) -- the batch records which kind of run made it
+        batch_mode = self.mode
         writer = BatchWriter(conn, self.source_id, version, self.run_id, batch_mode, params, definition)
         try:
             for seq, (s, e) in enumerate(slices, 1):

@@ -1,5 +1,5 @@
 -- =====================================================================
--- Verification of database roles and grants (structural changes 0002 · 0003 · 0004 · DD-74 · DD-75 · DD-76 · DD-88)
+-- Verification of database roles and grants (structural changes 0002 to 0005 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
 --
 -- It verifies the five privilege roles themselves: inside a transaction the script creates one temporary
 -- login user per role, the superuser session does SET ROLE to that login user, and then runs statements
@@ -155,6 +155,16 @@ SELECT pg_temp.expect_error ($$INSERT INTO meta.ingest_batch (run_id, batch_seq,
                                VALUES (gen_random_uuid(), 1, 'zz_check', 'incremental', 'a', 'b', 1, 1, 1,
                                        sha256('x'))$$, '%ck_ingest_batch_file%');   -- checksum without size
 SELECT pg_temp.expect_denied($$UPDATE meta.ingest_batch SET row_count = 0 WHERE false$$);
+-- The re-sweep is a batch mode of its own (0005); anything else is refused
+SELECT pg_temp.expect_ok    ($$INSERT INTO meta.ingest_batch (run_id, batch_seq, source_id, mode, window_from, window_to,
+                                   row_count, rows_written, contract_version)
+                               VALUES ('00000000-0000-0000-0000-0000000000c2', 1, 'zz_check', 'resweep', 'a', 'b', 0, 0, 1)$$);
+SELECT pg_temp.expect_error ($$INSERT INTO meta.ingest_batch (run_id, batch_seq, source_id, mode, window_from, window_to,
+                                   row_count, rows_written, contract_version)
+                               VALUES (gen_random_uuid(), 1, 'zz_check', 'manual', 'a', 'b', 0, 0, 1)$$, '%ck_ingest_batch_mode%');
+-- The staging batch registry is dbt's (0005), not ingestion's
+SELECT pg_temp.expect_denied($$INSERT INTO meta.staging_batch_state (model, run_id, batch_seq)
+                               VALUES ('stg_x', '00000000-0000-0000-0000-0000000000c1', 1)$$);
 SELECT pg_temp.expect_denied($$DELETE FROM meta.ingest_batch WHERE false$$);
 -- raw.icp_cdr_voice: append only, every row belongs to a registered batch
 SELECT pg_temp.expect_ok    ($$INSERT INTO raw.icp_cdr_voice (callid, callidnum, payload, run_id, batch_seq,
@@ -206,6 +216,15 @@ SET ROLE :"transform_user";
 SELECT pg_temp.expect_ok    ($$SELECT * FROM raw.zz_roles_check$$);
 SELECT pg_temp.expect_ok    ($$SELECT * FROM raw.icp_cdr_voice$$);
 SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.ingest_batch$$);
+-- Staging batch registry (0005, DD-89): dbt registers and, when rebuilding a model, clears; only existing batches
+SELECT pg_temp.expect_ok    ($$INSERT INTO meta.staging_batch_state (model, run_id, batch_seq)
+                               VALUES ('stg_icp_cdr_voice', '00000000-0000-0000-0000-0000000000c1', 1)$$);
+SELECT pg_temp.expect_error ($$INSERT INTO meta.staging_batch_state (model, run_id, batch_seq)
+                               VALUES ('stg_icp_cdr_voice', gen_random_uuid(), 1)$$, '%fk_staging_batch_state_batch%');
+SELECT pg_temp.expect_error ($$INSERT INTO meta.staging_batch_state (model, run_id, batch_seq)
+                               VALUES ('Bad Name', '00000000-0000-0000-0000-0000000000c1', 2)$$, '%staging_batch_state_model_check%');
+SELECT pg_temp.expect_denied($$UPDATE meta.staging_batch_state SET staged_at = now()$$);
+SELECT pg_temp.expect_ok    ($$DELETE FROM meta.staging_batch_state WHERE model = 'stg_icp_cdr_voice'$$);
 SELECT pg_temp.expect_denied($$INSERT INTO raw.zz_roles_check VALUES (2, 'x')$$);
 SELECT pg_temp.expect_denied($$INSERT INTO meta.ingest_batch (run_id, batch_seq, source_id, mode, window_from, window_to,
                                    row_count, rows_written, contract_version)

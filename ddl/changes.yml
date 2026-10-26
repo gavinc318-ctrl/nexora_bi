@@ -54,3 +54,9 @@
   summary: Batch registry meta.ingest_batch, quarantine key moved to it, hot-tuned parameters meta.source_runtime_param, raw.icp_cdr_voice partitioned by month, partition function extended to raw, privileges narrowed (DD-88)
   files:
     - changes/0004_ingest_batch_and_icp_cdr_raw.sql
+
+- id: "0005"
+  run_as: owner
+  summary: Staging batch registry meta.staging_batch_state (DD-89), re-sweep as a third batch mode
+  files:
+    - changes/0005_staging_batch_state.sql
