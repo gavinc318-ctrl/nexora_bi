@@ -1377,3 +1377,11 @@ dbt 生成 SQL 时把每个表写成三段式 `库名.schema.表名`，库名取
 
 真机现状：0005、0006 已执行，dbt 项目已部署；构建在 staging 第一步失败、未写入任何数据（事务回滚）。`build_icp_cdr_voice` 处于暂停，
 不要开启，等这件事定了再说。
+
+> **Mac 侧处理结果（2026-10-27）：选 A，加 HBA 护栏（DD-93）**
+> - 会话池改名 `oss911`，事务池 `oss911_txn`；DD-67「按库名选池模式」不变。
+> - **护栏**：pgBouncer `auth_type = hba`，HBA 按池 × 用户拒绝错配——`oss911_query_svc` / `oss911_admin_svc` 连 `oss911` → reject；
+>   dbt、ingest 的登录用户连 `oss911_txn` → reject。连错池立刻失败。HBA 文件随登录用户增减由剧本生成。
+> - `ingest.conf` 库名改 `oss911`；21 / 30 / 40、inventory、runbook 05 / 08 / 13 随改；pgBouncer 重启一次。`cad_mirror` 不动。
+> - troubleshooting 请加一条（第 33）；CLAUDE.md 第 5 节第二条已加这个实例。改完再开 `build_icp_cdr_voice`。
+
