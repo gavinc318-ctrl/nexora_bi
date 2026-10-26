@@ -1,0 +1,33 @@
+version: 2
+
+models:
+  - name: fact_call_leg
+    description: "core.fact_call_leg -- written by this model, owned by oss911_owner (DD-74 · DD-91)."
+    columns:
+      - name: call_leg_sk
+        description: "Unique across all partitions: the primary key includes date_key, so the database cannot check it (TC-DISC-13)."
+        data_tests: [not_null, unique]
+      - name: src_natural_key
+        data_tests: [not_null, unique]
+      - name: direction
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['inbound', 'outbound', 'internal', 'unmapped']
+      - name: release_source
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['agent', 'caller', 'system', 'unmapped']
+      - name: site_sk
+        data_tests:
+          - relationships:
+              arguments:
+                to: source('core', 'dim_site')
+                field: site_sk
+
+sources:
+  - name: core
+    schema: core
+    tables:
+      - name: dim_site

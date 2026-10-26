@@ -6,6 +6,7 @@
 #   not /opt/oss911/release/, which holds the DAG manifest that airflow rewrites by rename)
 #       contracts/  release.yml, pools.yml, resweep.yml and the released contracts
 #       dags/       the DAG files of src/dags
+#       dbt/        the dbt project of src/dbt (project file, models, macros, tests)
 #       SOURCE      git commit and whether the working tree was clean, for tracing (not part of the hash)
 #
 # Every step of a deployment reads this one copy -- validation, the DagBag rehearsal, conversion, pools, re-sweep
@@ -28,7 +29,48 @@
                               | map('regex_replace', '^', repo_root ~ '/contracts/') | list)))
          | combine(dict(query('ansible.builtin.fileglob', repo_root ~ '/src/dags/*.py') | map('basename')
                         | map('regex_replace', '^', 'dags/') | list
-                        | zip(query('ansible.builtin.fileglob', repo_root ~ '/src/dags/*.py')))) }}
+                        | zip(query('ansible.builtin.fileglob', repo_root ~ '/src/dags/*.py'))))
+         | combine(dict(_dbt_files | map('regex_replace', '^' ~ (repo_root ~ '/src/') | regex_escape, '') | list
+                        | zip(_dbt_files))) }}
+  vars:
+    # The dbt project's files, by the fixed layout of src/dbt. fileglob neither recurses nor expands a wildcard in a
+    # directory name, so each model layer directory is named here: staging and core now; mart and ai are added with
+    # their first models (a pattern for a directory that does not exist yet only prints a warning). A model in a layer
+    # directory not listed here would be missing from the release without any error.
+    # Generated directories -- target, logs, dbt_packages -- are never part of a release
+    _dbt_files: >-
+      {{ query('ansible.builtin.fileglob',
+               repo_root ~ '/src/dbt/*.yml', repo_root ~ '/src/dbt/macros/*.sql', repo_root ~ '/src/dbt/tests/*.sql',
+               repo_root ~ '/src/dbt/models/staging/*.sql', repo_root ~ '/src/dbt/models/staging/*.yml',
+               repo_root ~ '/src/dbt/models/core/*.sql', repo_root ~ '/src/dbt/models/core/*.yml') | sort }}
+
+# fileglob cannot be told "everything under src/dbt"; this check can. A file the list above misses fails the
+# deployment instead of silently leaving a model out of the release
+- name: Find every file of the dbt project (control node)
+  ansible.builtin.find:
+    paths: "{{ repo_root }}/src/dbt"
+    recurse: true
+    file_type: file
+    excludes: ["*.pyc"]
+  delegate_to: localhost
+  become: false
+  register: _dbt_all
+  check_mode: false
+
+- name: Assert the release lists every file of the dbt project
+  ansible.builtin.assert:
+    that:
+      - _dbt_missing | length == 0
+    fail_msg: >-
+      Files under src/dbt that the release does not list (tasks/release_dir.yml, _dbt_files): {{ _dbt_missing | join(', ') }}.
+      Add their directory to the list.
+    quiet: true
+  vars:
+    _dbt_missing: >-
+      {{ _dbt_all.files | map(attribute='path')
+         | reject('search', '/src/dbt/(target|logs|dbt_packages)/')
+         | map('regex_replace', '^' ~ (repo_root ~ '/src/') | regex_escape, '')
+         | reject('in', _rel_sources.keys() | list) | list }}
 
 - name: Hash the release content (control node)
   ansible.builtin.command:
@@ -45,8 +87,8 @@
   ansible.builtin.shell:
     cmd: |
       printf 'commit %s\n' "$(git -C {{ repo_root }} rev-parse HEAD 2>/dev/null || echo unknown)"
-      if [ -n "$(git -C {{ repo_root }} status --porcelain -- contracts src/dags 2>/dev/null)" ]; then
-        echo "working tree: modified (contracts/ or src/dags/ differ from the commit)"
+      if [ -n "$(git -C {{ repo_root }} status --porcelain -- contracts src/dags src/dbt 2>/dev/null)" ]; then
+        echo "working tree: modified (contracts/, src/dags/ or src/dbt/ differ from the commit)"
       else
         echo "working tree: clean"
       fi
@@ -74,6 +116,16 @@
     - "{{ rel_dir }}"
     - "{{ rel_dir }}/contracts"
     - "{{ rel_dir }}/dags"
+  when: rel_create | bool
+
+- name: Create the release's dbt directories
+  ansible.builtin.file:
+    path: "{{ rel_dir }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ rel_names | select('match', '^dbt/') | map('dirname') | unique | sort | list }}"
   when: rel_create | bool
 
 # force: false -- a file already in the directory is never overwritten; whether it is still this release's file is

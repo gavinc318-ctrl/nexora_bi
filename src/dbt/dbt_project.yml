@@ -1,0 +1,37 @@
+# dbt project of OSS911 BI (LD-02 · LD-03). Deployed from the release directory to /opt/oss911/dbt by 50-dags.yml
+# and run by Airflow through BashOperator, like the ingestion program (DD-84).
+#
+# Rules this project lives by (CLAUDE.md section 6 · LD-02 chapter 13 · DD-91):
+#   - the profile sets role: oss911_transform; staging, mart and ai belong to it, core does not
+#   - core is written incrementally into the existing tables only; dbt is not core's owner, and --full-refresh of a
+#     core model is refused (full_refresh: false below) -- a rebuild goes through reprocessing the batches instead
+#   - write only rows whose content really changed (DD-78), staging consumes raw by batch (DD-89)
+#   - no dbt packages: offline network, licences, eight years of maintenance (DD-91, development side's item 1)
+name: oss911
+version: "1.0.0"
+config-version: 2
+profile: oss911
+
+# Offline network: dbt must not try to send usage statistics anywhere (it would wait on a connection that never comes)
+flags:
+  send_anonymous_usage_stats: false
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+clean-targets: []
+
+on-run-start:
+  - "{{ create_safe_casts() }}"            # target and logs live outside the read-only project directory (--target-path, --log-path)
+
+vars:
+  site_code: MKK             # DD-91 item 2; dim_site's row is written by structural change 0006
+  report_timezone: Asia/Riyadh   # date_key is the day in this zone; day cut 00:00 AST (LD-02 chapter 6, AS-12)
+
+models:
+  oss911:
+    staging:
+      +schema: staging
+    core:
+      +schema: core
+      +full_refresh: false   # core belongs to oss911_owner; dbt may not drop or recreate it (DD-74)

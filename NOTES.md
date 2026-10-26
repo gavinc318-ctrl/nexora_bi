@@ -1302,3 +1302,46 @@ LD-07 2.1、DD-74 注、CLAUDE.md 硬约束（第十三条）；Gavin 定的三�
 - M-C11、M-C13 的 `depends_unverified` 应为 true：请开发机改 metrics.yaml（口径文件在开发机，规则 DD-06 / LD-03 不变）。
 - AS-32：已改为「if03a 须按 if03d 同一格式增设 integration_checks 段后回写」——请开发机在 if03a v4 一并加该段。
 
+
+## 2026-10-27  开发机：DD-91 已实现——0006、if03a v4、dbt 项目（staging 与 fact_call_leg）、构建与维护 DAG
+
+> 对上节「Mac 侧：dbt 层十二处需定——全部已定」的处理结果。
+
+| 项 | 落实 |
+| --- | --- |
+| 结构变更 0006 | dim_site 写入 MKK（site_sk = `core.site_namespace('MKK')`，即该站点派生一切键的命名空间本身）；fact_call_leg 加 `src_observed_at`；四个 CHECK（两表的 direction、release_source / released_by）加 `unmapped`；source_tz_offset 列注释；授 transform 写 clarification_queue |
+| if03a v4 | `enums.release_cause.classes`（37 / 25 / 367）由 `tools/icp_contract_enums.py` 从 CSV 生成，`--check` 比对；`integration_checks` 十二条；校验器认 classes 并列为必填 |
+| metrics | M-C11、M-C13 的 `depends_unverified: true`（metric 的 version 未动：口径没变，变的是标记——若须随之升版本请告知） |
+| dbt | `src/dbt/`：`stg_icp_cdr_voice`（按批次消费、类型化、方向与挂断方映射）、`fact_call_leg`（delete+insert，只写变了的行）；不引入任何包 |
+| DAG | 独立的 `build_icp_cdr_voice`（同频 5 分钟、pool dbt_build）与 `maintenance_partitions`（每日，预建 3 个月）；新文件 `src/dags/oss911_build.py` |
+| 部署 | dbt 项目进发布目录，50 装到 `/opt/oss911/dbt`（与 DAG 一样：只装发布内的文件、多余的删）；发布目录对 `src/dbt` 做「漏列即失败」的核对 |
+
+### 临时库实测（开发机，假接口数据）
+
+首次构建 18 项测试全过：raw = staging = core 2632 行。之后逐条验证 DD-91：
+
+| 场景 | 结果 |
+| --- | --- |
+| 没有新数据 | 两个模型都 `INSERT 0 0` |
+| 下一次增量（回看重叠） | 只写 17 条新腿；原 2632 行 xmin 一个都没变（DD-78） |
+| 清掉 core 的登记、全部重算 | 写入 0 行：派生内容没变就不写 |
+| 更新的观测、内容变了 | 改写 |
+| 更旧的观测（迟放行） | 不写，新数据保留（DD-82） |
+| 被隔离的批次 | 跳过；放行后下一次构建自动补入 |
+| date_key 跨月（10-31 23:30 AST → 11-01 00:30） | 行移到 `fact_call_leg_p202611`（分区由 pre-hook 建出），旧分区不留副本 |
+| 同键 WAITBEGIN 相差 2 天 | 不写 core；一条待澄清；再来一次不重复开 |
+| 分区维护 | 首次建 52 个，重跑 0 个 |
+
+### 开发机的三处处理，请知悉
+
+1. **ddl/02 的文件头没改**：它属于已执行的变更 0001，改了校验和即失败（DD-73）。更正写在 0006 的文件头里
+2. **挂断方只看末腿**：非末腿的 `release_source` 为 NULL（不适用），不计入 unmapped——否则每通电话的非末腿都会被算成「未映射」，
+   把真正的未映射淹没。与 Mac 侧下一轮「M-C11 改用末腿」一致
+3. **core 怎么知道 staging 有新数据**：core 模型也用 `meta.staging_batch_state` 登记（model = `fact_call_leg`）。它的登记在 post-hook
+   里按「staging 中本模型尚未登记的批次」写，这只在 dbt 不并发时精确——pool `dbt_build` 一槽保证了这一点（DD-85），已写在宏的注释里
+
+### 未做
+
+- fact_call（等 Mac 侧补 LD-03 与 metrics 的规则）
+- caller_number_hash（DD-92，密钥进 dbt 的路径随 LD-07 那批定）
+- `value_profile`、`reference_value`、mapping_registry 逐列登记的写入方

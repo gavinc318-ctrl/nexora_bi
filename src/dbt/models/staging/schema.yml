@@ -1,0 +1,21 @@
+version: 2
+
+models:
+  - name: stg_icp_cdr_voice
+    description: "ICP call legs, typed and mapped, one row per raw observation (DD-89 · DD-91)."
+    columns:
+      - name: direction
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['inbound', 'outbound', 'internal', 'unmapped']
+      - name: release_source
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['agent', 'caller', 'system', 'unmapped']
+      - name: run_id
+        data_tests: [not_null]
+      - name: observed_at
+        data_tests: [not_null]

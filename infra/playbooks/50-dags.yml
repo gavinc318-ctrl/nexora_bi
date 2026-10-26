@@ -1,4 +1,4 @@
-# 50-dags -- deploy the Airflow DAGs of the release into the DAG folder
+# 50-dags -- deploy the Airflow DAGs and the dbt project of the release
 #
 # Basis: DD-84 · DD-85 · LD-01 2.5 · LD-06 2.4
 # Prerequisites: 30-python (Airflow, the pools, venv-ingest) · 45-contracts (the DAG manifest
@@ -12,6 +12,9 @@
 #   keeps running it.
 # * After copying, the DAGs are parsed and written to the metadata database at once (airflow dags reserialize)
 #   instead of waiting for the DAG processor's next scan, and import errors fail the playbook.
+# * The dbt project goes to /opt/oss911/dbt (root, read-only for airflow) the same way: exactly the release's files,
+#   a file no longer in the release is removed -- a stale model would still be built. dbt writes its target and logs
+#   under the airflow home, never into the project (src/dags/oss911_build.py).
 # * New DAGs start paused (Airflow's dags_are_paused_at_creation). Unpausing is an operator action
 #   (runbook/11); start / stop of a source is meta.source_contract.enabled, the DAG's pause is for operations.
 
@@ -24,6 +27,7 @@
     oss911_etc: /etc/oss911
     repo_root: "{{ playbook_dir }}/../.."
     dags_dir: "{{ airflow_home }}/dags"
+    dbt_dir: "{{ venv_root }}/dbt"
     af_venv: "{{ venv_root }}/venv-airflow"
 
   tasks:
@@ -53,6 +57,43 @@
         group: airflow
         mode: "0640"
       loop: "{{ dag_files }}"
+
+    # ---------- The dbt project ----------
+    - name: Take the dbt files of the release
+      ansible.builtin.set_fact:
+        dbt_files: "{{ rel_names | select('match', '^dbt/') | map('regex_replace', '^dbt/', '') | list }}"
+
+    - name: Create the dbt project directories
+      ansible.builtin.file:
+        path: "{{ dbt_dir }}/{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop: "{{ [''] + (dbt_files | map('dirname') | reject('equalto', '') | unique | sort | list) }}"
+
+    - name: Install the dbt project from the release directory
+      ansible.builtin.copy:
+        src: "{{ rel_dir }}/dbt/{{ item }}"
+        remote_src: true
+        dest: "{{ dbt_dir }}/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ dbt_files }}"
+
+    - name: Find the files in the dbt project directory
+      ansible.builtin.find:
+        paths: "{{ dbt_dir }}"
+        recurse: true
+        file_type: file
+      register: _dbt_present
+
+    - name: Remove dbt files that are not in this release
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ _dbt_present.files | map(attribute='path') | reject('in', dbt_files | map('regex_replace', '^', dbt_dir ~ '/') | list) | list }}"
 
     # __pycache__ is written by Airflow's own DAG processor on every parse; removing it would make every run
     # "changed" (and it would only come back)
@@ -136,4 +177,5 @@
       loop: >-
         {{ (_manifest.content | b64decode | from_json).sources | map(attribute='source_id') | map('regex_replace', '^', 'ingest_') | list
            + (_manifest.content | b64decode | from_json).sources | selectattr('resweep') | map(attribute='source_id')
-             | map('regex_replace', '^', 'resweep_') | list }}
+             | map('regex_replace', '^', 'resweep_') | list
+           + ['maintenance_partitions'] }}
