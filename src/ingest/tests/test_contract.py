@@ -130,7 +130,7 @@ class ContractRulesTest(unittest.TestCase):
         paths = ["endpoint.path", "endpoint.host_ref", "endpoint.request_body", "auth.header", "auth.obtain.path",
                  "auth.obtain.credential_ref", "window.max_span_hours", "window.min_span_seconds",
                  "window.lookback_minutes", "window.source_timezone", "watermark.column", "idempotent_key",
-                 "columns", "enums.call_type.values"]
+                 "columns", "enums.call_type.values", "enums.release_cause.classes", "window.schedule"]
         for path in paths:
             for empty in ("missing", None, "", []):
                 doc = cdr()
@@ -143,6 +143,19 @@ class ContractRulesTest(unittest.TestCase):
                 else:
                     node[leaf] = empty
                 self.assertProblem(doc, f"{path} is required")
+
+    def test_release_cause_classes(self):
+        doc = cdr()
+        self.assertEqual(validate_contract(doc), [])
+        doc["enums"]["release_cause"]["classes"]["callee"] = [1]
+        self.assertProblem(doc, "unknown classes")
+        doc = cdr()
+        cls = doc["enums"]["release_cause"]["classes"]
+        cls["caller"] = cls["caller"] + [cls["agent"][0]]
+        self.assertProblem(doc, "is in both")
+        doc = cdr()
+        doc["enums"]["release_cause"]["classes"]["system"] = ["501"]
+        self.assertProblem(doc, "integer codes")
 
     def test_source_without_ingestion_cannot_be_released(self):
         doc = cdr()

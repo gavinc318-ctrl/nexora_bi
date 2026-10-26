@@ -189,7 +189,7 @@ metrics:
     dimensions: [dim_date, dim_site, dim_agent]
     source_tables: [core.fact_call_leg]
     version: 2
-    depends_unverified: false
+    depends_unverified: true            # RELEASECAUSE 归类为 mapped_unverified（DD-06 · LD-03，Mac 侧 2026-10-27）
     retrospective: false
     published: true
     rfp: "1.6.2.20"
@@ -221,7 +221,7 @@ metrics:
     dimensions: [dim_date, dim_site, dim_agent]
     source_tables: [core.fact_call_leg]
     version: 2
-    depends_unverified: false
+    depends_unverified: true            # UCENTERREASON 为 mapped_unverified（DD-06 · LD-03，Mac 侧 2026-10-27）
     retrospective: false
     published: true
     rfp: "1.6.2.20"

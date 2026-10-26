@@ -39,6 +39,7 @@ REQUIRED = {
         "window.schedule",                 # the DAG's schedule, taken into the DAG manifest (LD-01 2.1)
         "watermark.column", "idempotent_key", "columns",
         "enums.call_type.values",          # the batch checks compare CALLTYPE against it (cdr.py)
+        "enums.release_cause.classes",     # core's release_source (DD-91 item 5): staging reads it from the contract
     ],
 }
 _MISSING = object()
@@ -233,6 +234,27 @@ def validate_contract(doc: dict) -> list[str]:
                 p.append("window.source_timezone must be an IANA time zone name, e.g. UTC or Asia/Riyadh")
         elif "max_span_hours" in win:
             p.append("window.source_timezone is required for a time window (which zone the source's times are in)")
+
+    # Classification of codes into fixed classes (release causes -> agent / caller / system, DD-91 item 5): every
+    # class known, codes integers, no code in two classes
+    for name, enum in (doc.get("enums") or {}).items():
+        if isinstance(enum, dict) and "classes" in enum:
+            cls = enum["classes"]
+            allowed = {"release_cause": {"agent", "caller", "system"}}.get(name)
+            if not (isinstance(cls, dict) and cls):
+                p.append(f"enums.{name}.classes must map a class to a list of codes")
+                continue
+            if allowed is not None and set(cls) - allowed:
+                p.append(f"enums.{name}.classes has unknown classes {sorted(set(cls) - allowed)}; allowed {sorted(allowed)}")
+            seen: dict = {}
+            for c, codes in cls.items():
+                if not (isinstance(codes, list) and codes and all(_is_int(x) for x in codes)):
+                    p.append(f"enums.{name}.classes.{c} must be a non-empty list of integer codes")
+                    continue
+                for x in codes:
+                    if x in seen:
+                        p.append(f"enums.{name}.classes: code {x} is in both {seen[x]} and {c}")
+                    seen[x] = c
 
     # Value tables that batch checks compare against must be in the contract: the CSV files in 3rd API/ are
     # development material and are not deployed
