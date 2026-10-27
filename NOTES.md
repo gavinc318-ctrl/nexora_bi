@@ -1481,7 +1481,7 @@ Q30（config_version 是否单调、是否归零）已在单上，答复同样�
 | 4 | 同意：vdns 用 CTI 版本、其余用 VDN 版本，水位按 (ccId, vdnId)，只在 status = 2 取 |
 | 5 | 不调 POST；**N = 7 天**，作热调参数（白名单加 `version_stale_days`） |
 | 6 | 同意 valid_from 取 endTime；**首版用哨兵，接受这个推断**——哨兵值由开发机定一个 `sk_scd` 能表示的（`-infinity` 进 to_char 要实测），列注释写明 |
-| 7 | `unmapped`；**业务角色的指定来源是 M-10 人工维护**（SCD2 留痕），不等身份系统。Q35 仍问 |
+| 7 | **改**：ICP 工号只有接警员与其主管（Gavin，AS-36），故 role_code 默认 `call_taker`，主管由 M-10 标 `supervisor`；调度员的维度行将来自 CAD 上下岗记录。Q35 仍问但不阻塞 |
 | 8 | 同意 groupId → team_code；组名进 reference_value；monitorId 不落 |
 | 9 | 同意先写原文、译名走 label_override；LD-02 第 7 章已补这条 |
 | 10 | 同意留空、关系只在 raw、需要时立桥表 |
