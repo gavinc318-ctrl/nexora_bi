@@ -1403,3 +1403,70 @@ dbt、ingest 连 `oss911_txn` → `login rejected`；写入账号连 `oss911` / 
 （CLAUDE.md 第 5 节第三条：语法正确、语义错位，要用解析器复核）。现在 set 放在文件最前，渲染结果逐行核过：三条规则。
 
 CLAUDE.md 第 5 节「29 条」之类的条数：troubleshooting 现在 33 条，请 Mac 侧顺手改。
+
+## 2026-10-27  开发机：第 2 批下一步 if03d 参照数据（坐席、技能队列等维度）的实现方案，请 Mac 侧确认
+
+fact_call 等 Mac 侧补 LD-03 规则期间，ICP 线先做 if03d：`fact_call_leg` 的 `agent_sk` / `queue_sk` 等它，if03b / c 的坐席类事实也等它，
+它又不依赖 fact_call 的规则。把契约 if03d、LD-01 4.6 与第 9 章、LD-02 第 4、7、9 章、DD-12 / DD-56、ddl/02 与 ddl/04 的相关表、
+以及接口文档 synwas 一组（PDF p.907–933、p.1029–1033，逐页读完）对过一遍，**有十四处须先定**；其中几处是契约与接口文档对不上。
+开发机不替设计做这些决定。
+
+### 〇、接口文档里与契约不同的事实（先读这一段，后面的需定都从这里来）
+
+| # | 接口文档原文所示 | 契约现在的写法 |
+| --- | --- | --- |
+| a | **版本号不是按数据集的**：`versions` 返回一个 CTI 级版本（`ccId` 一个）加每个 VDN 一个版本（`vdnsVersion[]`），VDN 版本**一次覆盖该 VDN 的全部七个数据集**；另带 `startTime` / `endTime`（毫秒时间戳）、`status`（0 初始 / 1 进行中 / 2 成功 / 3 失败）、执行同步的网关集群 `clusterId` | `watermark: {type: sequence, column: config_version}`，一个水位 |
+| b | **GET 读的是网关自己的副本**，不是实时读 WAS：先要有一次 CTI / VDN 同步（`POST synwas/syncti`、`synvdn`），GET 返回上次成功同步的结果。这两个 POST **是写动作**（删 VDN 时网关会连带删其坐席、技能等），文档没说网关会不会自己定时同步 | 未提 |
+| c | 所有 GET 都是**全量**，无分页、无增量、无按版本取；表里没有任何时间或版本列 | 与「版本变了才拉全量」相符 |
+| d | `agents` 每行：`agentNo`、`agentName`（**单一名称**，样例里可为空串、可等于工号）、`groupId`（**一个**坐席组）、`skillId` 与 `skillGroupId`（**分号分隔的多值串**，样例可为 null）、`roleId`（分号分隔：2 配置管理员 / 3 质检员 / 4 普通坐席 / 5 报表管理员——**是 CMS 的权限角色，不是接警员 / 调度员 / 主管**） | `dim_agent.role_code NOT NULL`，取值注释为 call_taker · dispatcher · supervisor |
+| e | `groups`：`groupId`、`groupName`、`monitorId`（组长工号） | 契约写 target `core.dim_agent`，未说落哪列 |
+| f | `skills`：`skillId`、`skillName`（单一名称）、`realFlag`（1 实队列 / 0 虚队列）、`serverId`（业务类型 ID）、`mediaType`（1–20，5 = 普通语音） | `dim_queue.name_ar` / `name_en` 均 NOT NULL |
+| g | `skillgroups`：`skillGroupId`、`skillGroupName`、`skillIds`（分号分隔）——**技能与技能组是多对多** | `dim_queue.skill_group_code` 是单值列 |
+| h | `calledconfigs`：`accessCode`、`subCode`、`deviceType`、`deviceNo`、`deviceName`、`clientLevel`——接入码路由到哪个设备（技能队列、IVR 等） | target `core.dim_channel`；而 dim_channel 是**警情来源渠道**（phone · patrol · sms…，带 has_call） |
+| i | 文档类型与样例不符：`ccId` / `vdnId` 标 int 而样例是字符串；`startTime` 标 string 而样例是数字；`versions` 的 `result` 标 array 而样例是对象 | — |
+
+顺带回答 Mac 侧 10-27 节第二段的确认请求：**`DEVICETYPE = 1` 是技能队列**（PDF p.1033 设备类型附录，与 `3rd API/icp_device_type.csv` 一致）。
+
+### 一、需定
+
+| # | 问题 | 依据 / 现状 | 开发机建议 |
+| --- | --- | --- | --- |
+| 1 | **raw 表**：契约写 `target_raw: raw.icp_reference`，没有对应结构变更；而 LD-01 9.3、DD-56、`audit.reference_data_change_log` 的表注释都写「参照数据不经 raw 层」 | 后者说的是 M-10 的人工维护（译名、班次窗口），不是 ICP 同步来的配置 | 同步来的参照数据**经 raw**（契约为准），新结构变更建 `raw.icp_reference`；请把 9.3 那句收窄为「M-10 人工维护的参照数据不经 raw」 |
+| 2 | **raw 的列形**：八个数据集八种结构，LD-02 第 9 章要求「与源逐字一致」 | 一源一表 | 通用列：`dataset`、`src_natural_key`、`payload jsonb`（原样）、`vdn_version`，加标准接入元数据；不按数据集展开列——八种结构展开成宽表大半为空，且新增字段要改表 |
+| 3 | **raw 写快照还是写变化**：契约 `append_if_changed`。但只写变了的行，core 无法从 raw 区分「这个坐席没变」与「这个坐席消失了」，而「消失即置非当前」是契约要求 | 版本号只在同步后变；数据量小（坐席数百） | **版本变了就整份快照写入**（每个数据集一个批次，批次即快照）；core 以「最新快照里有没有」判断消失。去重仍在：同一版本重取（例如重跑）不再写。契约 `raw_write.mode` 改为 `snapshot_on_version` |
+| 4 | **以哪个版本为准**（〇-a） | 单一 VDN（AS-30，Q31 待书面确认） | 数据集 `vdns` 用 CTI 版本，其余七个用该 VDN 的版本；水位改为按（ccId, vdnId）各记一个。只在 `status = 2`（成功）时取数；进行中或失败本次跳过并记 run_log |
+| 5 | **网关的副本谁来刷新**（〇-b） | 若网关不自动同步，GET 永远是旧副本，版本号也永远不变——看起来像「配置没变」 | **本方不调 POST 同步**（写动作、会删数据，不属只读接入）；新增问题单一项问 ICP（见第三节）。在答复之前，`versions` 的 `endTime` 超过 N 天未变即告警，N 请定（建议 7） |
+| 6 | **缓变维的 valid_from 取什么**：源端不给生效时间 | `core.sk_scd` 把 valid_from 纳入键 | 取该版本同步的 `endTime`（网关上配置生效的时刻，源端事实）；取不到时用批次落地时间，并在列注释写明。**同一实体的第一版 valid_from = `-infinity`**：否则 10-19 以来、第一份快照之前的话单都关联不到坐席。代价：「第一版」覆盖它被观测之前的全部历史，是推断——请定是否接受 |
+| 7 | **`dim_agent.role_code` NOT NULL 无来源**（〇-d） | ICP 的 roleId 是 CMS 权限角色；接警员 / 调度员 / 主管是业务角色，ICP 不知道 | ICP 线只写 `call_taker`？不对：主管也有工号。建议 `unmapped`（DD-06），待身份系统或 M-10 提供业务角色后改；roleId 原样留在 raw。请定来源 |
+| 8 | **`dim_agent.team_code`（班组）是否取 ICP 坐席组 `groupId`** | 坐席组是管理分组、带组长 `monitorId`；DDL 注释「班组」 | 取 `groupId`；组名进 `meta.reference_value`（domain `agent_group`）；`monitorId` 暂不落 core（权限另走身份系统，DD-41） |
+| 9 | **`dim_queue` 双语名 NOT NULL，ICP 只给一个 `skillName`**（〇-f）；LD-02 第 7 章：「强制这件事在数据进入 core 之前完成」 | 若严格执行，新队列在 M-10 补译名之前进不了 core，`queue_sk` 一直空 | 两列先写源端原文，译名经 `meta.label_override` 覆盖、展现层取用（DD-56 已定「回落显示源端原文」，与此一致）。请定是否改 LD-02 第 7 章那句 |
+| 10 | **技能与技能组多对多**（〇-g），`skill_group_code` 单值 | — | `skill_group_code` 留空；技能组名进 `meta.reference_value`（domain `skill_group`）；成员关系暂只在 raw。报表若要按技能组汇总，另立桥表——等有指标要它再说 |
+| 11 | **被叫配置落哪**（〇-h）：dim_channel 是警情来源渠道，接入码路由配置不是 | 写进 dim_channel 会把「911 接入码」和「巡逻上报」这类渠道混在一张维度里 | 不进 dim_channel；本步只落 raw。它的用处（例如按接入码区分话务入口）等指标需要时再定落点。请定 |
+| 12 | **谁写 core 维度与留痕** | 维度属主 `oss911_owner`；dbt 现有权限只够写事实 | dbt 写（同 fact_call_leg 的做法：自定义宏，SCD2 关闭旧版 = UPDATE valid_to）。新结构变更授 `oss911_transform`：dim_agent / dim_queue 的 INSERT 与 UPDATE(valid_to, built_at)；`meta.reference_value` 的 INSERT 与 UPDATE；`audit.reference_data_change_log` 的 INSERT（changed_by = `icp_sync`）；`meta.label_override` 的 UPDATE(state, flagged_at)（源端改名即置 pending_reconfirm，DD-56） |
+| 13 | **版本更小、版本变了但内容无差异** | 契约已写：前者进待澄清并告警，后者记运行日志并告警 | 照契约。前者由接入程序判（它最先看到版本）；后者由 dbt 判（比对在 core 侧） |
+| 14 | **`mediaType` 与虚队列** | 本期只用语音（dim_queue 注释）；`realFlag = 0` 是虚队列 | 全部技能入 dim_queue，不按媒体类型过滤（注释已定保留）；`realFlag` 暂只在 raw，dim_queue 无此列，需要时再加 |
+
+### 二、拟（开发机的实现选择，无异议即按此）
+
+| # | 选择 |
+| --- | --- |
+| 1 | 接入程序加数据集式的 rest_api 取数路径：一次运行先取 `versions`，按第 4 条判定后，逐数据集取全量、各成一批（批次级隔离仍成立：一个数据集坏了只扣那一个） |
+| 2 | DAG `ingest_icp_reference`，契约 `*/30`，进 pool `icp_cms`（与话单同一平台、同一服务账号，Q03 未答之前不并发）；不建回扫 DAG（快照无需回扫） |
+| 3 | 假 ICP 接口加 synwas 九个 GET（按 PDF 的字段与类型不符之处原样模仿，包括字符串型 ccId），控制端点可「升版本、改名、删坐席、版本倒退、同步失败」 |
+| 4 | dbt：`stg_icp_reference`（按批次消费、拆数据集、分号多值拆开）、`dim_agent`、`dim_queue`、`reference_value` 写入；之后 `fact_call_leg` 按 device_no / queue_code 与通话时刻关联当时那一版——按 DD-91 第 7 条属「派生内容变了」，历史行会被改写一次 |
+| 5 | `agentName` 为空串或等于工号时照写原文，不当作缺失补值 |
+
+### 三、拟新增 ICP 问题单（请 Mac 侧并入 `queries/ICP_CMS_Interface_Clarification_Questions.xlsx`）
+
+| 拟编号 | 问题 | 为什么 |
+| --- | --- | --- |
+| Q33 | synwas 的 GET 读的是网关副本。平台是否会定时自动执行 CTI / VDN 同步？周期多长？若不会，谁在什么时候触发？本方是否应调用 `synvdn`（我方倾向不调，它是写动作） | 决定参照数据会不会无声地停在旧版本 |
+| Q34 | `versions` 的 VDN 版本是否只在同步**成功**时递增？内容没变的同步是否也会递增？ | 契约「版本变了但内容无差异即告警」依赖这一点；若每次同步都递增，此告警每次都会响 |
+| Q35 | 坐席的业务角色（接警员 / 调度员 / 主管）在 ICP 里是否有任何字段体现？`roleId` 只是 CMS 权限角色 | 需定第 7 条 |
+
+Q30（config_version 是否单调、是否归零）已在单上，答复同样适用于 VDN 版本。
+
+### 四、顺带发现的文档问题
+
+- LD-01 9.3 与 `audit.reference_data_change_log` 表注释「参照数据不经 raw 层」与契约 if03d 冲突（需定第 1 条）
+- 契约 if03d 的 `version_probe.path` 写作 `/cmsgateway/resource/synwas/versions`，LD-01 4.6 写作 `GET /synwas/versions`（缺前缀）
