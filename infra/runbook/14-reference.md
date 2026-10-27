@@ -61,8 +61,13 @@ ICP 的 `roleId` 是 CMS 的权限角色，不是业务角色。ICP 工号只有
 到它的终端按 Ctrl+C，`git pull` 之后再 `test/fake_icp/start.sh`。
 
 > 假接口的配置副本只在内存里，每次重启都从版本 13 开始。已经取过更高版本之后再重启，接入程序会看到「版本倒退」，
-> 开一条待澄清、不应用——这正是对真实平台归零（Q30）的设计行为。开发中要继续往前，用
-> `curl -s -X POST localhost:18080/_fake/control -d '{"ref": {"set_version": <比已取的大>}}'`。
+> 开一条待澄清、不应用——这正是对真实平台归零（Q30）的设计行为。开发中要继续往前，先查已取到哪一版，再把假接口的
+> 版本设成比它大的**具体数字**（查出来为空，说明还没取过，不用设）：
+>
+> ```bash
+> sudo -u postgres psql -d oss911 -At -c "SELECT max(snapshot_version) FROM meta.ingest_batch WHERE source_id = 'icp_reference' AND snapshot_scope LIKE 'agents@%'"
+> curl -s -X POST localhost:18080/_fake/control -d '{"ref": {"set_version": 15}}'    # 例：上一条查出 14
+> ```
 
 ```bash
 sudo -v
