@@ -45,6 +45,7 @@ from .config import ConfigError, db_settings, read_env_file, require
 from .contract import effective_lookback_minutes, validate_contract, validate_overrides
 from .icp import IcpClient, IcpError
 from .parse import content_hash, parse_csv
+from .snapshot import SnapshotIngest, check_mode
 
 SOURCE_TIME = "%Y-%m-%d %H:%M:%S"       # how windows and watermarks are written: the source's own notation
 
@@ -53,6 +54,8 @@ SOURCE_TIME = "%Y-%m-%d %H:%M:%S"       # how windows and watermarks are written
 CHECKS = {"icp_cdr_voice": check_cdr}
 # What a re-sweep reports afterwards, per source (LD-01 4.4)
 OBSERVE_AFTER_RESWEEP = {"icp_cdr_voice": open_calls}
+# Sources ingested by version-gated snapshots instead of time windows (snapshot.py, DD-94)
+SNAPSHOT_SOURCES = {"icp_reference"}
 
 EXIT_OK, EXIT_FAILED = 0, 1
 
@@ -116,6 +119,7 @@ class Runner:
         self.rows_received = 0
         self.wm_from: str | None = None
         self.wm_to: str | None = None
+        self.inherited_auth: dict | None = None
 
     def say(self, text: str) -> None:
         print(text, file=self.out, flush=True)
@@ -137,7 +141,7 @@ class Runner:
             if contract is None:
                 raise ConfigError(f"source {self.source_id} has no contract in meta.source_contract "
                                   "(not released, or 45-contracts not run)")
-            definition, version, enabled, overrides = contract
+            definition, version, enabled, overrides, self.inherited_auth = contract
             if not enabled:
                 self.say(f"source {self.source_id} is disabled (meta.source_contract.enabled); nothing done")
                 return EXIT_OK
@@ -158,23 +162,28 @@ class Runner:
                     conn.commit()
 
     def _read_contract(self, conn):
-        # One statement, one snapshot: the contract and the hot-tuned values belong to the same moment
+        # One statement, one snapshot: the contract, the hot-tuned values and the auth of the contract it inherits
+        # its login from (contract auth.inherits) belong to the same moment
         return conn.execute(
             """SELECT c.definition, c.contract_version, c.enabled,
                       coalesce((SELECT jsonb_object_agg(p.param_name, p.param_value)
-                                  FROM meta.source_runtime_param p WHERE p.source_id = c.source_id), '{}'::jsonb)
+                                  FROM meta.source_runtime_param p WHERE p.source_id = c.source_id), '{}'::jsonb),
+                      (SELECT i.definition -> 'auth' FROM meta.source_contract i
+                        WHERE i.source_id = c.definition -> 'auth' ->> 'inherits')
                  FROM meta.source_contract c WHERE c.source_id = %s""",
             (self.source_id,)).fetchone()
 
     # ------------------------------------------------------------------------------------------------------------
     def _locked(self, conn, definition: dict, version: int, overrides: dict) -> int:
-        if self.source_id not in CHECKS:
+        if self.source_id not in CHECKS and self.source_id not in SNAPSHOT_SOURCES:
             raise ConfigError(f"this program has no ingestion for source {self.source_id}")
         doc = dict(definition, enabled=True)
         problems = validate_contract(doc) + validate_overrides(doc, overrides)
         if problems:
             raise ConfigError(f"contract {self.source_id} v{version} in the database fails validation: "
                               + "; ".join(problems))
+        if self.source_id in SNAPSHOT_SOURCES:
+            return self._snapshot(conn, definition, version, overrides)
         lookback = effective_lookback_minutes(doc, overrides)
         params = {"lookback_minutes": lookback}
 
@@ -245,6 +254,26 @@ class Runner:
         self.say(f"run {self.run_id}: success, {self.committed} batch(es), {self.rows_received} rows received")
         return EXIT_OK
 
+    def _snapshot(self, conn, definition: dict, version: int, overrides: dict) -> int:
+        check_mode(self.mode, self.source_id)
+        self.say(f"run {self.run_id}: {self.source_id} v{version} snapshot (version-gated)")
+        client = self._icp_client(definition)
+        try:
+            message = SnapshotIngest(self, conn, client, definition, version, overrides).run()
+        except (IcpError, RunFailed, ConfigError, Terminated) as exc:
+            outcome = "partial" if self.committed else "failed"
+            self._record_failure(conn, version, outcome, f"after {self.committed} batch(es): {exc}")
+            raise RunFailed(f"{outcome} after {self.committed} batch(es): {exc}") from None
+        except BaseException as exc:
+            outcome = "partial" if self.committed else "failed"
+            self._record_failure(conn, version, outcome, f"after {self.committed} batch(es): {type(exc).__name__}: {exc}")
+            raise
+        if message:
+            self.say(f"  {message}")
+        self._run_log(conn, version, "success", message)
+        self.say(f"run {self.run_id}: success, {self.committed} batch(es), {self.rows_received} record(s)")
+        return EXIT_OK
+
     def _record_failure(self, conn, version: int, outcome: str, message: str) -> None:
         """Roll back the batch in progress and write the run_log row. If the connection itself is broken (e.g. the
         signal arrived inside a database call), say so on stderr; the server rolls the transaction back when the
@@ -259,6 +288,13 @@ class Runner:
     def _icp_client(self, definition: dict) -> IcpClient:
         host_ref = definition["endpoint"]["host_ref"]
         auth = definition["auth"]
+        if "inherits" in auth:
+            # The login of another contract (same gateway, same service account); it must be in the database
+            auth = self.inherited_auth
+            if not (isinstance(auth, dict) and isinstance((auth.get("obtain") or {}).get("credential_ref"), str)
+                    and auth.get("header") and (auth.get("obtain") or {}).get("path")):
+                raise ConfigError(f"contract {self.source_id}: auth inherits {definition['auth']['inherits']}, "
+                                  "which is not in meta.source_contract or has no complete auth")
         cred_ref = auth["obtain"]["credential_ref"]
         env = read_env_file("icp.env")
         prefix = f"OSS911_CRED_{cred_ref.upper()}"

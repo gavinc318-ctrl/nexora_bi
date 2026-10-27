@@ -1,71 +1,107 @@
 # =====================================================================
-# IF-03d  话务参照数据（配置同步接口）
+# IF-03d  话务参照数据（配置同步接口 synwas，接口文档 p.907–933）
 #
 # 技能队列、坐席、坐席组等的权威在 ICP，本方只读。
-# 关键在版本号：先取版本号，变了才拉全量，再逐字段比对后写变更留痕——
-# 直接全量比对会把排序与空白差异报成变更，假变更会把真变更淹掉（LD-01 4.6）。
+# 关键在版本号：先取版本号，变了才拉全量——直接全量比对会把排序与空白差异报成变更，
+# 假变更会把真变更淹掉（LD-01 4.6）。装载规则见 DD-94。
 # =====================================================================
 source_id: icp_reference
 connector: rest_api
 target_raw: raw.icp_reference
-contract_version: 1
+contract_version: 2                  # v2（2026-10-27）：按接口文档与 DD-94 重写——版本按 VDN 而非按数据集、
+                                     # 整份快照写入、只在同步成功时取、副本多日未刷新告警、被叫配置只落 raw
 enabled: true
 
 endpoint:
+  host_ref: icp_cms_gateway            # 与话单同一网关（契约 if03a）
+  method: GET
+  response: json                       # {message, retcode, result}；retcode "0" 为成功
   version_probe:
-    method: GET
     path: /cmsgateway/resource/synwas/versions
-  datasets:
-    - name: vdn
+    note: >-
+      返回一个 CTI 级版本（每个 ccId 一个）与每个 VDN 一个版本（vdnsVersion[]）；VDN 版本一次覆盖该 VDN 的
+      全部七个数据集，不是按数据集。另带 startTime / endTime（毫秒时间戳）与 status（0 初始 / 1 进行中 /
+      2 成功 / 3 失败）。文档把 result 标为 array，样例是对象，两种都要能读（DD-94 〇-a、〇-i）
+  datasets:                            # scope：cti = 用 CTI 版本；vdn = 用该 VDN 的版本，路径里的 {ccId}/{vdnId} 逐个 VDN 填
+    - name: vdns
       path: /cmsgateway/resource/synwas/vdns
+      scope: cti
+      key: vdnId
       target: core.dim_site
-      note: "单一 VDN（AS-30）。本集用于核对该假设是否仍成立——多出一个 VDN 是必须立刻知道的事"
-    - name: agent
+      note: "单一 VDN（AS-30，Q31 待书面确认）。本集用于核对该假设是否仍成立——多出一个 VDN 是必须立刻知道的事"
+    - name: agents
       path: "/cmsgateway/resource/synwas/agents/{ccId}/{vdnId}"
+      scope: vdn
+      key: agentNo
       target: core.dim_agent
-      note: "坐席工号与姓名。SCD2 的自然键即工号（AS-31）"
-    - name: agent_group
+      note: >-
+        坐席工号与姓名（单一名称，可为空串或等于工号——照写原文，DD-94 第十四条）。SCD2 的自然键即工号（AS-31）。
+        roleId 是 CMS 权限角色、不是业务角色：role_code 默认 call_taker，主管由 M-10 标记（DD-94 第六条，AS-36）。
+        skillId / skillGroupId 为分号分隔的多值串，成员关系只在 raw（DD-94 第九条）
+    - name: groups
       path: "/cmsgateway/resource/synwas/groups/{ccId}/{vdnId}"
-      target: core.dim_agent
-      note: "坐席组是管理分组，与技能队列是两套东西，不可混用"
-    - name: skill
+      scope: vdn
+      key: groupId
+      target: meta.reference_value      # domain agent_group；坐席的 groupId 进 dim_agent.team_code（DD-94 第七条）
+      note: "坐席组是管理分组，与技能队列是两套东西，不可混用。monitorId（组长工号）不落 core"
+    - name: skills
       path: "/cmsgateway/resource/synwas/skills/{ccId}/{vdnId}"
+      scope: vdn
+      key: skillId
       target: core.dim_queue
-      note: "技能队列。与 CAD 的警种不是一回事，禁止一对一映射"
-    - name: skill_group
+      note: >-
+        技能队列。与 CAD 的警种不是一回事，禁止一对一映射。skillName 单一名称，双语列先写原文、译名走
+        label_override（DD-94 第八条）。全部技能入维度、不按 mediaType 过滤；realFlag 只在 raw（第十三条）
+    - name: skillgroups
       path: "/cmsgateway/resource/synwas/skillgroups/{ccId}/{vdnId}"
-      target: core.dim_queue
-    - name: called_config
+      scope: vdn
+      key: skillGroupId
+      target: meta.reference_value      # domain skill_group；技能与技能组多对多，skill_group_code 留空（DD-94 第九条）
+    - name: calledconfigs
       path: "/cmsgateway/resource/synwas/calledconfigs/{ccId}/{vdnId}"
-      target: core.dim_channel
-      note: "被叫配置，即接入码"
-    - name: rest_reason
+      scope: vdn
+      key: null                         # 文档未给单列主键；accessCode + subCode 也不保证唯一，不臆造
+      target: raw_only                  # 接入码路由配置，不是警情来源渠道，不进 dim_channel（DD-94 第十条）
+    - name: restreasons
       path: "/cmsgateway/resource/synwas/restreasons/{ccId}/{vdnId}"
-      target: meta.reference_value
-      note: "休息原因码。M-R03 的休息时长按此分类"
-    - name: service_type
+      scope: vdn
+      key: reasonCode
+      target: meta.reference_value      # domain rest_reason。M-R03 的休息时长按此分类
+    - name: servertypes                 # 路径拼写照接口文档
       path: "/cmsgateway/resource/synwas/servertypes/{ccId}/{vdnId}"
-      target: meta.reference_value
-      note: "业务类型，IVR 指标按此分组"
+      scope: vdn
+      key: serviceId
+      target: meta.reference_value      # domain service_type。IVR 指标按此分组
 
-auth: {inherits: icp_cdr_voice}
+auth: {inherits: icp_cdr_voice}          # 同一网关、同一服务账号（Q03 未答之前不并发，pool icp_cms）
 
 window:
   schedule: "*/30 * * * *"
   strategy: version_gated
-  note: "每半小时取一次版本号；版本号未变即本次运行无操作，run_log 记 success 且 row_count = 0"
+  version_stale_days: 7                # 副本的同步 endTime 超过这么多天未变即告警（DD-94 第四条）；可热调
+  note: >-
+    每半小时取一次版本号；版本未变即本次运行无操作，run_log 记 success 且 row_count = 0。
+    synwas 的 GET 读的是网关自己的副本，靠网关的 CTI / VDN 同步刷新；本方不调同步接口（POST syncti / synvdn
+    是写动作，删 VDN 时会连带删除，DD-94 第四条）。网关会不会自动同步待 Q33 答复
 
-watermark: {type: sequence, column: config_version}
+watermark:
+  type: sequence
+  column: version
+  per: [ccId, vdnId]
+  note: >-
+    版本按范围各记各的：vdns 一个（CTI 版本），其余七个数据集各按 (ccId, vdnId)（VDN 版本）。已取到哪一版记在
+    meta.ingest_batch 的 snapshot_scope / snapshot_version，不写 watermark_state——它一源一行，装不下多个范围。
+    只在 status = 2（同步成功）时取数；进行中或失败本次跳过并记运行日志
+
 idempotent_key: [dataset, src_natural_key]
 
-# 写入语义（DD-82 · DD-76 · DD-02）：raw 只追加，不覆盖
+# 写入语义（DD-94 第二条 · DD-82 2026-10-27 注）
 raw_write:
-  mode: append_if_changed          # 写入前查同一（幂等键, content_hash）是否已存在，已存在不写
-  content_hash: all_source_columns # 全部源列；接入元数据（run_id · batch_seq · 落地时间）不计入
-  dedup_ignores_batches: [pending, discarded]   # 被扣下或丢弃批次中的行不挡后续观测
+  mode: snapshot_on_version        # 版本变了，该数据集整份快照写入，每数据集一批；同一版本重取不写
+  content_hash: all_source_fields  # 每条记录按收到的全部字段；接入元数据不计入
   bad_data: raw_then_quarantine    # 未通过校验的批次照常写入 raw，并登记 meta.quarantine_batch
 core_version:
-  from: config_version             # 源端给的数据集级版本号，按快照处理（DD-82 第四条）
+  from: config_version             # 数据集级版本号，按快照处理（DD-82 第四条）
   rules:
     greater: "应用该快照；快照中不再出现的实体置为非当前（SCD2，见 quality）"
     equal:   "不动"
@@ -73,17 +109,32 @@ core_version:
 
 quality:
   batch_checks:
-    - "版本号变化但全量比对无差异的，记入运行日志并告警——说明版本号的含义与预期不符"
+    - "同一快照内自然键重复：整批隔离（快照即全集，重复说明读到的不是一份完整一致的副本）"
+    - "快照为空而该范围上一次取到的快照不空：整批隔离——照单应用会把全部坐席或队列置为非当前"
+    - "自然键缺失的记录照写 raw，staging 计数、不造键"
+    - "版本号变化但全量比对无差异的，记入运行日志并告警——说明版本号的含义与预期不符（由 dbt 判，Q34）"
     - "坐席或技能队列消失时不删行，置为非当前（SCD2）。源端删除不等于历史不存在"
-  change_log: "逐字段差异写 audit.reference_data_change_log，并在 M-10 可查（LD-01 9.3）"
+    - "versions 列出的 VDN 多于一个：照常接入，并进待澄清队列（AS-30 不再成立）"
+  change_log: "逐字段差异写 audit.reference_data_change_log（changed_by = icp_sync），并在 M-10 可查（LD-01 9.3）"
 
 # 联调时必须用真实环境核实、不能按文档推断的事项。核实结论回写到本节并递增 contract_version
 integration_checks:
   - id: config_version_monotonic
-    question: "config_version 是否单调递增？平台重启、升级或主备切换后是否归零或回退？"
+    question: "版本号是否单调递增？平台重启、升级或主备切换后是否归零或回退？（Q30）"
     why: >-
       core 以它判断快照新旧（DD-82 第四条）。若重启后归零，此后每个快照都会被判为
       「更小」而停在待澄清队列，参照数据就此冻结——且看上去像是平台在频繁回滚。
-      届时须改为以（平台启动标识, config_version）或观测时间作版本
+      届时须改为以（平台启动标识, 版本号）或观测时间作版本
     status: open
-
+  - id: gateway_sync_schedule
+    question: "网关是否定时自动执行 CTI / VDN 同步？周期多长？（Q33）"
+    why: "GET 读网关副本；没人同步则数据停在旧版本而不报错，只能靠 version_stale_days 告警发现"
+    status: open
+  - id: version_bumps_without_change
+    question: "内容没变的同步是否也会升版本？版本是否只在同步成功时递增？（Q34）"
+    why: "若每次同步都升版本，「版本变了但内容无差异」的告警每次都响，须改判据"
+    status: open
+  - id: response_types
+    question: "ccId / vdnId、startTime / endTime、status、versions.result 的实际类型（文档类型与样例不符，DD-94 〇-i）"
+    why: "接入程序两种都能读；核实后收紧，免得一种类型错误被宽容地吞掉"
+    status: open

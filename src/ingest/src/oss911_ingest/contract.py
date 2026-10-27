@@ -23,6 +23,9 @@ IDENT = re.compile(r"^[a-z][a-z0-9_]*$")
 RAW_TABLE = re.compile(r"^raw\.[a-z][a-z0-9_]*$")
 SECRET_KEY = re.compile(r"passw|secret|private_key", re.IGNORECASE)
 LOOKBACK_MAX = 1440          # minutes; same bounds as the database CHECK (0004)
+STALE_DAYS_MAX = 365         # days; same bounds as the database CHECK (0007)
+# The synwas datasets (interface reference p.907-933) and the CHECK on raw.icp_reference.dataset (0007)
+SNAPSHOT_DATASETS = {"vdns", "agents", "groups", "skills", "skillgroups", "calledconfigs", "restreasons", "servertypes"}
 
 # Required layer (DD-88 item nineteen). The general rules above say what a field must look like when it is
 # there; this says which fields a source cannot run without. Declared per (connector, source_id): each source's
@@ -40,6 +43,11 @@ REQUIRED = {
         "watermark.column", "idempotent_key", "columns",
         "enums.call_type.values",          # the batch checks compare CALLTYPE against it (cdr.py)
         "enums.release_cause.classes",     # core's release_source (DD-91 item 5): staging reads it from the contract
+    ],
+    # Reference data by version-gated snapshots (snapshot.py, DD-94). Logs in with the CDR contract's account
+    ("rest_api", "icp_reference"): [
+        "endpoint.host_ref", "endpoint.version_probe.path", "endpoint.datasets",
+        "auth.inherits", "window.schedule", "window.version_stale_days", "idempotent_key",
     ],
 }
 _MISSING = object()
@@ -172,12 +180,13 @@ def validate_contract(doc: dict) -> list[str]:
         elif not isinstance((auth.get("obtain") or {}).get("credential_ref"), str):
             p.append("auth must have obtain.credential_ref, or inherits another contract's auth")
 
-    # Columns and the idempotency key (LD-01 2.2 · 2.3)
+    # Columns and the idempotency key (LD-01 2.2 · 2.3). A source of several record shapes (synwas datasets) has no
+    # single column list; whether a source needs one is the required layer's business
     columns = doc.get("columns")
     src_names: list[str] = []
-    if not isinstance(columns, list) or not columns:
+    if columns is not None and (not isinstance(columns, list) or not columns):
         p.append("columns must be a non-empty list")
-    else:
+    elif columns is not None:
         for i, col in enumerate(columns):
             if not (isinstance(col, dict) and isinstance(col.get("src"), str) and col["src"]):
                 p.append(f"columns[{i}]: must be a mapping with a non-empty src")
@@ -226,6 +235,8 @@ def validate_contract(doc: dict) -> list[str]:
             # deployment parses the DAGs with the candidate manifest before syncing (45-contracts) -- rather than
             # by a second cron parser here, which would be a new dependency and a second authority
             p.append("window.schedule must be a cron expression of five fields, e.g. '*/5 * * * *'")
+        if "version_stale_days" in win and not _int_in(win["version_stale_days"], 1, STALE_DAYS_MAX):
+            p.append(f"window.version_stale_days must be an integer from 1 to {STALE_DAYS_MAX}")
         if "source_timezone" in win:
             # The zone the source's naive times are in: decides what "now" is for an incremental window
             try:
@@ -234,6 +245,35 @@ def validate_contract(doc: dict) -> list[str]:
                 p.append("window.source_timezone must be an IANA time zone name, e.g. UTC or Asia/Riyadh")
         elif "max_span_hours" in win:
             p.append("window.source_timezone is required for a time window (which zone the source's times are in)")
+
+    # Snapshot datasets (DD-94): each named once, a known dataset, with a path; a VDN-scoped one takes its ccId and
+    # vdnId from the version probe, so its path must have both placeholders
+    datasets = (endpoint or {}).get("datasets") if isinstance(endpoint, dict) else None
+    if datasets is not None:
+        if not (isinstance(datasets, list) and datasets):
+            p.append("endpoint.datasets must be a non-empty list")
+        else:
+            names = []
+            for i, ds in enumerate(datasets):
+                if not isinstance(ds, dict):
+                    p.append(f"endpoint.datasets[{i}] must be a mapping")
+                    continue
+                name = ds.get("name")
+                names.append(name)
+                if name not in SNAPSHOT_DATASETS:
+                    p.append(f"endpoint.datasets[{i}].name must be one of {sorted(SNAPSHOT_DATASETS)}")
+                if not (isinstance(ds.get("path"), str) and ds["path"].startswith("/")):
+                    p.append(f"endpoint.datasets[{i}] ({name}): path must be an absolute path")
+                if ds.get("scope") not in ("cti", "vdn"):
+                    p.append(f"endpoint.datasets[{i}] ({name}): scope must be cti or vdn")
+                elif ds["scope"] == "vdn" and isinstance(ds.get("path"), str) \
+                        and not ("{ccId}" in ds["path"] and "{vdnId}" in ds["path"]):
+                    p.append(f"endpoint.datasets[{i}] ({name}): a vdn-scoped path needs {{ccId}} and {{vdnId}}")
+                if "key" not in ds or not (ds["key"] is None or (isinstance(ds["key"], str) and ds["key"])):
+                    p.append(f"endpoint.datasets[{i}] ({name}): key must be the record's id field, or null if it has none")
+            dups = sorted({n for n in names if isinstance(n, str) and names.count(n) > 1})
+            if dups:
+                p.append(f"endpoint.datasets: listed more than once: {dups}")
 
     # Classification of codes into fixed classes (release causes -> agent / caller / system, DD-91 item 5): every
     # class known, codes integers, no code in two classes
@@ -290,6 +330,13 @@ def validate_overrides(doc: dict, overrides: dict[str, str]) -> list[str]:
                 # A shorter lookback only loses data and reports nothing: that is a change of meaning, so it goes
                 # through a release that lowers the contract default (DD-88 item fifteen)
                 p.append(f"{name}={value}: lookback can only be raised, not below the contract default {default}")
+        elif name == "version_stale_days":
+            # Either way is allowed: a longer limit only reports later, it loses no data
+            if not _int_in(win.get("version_stale_days"), 1, STALE_DAYS_MAX):
+                p.append(f"{name}={value}: this contract has no valid window.version_stale_days to override")
+            elif not (isinstance(value, str) and re.fullmatch(r"[0-9]{1,3}", value)) \
+                    or not 1 <= int(value) <= STALE_DAYS_MAX:
+                p.append(f"{name}={value}: must be an integer from 1 to {STALE_DAYS_MAX}")
         else:
             p.append(f"{name}={value}: not a hot-tunable parameter")
     return p
@@ -299,3 +346,8 @@ def effective_lookback_minutes(doc: dict, overrides: dict[str, str]) -> int:
     """Contract default, raised by a hot-tuned value if there is one. Call only after both have been validated."""
     default = doc["window"]["lookback_minutes"]
     return max(default, int(overrides["lookback_minutes"])) if "lookback_minutes" in overrides else default
+
+
+def effective_stale_days(doc: dict, overrides: dict[str, str]) -> int:
+    """Contract default, replaced by a hot-tuned value if there is one. Call only after both have been validated."""
+    return int(overrides.get("version_stale_days", doc["window"]["version_stale_days"]))

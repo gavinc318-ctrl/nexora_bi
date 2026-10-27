@@ -48,15 +48,17 @@ class IcpClient:
 
     # ---- plumbing ----
     def _post(self, path: str, payload: dict, headers: dict | None = None):
-        req = urllib.request.Request(
-            self._base + path, data=json.dumps(payload).encode("utf-8"), method="POST",
-            headers={"Content-Type": "application/json; charset=UTF-8", **(headers or {})})
+        return self._send("POST", path, json.dumps(payload).encode("utf-8"),
+                          {"Content-Type": "application/json; charset=UTF-8", **(headers or {})})
+
+    def _send(self, method: str, path: str, data: bytes | None, headers: dict):
+        req = urllib.request.Request(self._base + path, data=data, method=method, headers=headers)
         try:
             resp = urllib.request.urlopen(req, timeout=self._timeout)   # noqa: S310 -- URL comes from deployment config
         except urllib.error.HTTPError as exc:
-            raise IcpError(f"POST {path}: HTTP {exc.code}") from None
+            raise IcpError(f"{method} {path}: HTTP {exc.code}") from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise IcpError(f"POST {path}: {getattr(exc, 'reason', exc)}") from None
+            raise IcpError(f"{method} {path}: {getattr(exc, 'reason', exc)}") from None
         with resp:
             return resp.status, resp.headers, resp.read()
 
@@ -112,3 +114,27 @@ class IcpClient:
             fname = re.search(r'filename="?([^";]+)"?', disposition)
             return Download(body=body, content_type=ctype, filename=fname.group(1) if fname else None)
         raise IcpError(f"POST {path}: token rejected twice ({TOKEN_INVALID})")
+
+    # ---- JSON read (configuration sync, synwas) ----
+    def get_json(self, path: str) -> tuple[object, bytes]:
+        """GET a JSON resource and return (its "result", the response body as received). Same token handling as
+        download(): one retry with a new token if the token is rejected."""
+        for attempt in (1, 2):
+            if self._token is None:
+                self.authenticate()
+            status, headers, body = self._send("GET", path, None, {self._token_header: self._token})
+            try:
+                doc = json.loads(body.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                raise IcpError(f"GET {path}: HTTP {status}, response is not JSON") from None
+            code = str(doc.get("retcode")) if isinstance(doc, dict) else None
+            if code == TOKEN_INVALID and attempt == 1:
+                self._token = None
+                continue
+            if code != "0":
+                message = doc.get("message", "") if isinstance(doc, dict) else ""
+                raise IcpError(f"GET {path}: retcode {code} {message}".strip())
+            if "result" not in doc:
+                raise IcpError(f"GET {path}: retcode 0 but no result in the response")
+            return doc["result"], body
+        raise IcpError(f"GET {path}: token rejected twice ({TOKEN_INVALID})")
