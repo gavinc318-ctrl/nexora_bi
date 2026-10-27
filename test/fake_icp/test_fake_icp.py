@@ -241,6 +241,49 @@ class FakeICPTest(unittest.TestCase):
             self.control(inject=["no_such_thing"])
         self.assertEqual(cm.exception.code, 400)
 
+    # ---------- 配置同步（synwas）----------
+    def get(self, path, token=None):
+        req = urllib.request.Request(self.base + path, method="GET")
+        if token:
+            req.add_header("cmsgateway-token", token)
+        with urllib.request.urlopen(req) as r:
+            return json.loads(r.read().decode("utf-8"))
+
+    def test_synwas_requires_token_and_vdn(self):
+        self.assertEqual(self.get("/cmsgateway/resource/synwas/versions")["retcode"], "300-008")
+        t = self.token()
+        self.assertEqual(self.get("/cmsgateway/resource/synwas/agents/1/2", t)["retcode"], "300-010")
+        self.assertEqual(self.get("/cmsgateway/resource/synwas/agents/1/1", t)["retcode"], "0")
+
+    def test_synwas_shapes_follow_the_document(self):           # 〇-i：类型不一致照文档原样
+        t = self.token()
+        v = self.get("/cmsgateway/resource/synwas/versions", t)["result"]
+        self.assertIsInstance(v, dict)                          # 文档标 array，样例是对象
+        self.assertIsInstance(v["vdnsVersion"][0]["endTime"], int)
+        agents = self.get("/cmsgateway/resource/synwas/agents/1/1", t)["result"]
+        self.assertIsInstance(agents[0]["ccId"], str)
+        self.assertTrue(any(a["agentName"] == "" for a in agents))
+        self.assertTrue(any(a["skillId"] is None for a in agents))
+        self.assertTrue(any(";" in (a["skillId"] or "") for a in agents))
+        for ds in ("groups", "restreasons", "servertypes", "skills", "skillgroups", "calledconfigs"):
+            self.assertTrue(self.get(f"/cmsgateway/resource/synwas/{ds}/1/1", t)["result"], ds)
+
+    def test_synwas_control(self):
+        t = self.token()
+        ver = lambda: self.get("/cmsgateway/resource/synwas/versions", t)["result"]["vdnsVersion"][0]  # noqa: E731
+        v0 = ver()["version"]
+        self.control(ref={"rename": {"agentNo": "101", "agentName": "X"}})
+        self.assertEqual(ver()["version"], v0 + 1)
+        agents = self.get("/cmsgateway/resource/synwas/agents/1/1", t)["result"]
+        self.assertEqual([a["agentName"] for a in agents if a["agentNo"] == "101"], ["X"])
+        self.control(ref={"remove": "102"})
+        agents = self.get("/cmsgateway/resource/synwas/agents/1/1", t)["result"]
+        self.assertFalse(any(a["agentNo"] == "102" for a in agents))
+        self.control(ref={"set_version": v0, "status": 1})
+        self.assertEqual((ver()["version"], ver()["status"]), (v0, 1))
+        with self.assertRaises(urllib.error.HTTPError):
+            self.control(ref={"remove": "no-such-agent"})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,9 +4,10 @@
 照接口文档实现与真实接口相同的请求与响应，接入程序按正常路径调用它，与调用真实接口的
 唯一差别是部署时注入的地址与账号。接入程序里不得有任何「合成模式」分支。
 
-真实接口的两个端点（照文档）：
+真实接口的端点（照文档）：
   POST /cmsgateway/resource/userauth/auth                 鉴权，第 905 页
   POST /cmsgateway/resource/reports/vdnvoicecalldetail    话单下载，第 1019–1020 页
+  GET  /cmsgateway/resource/synwas/...                    配置同步一组九个，第 907–933 页（reference.py）
 
 另有两个**只供测试用**的端点，真实接口没有，接入程序永远不调：
   POST /_fake/control    调整「此刻」、token 有效期，注入故障与边界数据
@@ -31,6 +32,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import generator as gen
+import reference as ref_api
 
 AUTH_PATH = "/cmsgateway/resource/userauth/auth"
 CDR_PATH = "/cmsgateway/resource/reports/vdnvoicecalldetail"
@@ -52,7 +54,8 @@ class State:
         self.delay_seconds = 0.0                  # 每次下载人为延时，用来制造并发冲突
         self.fail_next: list[str] = []            # 下面几次下载直接返回这些 retcode
         self.inject: list[str] = []               # 下一次下载要混入的边界数据，用一次即清
-        self.calls = {"auth": 0, "cdr": 0, "cdr_rejected_concurrent": 0}
+        self.calls = {"auth": 0, "cdr": 0, "cdr_rejected_concurrent": 0, "synwas": 0}
+        self.ref = ref_api.initial(seed, self.now())   # 网关的配置副本（synwas）
 
     def now(self) -> datetime:
         return self.now_override or datetime.now(timezone.utc).replace(tzinfo=None)   # 按 UTC（猜 1、2）
@@ -103,9 +106,26 @@ class Handler(BaseHTTPRequestHandler):
                 body = {"seed": st.seed, "emit_mode": st.emit_mode, "token_ttl": st.token_ttl,
                         "now": st.now().strftime(gen.TS_FMT), "now_overridden": st.now_override is not None,
                         "delay_seconds": st.delay_seconds, "fail_next": list(st.fail_next),
-                        "inject": list(st.inject), "calls": dict(st.calls)}
+                        "inject": list(st.inject), "calls": dict(st.calls),
+                        "ref": {"cti": dict(st.ref["cti"]), "vdn": dict(st.ref["vdn"]),
+                                "agents": len(st.ref["agents"])}}
             return self._json(200, body)
+        if self.path.startswith(ref_api.PREFIX):
+            return self._synwas()
         self._json(405, {"message": "method not allowed", "retcode": "000-002"})
+
+    # ---------- 配置同步（synwas，只有 GET）----------
+    def _synwas(self):
+        st = self.state
+        with st.lock:
+            st.calls["synwas"] += 1
+            exp = st.tokens.get(self.headers.get("cmsgateway-token") or "")
+            if exp is None or exp <= st.now():
+                return self._fail("300-008", "The token specified by cmsgateway-token in the HTTP request does not exist.")
+            if st.fail_next:
+                return self._fail(st.fail_next.pop(0), "injected failure")
+            status, body = ref_api.route(st.ref, self.path)
+        self._json(status, body)
 
     do_PUT = do_DELETE = do_PATCH = lambda self: self._json(405, {"message": "method not allowed",
                                                                   "retcode": "000-002"})
@@ -219,6 +239,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(400, {"error": f"unknown injection: {sorted(bad)}",
                                             "known": sorted(INJECTIONS)})
                 st.inject = list(body["inject"])
+            if "ref" in body:
+                err = ref_api.control(st.ref, body, st.now())
+                if err:
+                    return self._json(400, {"error": err})
             if "emit_mode" in body:
                 if body["emit_mode"] not in ("on_leave", "on_enter"):
                     return self._json(400, {"error": "emit_mode must be on_leave or on_enter"})

@@ -51,6 +51,21 @@ curl -s -X POST localhost:18080/_fake/control \
 curl -s localhost:18080/_fake/state
 ```
 
+### 配置同步（synwas，if03d · DD-94）
+
+九个 GET 照接口文档 p.907–933（`reference.py`），读的是一份「网关副本」；类型不一致照文档原样（ccId 为字符串、
+versions 的时间是毫秒数字、result 是对象）。改动副本即模拟网关做了一次同步：
+
+```bash
+curl -s -X POST localhost:18080/_fake/control -d '{"ref": {"rename": {"agentNo": "101", "agentName": "New"}}}'
+curl -s -X POST localhost:18080/_fake/control -d '{"ref": {"remove": "102"}}'          # 删坐席并升版本
+curl -s -X POST localhost:18080/_fake/control -d '{"ref": {"add": {"agentNo": "170"}}}'
+curl -s -X POST localhost:18080/_fake/control -d '{"ref": {"bump": true}}'            # 只升版本、内容不变（Q34）
+curl -s -X POST localhost:18080/_fake/control -d '{"ref": {"set_version": 5}}'        # 版本倒退
+curl -s -X POST localhost:18080/_fake/control -d '{"ref": {"status": 1}}'             # 同步进行中（3 = 失败）
+curl -s -X POST localhost:18080/_fake/control -d '{"ref": {"end_time": "2026-10-01 00:00:00"}}'   # 副本多日未刷新
+```
+
 ## 覆盖的边界情况（NOTES.md 草稿第二节）
 
 | # | 情况 | 怎么造出来 |
@@ -71,5 +86,5 @@ curl -s localhost:18080/_fake/state
 python3 test/fake_icp/test_fake_icp.py -v
 ```
 
-18 项，验的是假接口自己守住了约束、也真能造出上面的边界情况。这些测试做过反向验证：
+22 项，验的是假接口自己守住了约束、也真能造出上面的边界情况。这些测试做过反向验证：
 把假接口的窗口上限、并发拒绝、乱序、半开区间、-1 腿判定逐一改坏，对应的测试都会失败。
