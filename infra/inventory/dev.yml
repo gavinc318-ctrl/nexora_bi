@@ -188,7 +188,7 @@ all:
     # Runtime configuration of the ingestion program (LD-01 2.5), written by 30-python.yml into /etc/oss911.
     # The database is reached through pgBouncer's session pool (DD-85: the advisory lock lives in the session).
     ingest_db_host: 127.0.0.1
-    ingest_db_name: "{{ pg_database }}_etl"
+    ingest_db_name: "{{ pg_database }}"          # the session pool, named like the database (DD-93)
     # icp.env: ICP gateway address and service account. Variable names follow the released contracts
     # (host_ref icp_cms_gateway, credential_ref icp_cms_service_account in if03a).
     #   generate: true only on the development machine, where the account belongs to the fake ICP interface (AS-32).

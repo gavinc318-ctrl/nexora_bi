@@ -105,6 +105,10 @@ sudo -u postgres psql -d oss911 -c "DELETE FROM meta.staging_batch_state WHERE m
 下一次构建会把 staging 里的全部观测重新算一遍，**只写派生内容变了的行**。staging 本身可用
 `dbt build --full-refresh --select stg_icp_cdr_voice` 从 raw 重建（它的登记在同一事务里清掉）。
 
+## 若构建报 `cross-database references are not implemented`
+
+pgBouncer 的会话池还叫旧名 `oss911_etl`：按 DD-93 改名后的 21 / 30 / 40 还没跑完（troubleshooting 第 33 条）。
+
 ## 开发机上验不到的
 
 - 真实话单的口径（合成数据只验代码路径，AS-32）

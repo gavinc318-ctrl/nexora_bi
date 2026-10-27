@@ -1,0 +1,31 @@
+{% set session_logins = db_logins | selectattr('role', 'in', ['oss911_ingest', 'oss911_transform']) | map(attribute='name') | list %}
+{% set service_logins = db_logins | selectattr('role', 'in', ['oss911_query_svc', 'oss911_admin_svc']) | map(attribute='name') | list %}
+# Managed by infra/playbooks/21-connection.yml, do not edit by hand
+#
+# pgBouncer's own HBA (auth_type = hba, DD-93): which login may use which pool. The first matching line wins.
+# A pool is chosen by the database name the client connects to (DD-67); connecting to the wrong one does not fail by
+# itself -- it only behaves differently (a session-pool client loses its session state on the transaction pool, a
+# service-layer client holds a session-pool connection for its whole life). So mismatches are rejected here, at
+# login, with "login rejected": the mistake shows on the first connection instead of as random failures or a
+# connection pool that runs dry.
+#
+# Generated from inventory db_logins and the roles their logins are members of; a new login user is added there and
+# this file follows on the next run of 21. pgBouncer matches login names, not role membership.
+
+# The session pool's users never use the transaction pool: dbt and the ingestion program rely on session state
+# (temporary tables, SET ROLE, advisory locks)
+{% if session_logins %}
+host   {{ pg_database }}_txn   {{ session_logins | join(',') }}   0.0.0.0/0   reject
+{% endif %}
+# The service layer's users never use the session pool: it is sized for dbt and ingestion, and a service holding
+# connections there would exhaust it
+{% if service_logins %}
+host   {{ pg_database }}       {{ service_logins | join(',') }}   0.0.0.0/0   reject
+{% else %}
+# (no service-layer login users yet; they are created with the service layer and listed here then)
+{% endif %}
+# DS's writer of the CAD mirror reaches its own database only (LD-07 2.1; CONNECT is revoked as well)
+host   {{ pg_database }},{{ pg_database }}_txn,{{ airflow_db }},{{ keycloak_db }}   cad_mirror_writer   0.0.0.0/0   reject
+
+# Everything else: SCRAM, with the password looked up through auth_query (pgbouncer.ini)
+host   all   all   0.0.0.0/0   scram-sha-256

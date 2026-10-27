@@ -5,8 +5,8 @@
 ```
 应用 ──► pgBouncer :6432 ──► HAProxy :5000 ──► 当前主库
           │                   （健康检查决定谁是主）
-          ├─ 连库名 oss911      → 事务级池
-          ├─ 连库名 oss911_etl  → 会话级池
+          ├─ 连库名 oss911      → 会话级池（与真实库名相同，DD-93）
+          ├─ 连库名 oss911_txn  → 事务级池
           └─ 连库名 keycloak    → 会话级池
 ```
 
@@ -25,11 +25,16 @@ pgBouncer 的后端就永远是 `127.0.0.1:5000`，主库易主与它无关。
 
 | 连接时写的库名 | 模式 | 给谁 |
 | --- | --- | --- |
-| `oss911` | transaction | 门户查询、Superset、服务层接口 |
-| `oss911_etl` | session | Airflow、dbt、人工运维 |
+| `oss911` | session | dbt、接入程序、人工运维 |
+| `oss911_txn` | transaction | 门户查询、Superset、服务层接口 |
 | `keycloak` | session | Keycloak 的 JDBC 池 |
 
 三者都在 `6432` 上。连接串里换的是 `dbname`，不是端口。
+
+**会话池必须叫真实库名 `oss911`**（DD-93，2026-10-27 起；此前叫 `oss911_etl`）：dbt 把每个表写成「库名.schema.表名」，库名取
+连接用的库名；别名会被 PostgreSQL 当作跨库引用拒绝（troubleshooting 第 33 条）。**连错池会被直接拒绝**：pgBouncer 以 HBA
+（`/etc/pgbouncer/pgbouncer_hba.conf`，由剧本按 inventory 的 `db_logins` 生成）规定——dbt、ingest 的登录用户连 `oss911_txn`、
+服务层的登录用户连 `oss911`、DS 的写入账号连 `cad_mirror` 以外的库，一律 `login rejected`。
 
 事务级省连接，但 `SET`、临时表、advisory lock、预处理语句**不保证落在同一个后端连接上**；
 会话级保行为，但**连接在客户端断开前不归还**。
@@ -85,15 +90,15 @@ sudo -u postgres psql -c \
   "CREATE ROLE verify_pool LOGIN PASSWORD 'TempVerify#2026' IN ROLE pg_read_all_data"
 
 # 1 会话池上，临时表必须可用。这是两种池模式存在的全部理由。
-#   注意：换的是 -d（库名 oss911_etl），不是 -p——端口只有一个
-PGPASSWORD='TempVerify#2026' psql -h 127.0.0.1 -p 6432 -U verify_pool -d oss911_etl <<'SQL'
+#   注意：换的是 -d（库名 oss911），不是 -p——端口只有一个
+PGPASSWORD='TempVerify#2026' psql -h 127.0.0.1 -p 6432 -U verify_pool -d oss911 <<'SQL'
 CREATE TEMP TABLE t(x int);
 INSERT INTO t VALUES (1);
 SELECT count(*) AS should_be_1 FROM t;
 SQL
 
 # 2 事务池上能正常查询（短事务，这是它该干的事）
-PGPASSWORD='TempVerify#2026' psql -h 127.0.0.1 -p 6432 -U verify_pool -d oss911 \
+PGPASSWORD='TempVerify#2026' psql -h 127.0.0.1 -p 6432 -U verify_pool -d oss911_txn \
   -c "SELECT 1"
 
 # 3 后端连接数确实被闸住

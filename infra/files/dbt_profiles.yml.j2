@@ -1,6 +1,7 @@
 # Managed by infra/playbooks/30-python.yml, do not edit by hand
 #
-# dbt uses pgBouncer's session pool (database name {{ pg_database }}_etl).
+# dbt uses pgBouncer's session pool, whose name is the database's real name {{ pg_database }} (DD-93): dbt writes
+# every relation as "database.schema.table" from dbname, so an alias here is rejected as a cross-database reference.
 # On the transaction pool dbt's temporary tables, SET and advisory locks fail at random --
 # not always but occasionally, which is why the database name must be right here (DD-67).
 #
@@ -15,7 +16,7 @@ oss911:
       port: {{ pgb_listen_port }}
       user: "{{ '{{ env_var(\'DBT_USER\') }}' }}"
       password: "{{ '{{ env_var(\'DBT_PASSWORD\') }}' }}"
-      dbname: {{ pg_database }}_etl
+      dbname: {{ pg_database }}
       # After connecting, SET ROLE to the privilege role so that tables built by dbt belong to oss911_transform.
       # Without it the owner is the login user, the FOR ROLE oss911_transform default privileges of 0002 do not apply,
       # and the service layer cannot read mart (DD-74 · LD-02 13.2). Do not remove this line.

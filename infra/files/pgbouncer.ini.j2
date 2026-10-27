@@ -2,8 +2,10 @@
 ;;
 ;; Pool mode is chosen by database name -- this instance has one listen port, and the database name a client connects to decides the pool mode.
 ;; Division of work, see DD-67:
-;;   oss911       transaction, portal queries / Superset / service layer APIs
-;;   oss911_etl   session, Airflow / dbt / manual operations
+;;   oss911       session, dbt / the ingestion program / manual operations. Named exactly like the database: dbt writes
+;;                every relation as "database.schema.table" from its connection's database name, and PostgreSQL rejects
+;;                any other name as a cross-database reference (DD-93)
+;;   oss911_txn   transaction, portal queries / Superset / service layer APIs
 ;;   keycloak     session, Keycloak's JDBC pool (prepared statements need the same backend connection)
 ;;   airflow      session, Airflow's metadata database
 ;;   cad_mirror   session, DS's sync program writing the CAD mirror (DD-90)
@@ -12,8 +14,8 @@
 ;; pgBouncer cannot elect a primary; Patroni knows which node is primary, and HAProxy reads its health check.
 
 [databases]
-{{ pg_database }}     = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ pg_database }} pool_mode=transaction pool_size={{ pgb_pool_size_txn }} reserve_pool={{ pgb_reserve_pool }}
-{{ pg_database }}_etl = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ pg_database }} pool_mode=session     pool_size={{ pgb_pool_size_session }}
+{{ pg_database }}     = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ pg_database }} pool_mode=session     pool_size={{ pgb_pool_size_session }}
+{{ pg_database }}_txn = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ pg_database }} pool_mode=transaction pool_size={{ pgb_pool_size_txn }} reserve_pool={{ pgb_reserve_pool }}
 {{ keycloak_db }}     = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ keycloak_db }} pool_mode=session     pool_size={{ pgb_pool_size_keycloak }}
 {{ airflow_db }}      = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ airflow_db }}  pool_mode=session     pool_size={{ pgb_pool_size_airflow }}
 {{ cad_mirror_db }}   = host=127.0.0.1 port={{ haproxy_listen_port }} dbname={{ cad_mirror_db }} pool_mode=session pool_size={{ pgb_pool_size_cad_mirror }}
@@ -21,7 +23,9 @@
 [pgbouncer]
 listen_addr = 0.0.0.0
 listen_port = {{ pgb_listen_port }}
-auth_type = scram-sha-256
+;; hba: pgbouncer_hba.conf decides per pool and login -- mismatches are rejected, everything else uses SCRAM (DD-93)
+auth_type = hba
+auth_hba_file = {{ pgb_conf_dir }}/pgbouncer_hba.conf
 ;; userlist holds only pgbouncer itself. Every other user is looked up via auth_query --
 ;; otherwise each new database user would need a password hash copied into userlist, one more copy to drift out of sync.
 auth_file = /etc/pgbouncer/userlist.txt

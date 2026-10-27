@@ -154,7 +154,7 @@ sudo -u postgres psql -d oss911 -c "
 # 5 亲手试一次「raw 只追加」：以 ingest 身份删 raw 里的东西，应被拒绝
 #   raw 现在还没有表，借 meta.run_log 演示同一件事——ingest 能写、不能删：
 sudo -u airflow bash -c 'set -a; . /etc/oss911/ingest.env; set +a;
-  PGPASSWORD=$INGEST_DB_PASSWORD psql -h 127.0.0.1 -p 6432 -U $INGEST_DB_USER -d oss911_etl \
+  PGPASSWORD=$INGEST_DB_PASSWORD psql -h 127.0.0.1 -p 6432 -U $INGEST_DB_USER -d oss911 \
     -c "DELETE FROM meta.run_log WHERE false"'
 #   预期：ERROR:  permission denied for table run_log
 

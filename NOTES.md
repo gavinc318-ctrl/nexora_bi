@@ -1385,3 +1385,21 @@ dbt 生成 SQL 时把每个表写成三段式 `库名.schema.表名`，库名取
 > - `ingest.conf` 库名改 `oss911`；21 / 30 / 40、inventory、runbook 05 / 08 / 13 随改；pgBouncer 重启一次。`cad_mirror` 不动。
 > - troubleshooting 请加一条（第 33）；CLAUDE.md 第 5 节第二条已加这个实例。改完再开 `build_icp_cdr_voice`。
 
+
+## 2026-10-27  开发机：DD-93 已实现（池改名、HBA 护栏）；troubleshooting 第 33 条
+
+| 项 | 落实 |
+| --- | --- |
+| 改名 | pgbouncer.ini：`oss911` = 会话池、`oss911_txn` = 事务池；dbt profile、`ingest.conf`（inventory `ingest_db_name`）、40 的建分区与登录核对改连 `oss911` |
+| HBA 护栏 | `auth_type = hba`，新模板 `infra/files/pgbouncer_hba.conf.j2`，由 21 按 inventory `db_logins` 生成、变了即 reload：会话池用户（角色 oss911_ingest / oss911_transform 的登录）连 `oss911_txn` → reject；服务层用户（oss911_query_svc / admin_svc 的登录，现在还没有）连 `oss911` → reject；**另加一条**：`cad_mirror_writer` 连 `cad_mirror` 以外的池一律 reject（与库级收回 CONNECT 是同一个意思，多一层）。pgBouncer 的 HBA 只认登录名、不认角色成员，所以按 db_logins 的 role 展开成登录名 |
+| 以真实身份验证 | 40 的每个会话池登录用户再连一次 `oss911_txn`，断言 `login rejected` |
+| 文档 | runbook 05 / 08 / 13 改名；troubleshooting 第 28 条旧代码块加注；新增第 33 条 |
+
+**开发机实测**（本地 pgBouncer 1.22，与真机同版本；`auth_query` 与 SCRAM 照 21 的做法）：dbt、ingest、探测用户连 `oss911` 通过；
+dbt、ingest 连 `oss911_txn` → `login rejected`；写入账号连 `oss911` / `oss911_txn` → `login rejected`；错口令仍是 SCRAM 失败。
+
+**写模板时出过一个缺陷，已修**：第一版用 `{%- set %}` 去掉空行，按 Ansible 的 `trim_blocks` 渲染后，第一条 reject 规则被粘到了
+上一行注释的末尾——**整条规则成了注释，护栏静默失效**，而 `--syntax-check` 照样通过。按 Ansible 的渲染方式实际渲染一遍才看出来
+（CLAUDE.md 第 5 节第三条：语法正确、语义错位，要用解析器复核）。现在 set 放在文件最前，渲染结果逐行核过：三条规则。
+
+CLAUDE.md 第 5 节「29 条」之类的条数：troubleshooting 现在 33 条，请 Mac 侧顺手改。

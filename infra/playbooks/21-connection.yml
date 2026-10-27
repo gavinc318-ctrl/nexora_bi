@@ -164,6 +164,16 @@
           no_log: true
           notify: reload pgbouncer          # after password rotation re-read auth_file -- reload is enough, do not restart
 
+        # Which login may use which pool (DD-93). Rewritten when db_logins change; pgBouncer re-reads it on reload
+        - name: Deploy pgBouncer's HBA (rejects pool / login mismatches)
+          ansible.builtin.template:
+            src: ../files/pgbouncer_hba.conf.j2
+            dest: "{{ pgb_conf_dir }}/pgbouncer_hba.conf"
+            owner: postgres
+            group: postgres
+            mode: "0640"
+          notify: reload pgbouncer
+
         - name: Enable and start pgBouncer
           ansible.builtin.systemd_service:
             name: pgbouncer

@@ -100,7 +100,7 @@
     cmd: |
       set -a; . {{ oss911_etc }}/{{ login.env_file }}; set +a
       PGPASSWORD="${{ login.env_prefix }}_PASSWORD" psql -X -tA \
-        -h 127.0.0.1 -p {{ pgb_listen_port }} -U "${{ login.env_prefix }}_USER" -d {{ pg_database }}_etl \
+        -h 127.0.0.1 -p {{ pgb_listen_port }} -U "${{ login.env_prefix }}_USER" -d {{ pg_database }} \
         -c "SELECT current_user || '|' || pg_has_role(current_user, '{{ login.role }}', 'USAGE')
                                 || '|' || pg_has_role(current_user, '{{ login.role }}', 'SET')" 2>&1
   args:
@@ -127,3 +127,32 @@
         3. Second or third column is false: not a member of {{ login.role }}, or granted with INHERIT FALSE / SET FALSE
            sudo -u postgres psql -d {{ pg_database }} -c '\drg {{ login.name }}'
     success_msg: "{{ login.name }}: logged in through pgBouncer, inherits {{ login.role }}, can SET ROLE"
+
+# The guard of DD-93, verified as the consumer: a session-pool login must be turned away by the transaction pool.
+# Expected to FAIL with "login rejected" -- succeeding would mean the HBA does not cover this login (it is generated
+# from db_logins by 21-connection; rerun 21 after adding a login)
+- name: "{{ login.name }}: verify pgBouncer refuses it on the transaction pool"
+  ansible.builtin.shell:
+    cmd: |
+      set -a; . {{ oss911_etc }}/{{ login.env_file }}; set +a
+      PGPASSWORD="${{ login.env_prefix }}_PASSWORD" psql -X -tA \
+        -h 127.0.0.1 -p {{ pgb_listen_port }} -U "${{ login.env_prefix }}_USER" -d {{ pg_database }}_txn \
+        -c "SELECT 'connected'" 2>&1
+  args:
+    executable: /bin/bash
+  become_user: "{{ login.file_owner }}"
+  register: _txn_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: login.role in ['oss911_ingest', 'oss911_transform']
+
+- name: "{{ login.name }}: assert the transaction pool rejected it"
+  ansible.builtin.assert:
+    that:
+      - "'login rejected' in _txn_check.stdout"
+    fail_msg: |-
+      {{ login.name }} was not rejected on {{ pg_database }}_txn: {{ _txn_check.stdout | trim }}
+      The pool / login HBA (/etc/pgbouncer/pgbouncer_hba.conf) does not cover it. Rerun 21-connection.yml (DD-93)
+    success_msg: "{{ login.name }}: rejected on the transaction pool, as it should be (DD-93)"
+  when: login.role in ['oss911_ingest', 'oss911_transform']

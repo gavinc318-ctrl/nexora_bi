@@ -315,7 +315,7 @@ localhost,10.89.10.1|f                      ← 设置是对的，且不待重�
   「两个池」不是两个端口，而是 `[databases]` 段里的两条库名，都在同一个端口上，
   **由客户端连哪个库名决定用哪种池模式**：
   ```
-  oss911      → transaction
+  oss911      → transaction      （2026-10-27 起：oss911 → session、oss911_txn → transaction，DD-93、第 33 条）
   oss911_etl  → session
   keycloak    → session
   ```
@@ -620,3 +620,15 @@ dbt/dbt_core_experimental_parser-2.0.5.tar.gz
   bash -c 'set -a; . /etc/oss911/airflow.env; set +a; printenv PYTHONWARNINGS'
   sudo systemctl show airflow-scheduler -p Environment | tr ' ' '\n' | grep -c PYTHONWARNINGS   # 只数，不打印口令
   ```
+
+### 现象：dbt 报 `cross-database references are not implemented: "oss911_etl.staging.stg_icp_cdr_voice"`
+
+- **原因** —— dbt 连的是 pgBouncer 会话池的**别名** `oss911_etl`，进了 PostgreSQL 是 `oss911` 库。dbt-postgres 把每个表写成
+  「库名.schema.表名」，库名取 profile 的 `dbname`；PostgreSQL 见到与当前库不同的库名，当作跨库引用拒绝。dbt 内部绕不过去：
+  它还校验每个表的库名必须等于 `dbname`，改写库名会被 dbt 自己拒绝。开发机最初在临时库上直连真实库名测试、没经过别名，
+  所以没测出来；2026-10-27 真机首次构建时出现，随后在开发机起本地 pgBouncer 原样复现
+- **处置** —— 会话池改名为真实库名 `oss911`，事务池改名 `oss911_txn`（DD-93）；dbt profile 与 `ingest.conf` 都连 `oss911`。
+  21 / 30 / 40 重跑，pgBouncer 重启一次
+- **预防** —— 一、**测试的连接路径必须与真实部署一致**：dbt 的测试经 pgBouncer、用部署的库名连接（CLAUDE.md 第 5 节第二条已加
+  这个实例）。二、pgBouncer 以 HBA 拒绝「池 × 用户」错配，连错池在第一次连接时就 `login rejected`；40-schema 以 ingest、dbt 的
+  身份各连一次事务池，断言被拒。三、服务层的 SQL 不写三段式名字；Superset 的 `allow_multi_catalog` 保持 false（DD-93 核查注）

@@ -107,7 +107,7 @@
         cmd: |
           set -a; . {{ oss911_etc }}/dbt.env; set +a
           PGPASSWORD="$DBT_PASSWORD" psql -X -tA -v ON_ERROR_STOP=1 \
-            -h 127.0.0.1 -p {{ pgb_listen_port }} -U "$DBT_USER" -d {{ pg_database }}_etl -c "
+            -h 127.0.0.1 -p {{ pgb_listen_port }} -U "$DBT_USER" -d {{ pg_database }} -c "
             SELECT coalesce(sum(meta.ensure_monthly_partitions(
                        n.nspname || '.' || c.relname,
                        (current_date - interval '{{ partition_months_back }} months')::date,
