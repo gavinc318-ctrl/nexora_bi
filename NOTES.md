@@ -1437,7 +1437,7 @@ fact_call 等 Mac 侧补 LD-03 规则期间，ICP 线先做 if03d：`fact_call_l
 | 4 | **以哪个版本为准**（〇-a） | 单一 VDN（AS-30，Q31 待书面确认） | 数据集 `vdns` 用 CTI 版本，其余七个用该 VDN 的版本；水位改为按（ccId, vdnId）各记一个。只在 `status = 2`（成功）时取数；进行中或失败本次跳过并记 run_log |
 | 5 | **网关的副本谁来刷新**（〇-b） | 若网关不自动同步，GET 永远是旧副本，版本号也永远不变——看起来像「配置没变」 | **本方不调 POST 同步**（写动作、会删数据，不属只读接入）；新增问题单一项问 ICP（见第三节）。在答复之前，`versions` 的 `endTime` 超过 N 天未变即告警，N 请定（建议 7） |
 | 6 | **缓变维的 valid_from 取什么**：源端不给生效时间 | `core.sk_scd` 把 valid_from 纳入键 | 取该版本同步的 `endTime`（网关上配置生效的时刻，源端事实）；取不到时用批次落地时间，并在列注释写明。**同一实体的第一版 valid_from = `-infinity`**：否则 10-19 以来、第一份快照之前的话单都关联不到坐席。代价：「第一版」覆盖它被观测之前的全部历史，是推断——请定是否接受 |
-| 7 | **`dim_agent.role_code` NOT NULL 无来源**（〇-d） | ICP 的 roleId 是 CMS 权限角色；接警员 / 调度员 / 主管是业务角色，ICP 不知道 | ICP 线只写 `call_taker`？不对：主管也有工号。建议 `unmapped`（DD-06），待身份系统或 M-10 提供业务角色后改；roleId 原样留在 raw。请定来源 |
+| 7 | **`dim_agent.role_code` NOT NULL 无来源**（〇-d） | ICP 的 roleId 是 CMS 权限角色；接警员 / 调度员 / 主管是业务角色，ICP 不知道 | 不能一律写 `call_taker`（主管、调度员也可能有 ICP 工号）。建议 `unmapped`（DD-06），待身份系统或 M-10 提供业务角色后改；roleId 原样留在 raw。请定来源 |
 | 8 | **`dim_agent.team_code`（班组）是否取 ICP 坐席组 `groupId`** | 坐席组是管理分组、带组长 `monitorId`；DDL 注释「班组」 | 取 `groupId`；组名进 `meta.reference_value`（domain `agent_group`）；`monitorId` 暂不落 core（权限另走身份系统，DD-41） |
 | 9 | **`dim_queue` 双语名 NOT NULL，ICP 只给一个 `skillName`**（〇-f）；LD-02 第 7 章：「强制这件事在数据进入 core 之前完成」 | 若严格执行，新队列在 M-10 补译名之前进不了 core，`queue_sk` 一直空 | 两列先写源端原文，译名经 `meta.label_override` 覆盖、展现层取用（DD-56 已定「回落显示源端原文」，与此一致）。请定是否改 LD-02 第 7 章那句 |
 | 10 | **技能与技能组多对多**（〇-g），`skill_group_code` 单值 | — | `skill_group_code` 留空；技能组名进 `meta.reference_value`（domain `skill_group`）；成员关系暂只在 raw。报表若要按技能组汇总，另立桥表——等有指标要它再说 |
