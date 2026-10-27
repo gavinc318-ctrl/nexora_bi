@@ -26,6 +26,24 @@ models:
                 to: source('core', 'dim_site')
                 field: site_sk
 
+  - name: dim_agent
+    description: "core.dim_agent -- SCD2 from ICP's agents snapshot (DD-94). Rows are only inserted and closed."
+    columns:
+      - name: agent_sk
+        data_tests: [not_null, unique]
+      - name: role_code
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['call_taker', 'supervisor']
+  - name: dim_queue
+    description: "core.dim_queue -- SCD2 from ICP's skills snapshot (DD-94). Rows are only inserted and closed."
+    columns:
+      - name: queue_sk
+        data_tests: [not_null, unique]
+      - name: name_en
+        data_tests: [not_null]
+
 sources:
   - name: core
     schema: core

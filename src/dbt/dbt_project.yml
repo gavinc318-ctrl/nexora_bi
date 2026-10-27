@@ -35,3 +35,6 @@ models:
     core:
       +schema: core
       +full_refresh: false   # core belongs to oss911_owner; dbt may not drop or recreate it (DD-74)
+    meta:
+      +schema: meta
+      +full_refresh: false   # meta.reference_value is created by the structural changes, like core (DD-94 item eleven)

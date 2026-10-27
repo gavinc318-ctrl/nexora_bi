@@ -41,7 +41,7 @@
                         | zip(_dbt_files))) }}
   vars:
     # The dbt project's files, by the fixed layout of src/dbt. fileglob neither recurses nor expands a wildcard in a
-    # directory name, so each model layer directory is named here: staging and core now; mart and ai are added with
+    # directory name, so each model layer directory is named here: staging, core and meta now; mart and ai are added with
     # their first models (a pattern for a directory that does not exist yet only prints a warning). A model in a layer
     # directory not listed here would be missing from the release without any error.
     # Generated directories -- target, logs, dbt_packages -- are never part of a release
@@ -49,7 +49,8 @@
       {{ query('ansible.builtin.fileglob',
                _repo ~ '/src/dbt/*.yml', _repo ~ '/src/dbt/macros/*.sql', _repo ~ '/src/dbt/tests/*.sql',
                _repo ~ '/src/dbt/models/staging/*.sql', _repo ~ '/src/dbt/models/staging/*.yml',
-               _repo ~ '/src/dbt/models/core/*.sql', _repo ~ '/src/dbt/models/core/*.yml') | sort }}
+               _repo ~ '/src/dbt/models/core/*.sql', _repo ~ '/src/dbt/models/core/*.yml',
+               _repo ~ '/src/dbt/models/meta/*.sql') | sort }}
 
 # fileglob cannot be told "everything under src/dbt"; this check can. A file the list above misses fails the
 # deployment instead of silently leaving a model out of the release

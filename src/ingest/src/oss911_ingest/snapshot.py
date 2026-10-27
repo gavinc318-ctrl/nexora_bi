@@ -190,11 +190,11 @@ class SnapshotIngest:
         self.conn.execute(
             """INSERT INTO meta.ingest_batch (run_id, batch_seq, source_id, mode, window_from, window_to,
                    row_count, rows_written, file_sha256, file_bytes, contract_version, effective_params,
-                   snapshot_scope, snapshot_version)
-               VALUES (%s, %s, %s, 'snapshot', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                   snapshot_scope, snapshot_version, snapshot_synced_at)
+               VALUES (%s, %s, %s, 'snapshot', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (self.r.run_id, self.seq, self.r.source_id, "" if taken is None else str(taken), str(v.version),
              len(rows), len(rows), hashlib.sha256(body).digest(), len(body), self.contract_version,
-             json.dumps(self.params), scope, v.version))
+             json.dumps(self.params), scope, v.version, v.end_time))
         key = ds.get("key")
         with self.conn.cursor() as cur:
             cur.executemany(

@@ -43,6 +43,9 @@ UTC = pendulum.timezone("UTC")
 # DAG yet: its data stays in raw until its models are written. Listed explicitly, like the pools of the ingestion DAGs.
 BUILDS = {
     "icp_cdr_voice": "stg_icp_cdr_voice fact_call_leg",
+    # The dimension models also relink the call legs already in core (macros/reference.sql); the shared pool keeps
+    # them from running at the same time as build_icp_cdr_voice
+    "icp_reference": "stg_icp_reference dim_agent dim_queue reference_value",
 }
 
 DEFAULT_ARGS = {

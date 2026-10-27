@@ -369,7 +369,7 @@ SELECT meta.ensure_monthly_partitions('raw.icp_reference', current_date, current
 SET ROLE :"ingest_user";
 SELECT pg_temp.expect_ok    ($$INSERT INTO raw.icp_reference (dataset, cc_id, vdn_id, src_natural_key, snapshot_version,
                                    payload, run_id, batch_seq, contract_version, content_hash)
-                               VALUES ('agents', '1', '1', '101', 13, '{}', '00000000-0000-0000-0000-0000000000d1', 1, 1,
+                               VALUES ('agents', '1', '1', 'zz_check', 13, '{}', '00000000-0000-0000-0000-0000000000d1', 1, 1,
                                        sha256('x'))$$);
 SELECT pg_temp.expect_denied($$UPDATE raw.icp_reference SET payload = '{}' WHERE false$$);
 SELECT pg_temp.expect_denied($$DELETE FROM raw.icp_reference WHERE false$$);
@@ -380,35 +380,35 @@ RESET ROLE;
 SET ROLE :"transform_user";
 SELECT pg_temp.expect_ok    ($$INSERT INTO core.dim_agent (agent_sk, site_sk, src_natural_key, role_code, valid_from,
                                    src_system, run_id, contract_version)
-                               VALUES (core.sk_scd('MKK', 'icp', '101', '1970-01-01Z'), core.site_namespace('MKK'), '101',
+                               VALUES (core.sk_scd('MKK', 'icp', 'zz_check', '1970-01-01Z'), core.site_namespace('MKK'), 'zz_check',
                                        'call_taker', '1970-01-01Z', 'icp', gen_random_uuid(), 2)$$);
-SELECT pg_temp.expect_ok    ($$UPDATE core.dim_agent SET valid_to = now(), built_at = now() WHERE src_natural_key = '101'$$);
+SELECT pg_temp.expect_ok    ($$UPDATE core.dim_agent SET valid_to = now(), built_at = now() WHERE src_natural_key = 'zz_check'$$);
 SELECT pg_temp.expect_denied($$UPDATE core.dim_agent SET name_en = 'x' WHERE false$$);
 SELECT pg_temp.expect_denied($$UPDATE core.dim_queue SET name_en = 'x' WHERE false$$);
 SELECT pg_temp.expect_denied($$DELETE FROM core.dim_agent WHERE false$$);
 SELECT pg_temp.expect_denied($$DELETE FROM core.dim_queue WHERE false$$);
 SELECT pg_temp.expect_ok    ($$INSERT INTO meta.reference_value (domain, src_system, code, src_label, contract_version)
-                               VALUES ('rest_reason', 'icp', '1', 'Break', 2)$$);
+                               VALUES ('zz_check', 'icp', '1', 'Break', 2)$$);
 SELECT pg_temp.expect_ok    ($$UPDATE meta.reference_value SET src_label = 'Pause', is_current = false, last_seen_at = now()
-                               WHERE domain = 'rest_reason'$$);
+                               WHERE domain = 'zz_check'$$);
 SELECT pg_temp.expect_denied($$UPDATE meta.reference_value SET name_en = 'x' WHERE false$$);
 SELECT pg_temp.expect_ok    ($$INSERT INTO audit.reference_data_change_log (target_table, target_key, field_name,
-                                   old_value, new_value, changed_by) VALUES ('core.dim_agent', '101', 'name', 'a', 'b', 'icp_sync')$$);
+                                   old_value, new_value, changed_by) VALUES ('core.dim_agent', 'zz_check', 'name', 'a', 'b', 'icp_sync')$$);
 SELECT pg_temp.expect_ok    ($$UPDATE meta.label_override SET state = 'pending_reconfirm', flagged_at = now() WHERE false$$);
 SELECT pg_temp.expect_denied($$UPDATE meta.label_override SET label_text = 'x' WHERE false$$);
 SELECT pg_temp.expect_denied($$INSERT INTO meta.agent_role_override (site_code, src_system, src_natural_key, role_code,
-                                   set_by, reason) VALUES ('MKK', 'icp', '101', 'supervisor', 'x', 'x')$$);
+                                   set_by, reason) VALUES ('MKK', 'icp', 'zz_check', 'supervisor', 'x', 'x')$$);
 RESET ROLE;
 
 -- M-10 marks supervisors (DD-94 item six), with a reason
 SET ROLE :"admin_user";
 SELECT pg_temp.expect_ok    ($$INSERT INTO meta.agent_role_override (site_code, src_system, src_natural_key, role_code,
-                                   set_by, reason) VALUES ('MKK', 'icp', '101', 'supervisor', 'x', 'shift lead')$$);
+                                   set_by, reason) VALUES ('MKK', 'icp', 'zz_check', 'supervisor', 'x', 'shift lead')$$);
 SELECT pg_temp.expect_error ($$INSERT INTO meta.agent_role_override (site_code, src_system, src_natural_key, role_code,
-                                   set_by, reason) VALUES ('MKK', 'icp', '102', 'dispatcher', 'x', 'x')$$,
+                                   set_by, reason) VALUES ('MKK', 'icp', 'zz_check2', 'dispatcher', 'x', 'x')$$,
                              '%agent_role_override_role_code_check%');
 SELECT pg_temp.expect_error ($$INSERT INTO meta.agent_role_override (site_code, src_system, src_natural_key, role_code,
-                                   set_by, reason) VALUES ('MKK', 'icp', '103', 'supervisor', 'x', '  ')$$,
+                                   set_by, reason) VALUES ('MKK', 'icp', 'zz_check3', 'supervisor', 'x', '  ')$$,
                              '%agent_role_override_reason_check%');
 RESET ROLE;
 -- Hot-tuned stale limit: whitelisted, typed

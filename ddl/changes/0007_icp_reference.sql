@@ -70,6 +70,7 @@ END $$;
 ALTER TABLE meta.ingest_batch
     ADD COLUMN snapshot_scope   text,
     ADD COLUMN snapshot_version bigint,
+    ADD COLUMN snapshot_synced_at timestamptz,
     ADD CONSTRAINT ck_ingest_batch_mode CHECK (mode IN ('incremental', 'backfill', 'resweep', 'snapshot')),
     ADD CONSTRAINT ck_ingest_batch_snapshot CHECK (
         (mode = 'snapshot') = (snapshot_scope IS NOT NULL AND snapshot_version IS NOT NULL));
@@ -77,6 +78,9 @@ COMMENT ON COLUMN meta.ingest_batch.snapshot_scope IS
     'Snapshot batches only: <dataset>@<ccId>/<vdnId> (vdns: vdns@<ccId>) -- what one version number covers';
 COMMENT ON COLUMN meta.ingest_batch.snapshot_version IS
     'Snapshot batches only: the source''s version of that scope when fetched (DD-94 item three)';
+COMMENT ON COLUMN meta.ingest_batch.snapshot_synced_at IS
+    'Snapshot batches only: endTime of the gateway sync that produced this version, as the source reports it; NULL '
+    'when unreadable. A dimension version built from the snapshot is valid from this time (DD-94 item five)';
 CREATE INDEX ix_ingest_batch_snapshot ON meta.ingest_batch (source_id, snapshot_scope, snapshot_version)
     WHERE mode = 'snapshot';
 
