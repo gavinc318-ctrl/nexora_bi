@@ -1470,3 +1470,26 @@ Q30（config_version 是否单调、是否归零）已在单上，答复同样�
 
 - LD-01 9.3 与 `audit.reference_data_change_log` 表注释「参照数据不经 raw 层」与契约 if03d 冲突（需定第 1 条）
 - 契约 if03d 的 `version_probe.path` 写作 `/cmsgateway/resource/synwas/versions`，LD-01 4.6 写作 `GET /synwas/versions`（缺前缀）
+
+## 2026-10-27  Mac 侧：if03d 十四处全部已定（DD-94），五处拟同意，Q33–Q35 已入问题单
+
+| # | 决定 |
+| --- | --- |
+| 1 | 经 raw，新结构变更建 `raw.icp_reference`；LD-01 9.3 已收窄为「M-10 人工维护的不经 raw」，`reference_data_change_log` 表注释请开发机同改 |
+| 2 | 同意通用列（dataset、src_natural_key、payload、vdn_version + 接入元数据） |
+| 3 | 同意整份快照、每数据集一批、同版本重取不写；契约 `raw_write.mode: snapshot_on_version`（DD-82 已加注） |
+| 4 | 同意：vdns 用 CTI 版本、其余用 VDN 版本，水位按 (ccId, vdnId)，只在 status = 2 取 |
+| 5 | 不调 POST；**N = 7 天**，作热调参数（白名单加 `version_stale_days`） |
+| 6 | 同意 valid_from 取 endTime；**首版用哨兵，接受这个推断**——哨兵值由开发机定一个 `sk_scd` 能表示的（`-infinity` 进 to_char 要实测），列注释写明 |
+| 7 | `unmapped`；**业务角色的指定来源是 M-10 人工维护**（SCD2 留痕），不等身份系统。Q35 仍问 |
+| 8 | 同意 groupId → team_code；组名进 reference_value；monitorId 不落 |
+| 9 | 同意先写原文、译名走 label_override；LD-02 第 7 章已补这条 |
+| 10 | 同意留空、关系只在 raw、需要时立桥表 |
+| 11 | 同意只落 raw；契约 if03d 的 calledconfigs target 改为 none / raw-only |
+| 12 | 同意，按所列权限新结构变更 |
+| 13 | 同意 |
+| 14 | 同意 |
+
+拟五处全部同意。文档：LD-01 4.6 已补版本 / 副本 / 快照四条并改路径前缀；Q33–Q35 已加进 `queries/ICP_CMS_Interface_Clarification_Questions.xlsx`
+（共 35 题）。契约 if03d 的改动（mode、版本探测、targets）由开发机做，升 v2。troubleshooting 条数 CLAUDE.md 已改 33。
+
