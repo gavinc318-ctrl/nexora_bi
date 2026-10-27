@@ -15,7 +15,7 @@
     incremental_strategy='delete+insert',
     unique_key='call_leg_sk',
     on_schema_change='fail',
-    pre_hook="{{ ensure_leg_partitions() }}",
+    pre_hook=["{{ lock_call_leg_links() }}", "{{ ensure_leg_partitions() }}"],
     post_hook=["{{ raise_leg_guard_items() }}", "{{ register_core_batches() }}"]
 ) }}
 

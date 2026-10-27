@@ -5,7 +5,7 @@
     materialized='incremental',
     incremental_strategy='append',
     on_schema_change='fail',
-    pre_hook="{{ scd2_close(queue_desired(), queue_snapshot(), queue_attrs(), 'queue_sk') }}",
+    pre_hook=["{{ lock_call_leg_links() }}", "{{ scd2_close(queue_desired(), queue_snapshot(), queue_attrs(), 'queue_sk') }}"],
     post_hook=["{{ scd2_log(queue_attrs(), 'queue_sk') }}", "{{ flag_renamed_labels('name_en') }}",
                "{{ relink_call_legs('queue_sk', 1) }}", "{{ register_snapshot_batches('skills') }}"]
 ) }}

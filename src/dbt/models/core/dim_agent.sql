@@ -7,7 +7,7 @@
     materialized='incremental',
     incremental_strategy='append',
     on_schema_change='fail',
-    pre_hook="{{ scd2_close(agent_desired(), agent_snapshot(), agent_attrs(), 'agent_sk', ['role_code']) }}",
+    pre_hook=["{{ lock_call_leg_links() }}", "{{ scd2_close(agent_desired(), agent_snapshot(), agent_attrs(), 'agent_sk', ['role_code']) }}"],
     post_hook=["{{ scd2_log(agent_attrs(), 'agent_sk') }}", "{{ flag_renamed_labels('name_en') }}",
                "{{ relink_call_legs('agent_sk', 2) }}", "{{ register_snapshot_batches('agents') }}"]
 ) }}

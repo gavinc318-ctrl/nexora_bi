@@ -155,7 +155,8 @@ VALUES ('MKK', 'icp', '<工号>', 'supervisor', '<你的名字>', now(), '<依�
 
 ## 若测试 `fact_call_leg_dimension_links` 失败
 
-说明有话单的坐席或队列关联与维度不一致。正常运行时维度变化和重新关联在同一事务里，不会分开；万一出现，重新关联全部：
+说明有话单的坐席或队列关联与维度不一致。话单模型与两个维度模型以事务级咨询锁串行（`lock_call_leg_links`），手工构建
+也不会与 Airflow 的构建交错；万一仍出现（例如加锁之前留下的），重新关联全部：
 
 ```bash
 sudo -u airflow bash -c 'set -a; . /etc/oss911/dbt.env; set +a; cd /tmp && DBT_SEND_ANONYMOUS_USAGE_STATS=false \

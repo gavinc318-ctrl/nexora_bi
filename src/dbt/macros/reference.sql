@@ -208,3 +208,15 @@
     {% do run_query('commit') %}
     {{ log('relink_all_call_legs: done', info=true) }}
 {%- endmacro %}
+
+{#- Pre-hook, first, of fact_call_leg, dim_agent and dim_queue: one at a time, also outside Airflow.
+    The links between call legs and dimensions are kept right from two sides -- fact_call_leg joins the dimension
+    version valid at each new leg, and a dimension model relinks the legs already in core. If the two run at the same
+    time, each can miss the other's uncommitted rows: legs written by the one, dimension versions by the other, and
+    neither links them. Airflow's pool dbt_build (one slot) keeps the scheduled builds apart, but a build run by hand
+    bypasses the pool (seen on the real machine, 2026-10-27). A transaction-level advisory lock serialises the three
+    models whoever runs them; it is released at commit, and the second model's statements then see the first's rows.
+-#}
+{% macro lock_call_leg_links() -%}
+    select pg_advisory_xact_lock(hashtext('oss911.call_leg_links'))
+{%- endmacro %}
