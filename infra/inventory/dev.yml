@@ -77,6 +77,7 @@ all:
     pg_extensions:
       - postgis
       - pgcrypto        # no current DDL depends on it: core.sk uses uuid-ossp (created by change 0001); whether to keep it is open (NOTES.md)
+      - btree_gist      # change 0008: no two role marks of one agent overlap (exclusion constraint); ships with PostgreSQL (contrib)
 
     # ---- Connection layer ----
     # Two pool modes, because two kinds of client need different things from a connection (DD-67):

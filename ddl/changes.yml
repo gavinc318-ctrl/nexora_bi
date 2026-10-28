@@ -72,3 +72,9 @@
   summary: ICP reference data (DD-94) -- raw.icp_reference, snapshot batches, version_stale_days, agent_role_override, reference_value.src_label, dbt's writes to the dimensions narrowed to new versions
   files:
     - changes/0007_icp_reference.sql
+
+- id: "0008"
+  run_as: owner
+  summary: Supervisor marks as validity intervals (DD-94 item sixteen) -- meta.agent_role_override rebuilt with valid_from / valid_to, no overlap per agent (btree_gist), clearing closes valid_to
+  files:
+    - changes/0008_agent_role_intervals.sql
