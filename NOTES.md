@@ -1580,3 +1580,14 @@ Q30（config_version 是否单调、是否归零）已在单上，答复同样�
 3. `stg_icp_reference` 只处理契约配置的 `(ccId, vdnId)`；其他 VDN 的快照留 raw + 待澄清（接入已做），不进 dim。
 已记 DD-94 注十五至十七、LD-02 第 7 章第三条规则。
 
+## 2026-10-28  Mac 侧：维度成员缺失的腿怎么算（DD-95）；十四处知悉
+
+**DD-95**：
+1. 总量照计；按坐席 / 队列分组归显式 **`unlinked`** 桶（mart 按 `agent_sk IS NULL` 归入，保留原始工号可下钻），不是「其他」、不剔除。
+2. **进待澄清**：每个工号一条，未处理前不重复开（`clarification_queue` 已授 transform INSERT）。dbt WARN 测试保留。
+3. 不造哨兵行、不拉长已关闭版本（与开发机一致）。成员重新出现 → post-hook 重新关联补上。
+
+**十四处**：全部知悉，记入 DD-94 注。三处以昨天评审答复为准：第 3 条缺键 → 整批隔离（十五）；第 7 条 `agent_role_override` →
+带 valid_from / valid_to，撤销关区间不删行、按变化点并集切版本（十六）；第 4 条多 VDN → staging 只处理配置的 VDN（十七）。
+其余十一处同意，哨兵 1970-01-01 UTC 认可。三处更正已做：DD-94 被拒方案五理由、DD-56 收窄、CLAUDE.md 第 9 节。
+
