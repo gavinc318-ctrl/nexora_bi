@@ -43,12 +43,34 @@ ICP 的配置同步接口（synwas，接口文档 p.907–933）给出坐席、�
 - 第一次见到的坐席或队列：从哨兵 `1970-01-01 00:00 UTC` 起——第一版覆盖观测之前的全部历史，否则第一份快照之前的
   话单都关联不到坐席。这是推断，DD-94 第五条接受了它
 - 之后的变化：从网关那次同步的 `endTime` 起
-- M-10 标记主管：从标记的 `set_at` 起
+- M-10 的主管标记：从标记的 `valid_from` 起，到 `valid_to` 止（撤销 = 关 `valid_to`，不删行）
+
+版本按「源端快照的同步时刻 ∪ 标记的起止时刻」逐点切分，每个变化点一版（DD-94 十六）：08:00 同步的改名和 09:00 起的
+主管标记，即使在同一次构建里应用，也是两版。一次构建会应用所有待应用的快照，不再一次一份。
+
+维度只增不改，所以**不能切到已有最新版本之前**：起始时刻早于该坐席最新版本的标记（补登过去的事），从最新版本之后
+一秒起生效，留痕的 reason 里写明「mark valid from …, versions before are not rewritten」。起始时刻在将来的标记，
+到点之后的那次构建才生效。
 
 ### 五、角色：默认接警员，主管由 M-10 标
 
 ICP 的 `roleId` 是 CMS 的权限角色，不是业务角色。ICP 工号只有接警员与其主管（AS-36），所以一律 `call_taker`，主管
-由 M-10 写进 `meta.agent_role_override`，下一次构建生成新版本。M-10 还没做，现在用 SQL 写（见文末）。
+由 M-10 写进 `meta.agent_role_override`（带生效区间，结构变更 0008），下一次构建生成新版本。M-10 还没做，现在用 SQL
+写（见文末）。
+
+### 七、只用本中心的 VDN
+
+契约 `endpoint.site_vdn` 写明本中心的 ccId 与 vdnId（开发机是假接口的 1 / 1，真实值待 Q31）。版本号里出现的其他 VDN
+照常接入 raw、进待澄清，不进维度；`site_vdn` 不在版本号里，也进待澄清。staging 不登记其他 VDN 的批次，所以改正
+`site_vdn` 之后，下一次构建会把它们补进来。
+
+快照里有任何一条记录缺自然键（如工号为空），该数据集整批隔离（DD-94 十五）：缺键的快照不完整，不能据以判断谁消失了。
+
+### 八、话单里的工号在配置里不存在
+
+话单的坐席或队列在通话开始时没有有效的维度版本（例如已从 ICP 删除，仍有话单），关联为空、不造「未知坐席」；每个工号
+开一条待澄清（`src_column` 以 `of call legs, not in the configuration at their start (DD-95)` 结尾），未处理前不重复开。
+mart 将按「未关联」单独成桶（DD-95）。
 
 ### 六、话单的坐席、队列关联会被补上
 
@@ -57,7 +79,7 @@ ICP 的 `roleId` 是 CMS 的权限角色，不是业务角色。ICP 工号只有
 
 ## 执行
 
-本轮有结构变更 0007、接入程序改动、契约 if03d v2、dbt 新模型与新 DAG。假 ICP 接口也加了 synwas 接口，**要重启**：
+本轮有结构变更 0007、接入程序改动、契约 if03d v2、dbt 新模型与新 DAG。（2026-10-28 起另有 0008、契约 v3，见文末「0008 与契约 v3」。）假 ICP 接口也加了 synwas 接口，**要重启**：
 到它的终端按 Ctrl+C，`git pull` 之后再 `test/fake_icp/start.sh`。
 
 > 假接口的配置副本只在内存里，每次重启都从版本 13 开始。已经取过更高版本之后再重启，接入程序会看到「版本倒退」，
@@ -146,12 +168,19 @@ sudo -u postgres psql -d oss911 -P pager=off -c "SELECT target_key, field_name, 
 ## M-10 之前：手工标记主管
 
 ```bash
+# 标记：从某个时刻起是主管
 sudo -u postgres psql -d oss911 -c "
-INSERT INTO meta.agent_role_override (site_code, src_system, src_natural_key, role_code, set_by, set_at, reason)
-VALUES ('MKK', 'icp', '<工号>', 'supervisor', '<你的名字>', now(), '<依据>')"
+INSERT INTO meta.agent_role_override (site_code, src_system, agent_no, role_code, valid_from, changed_by, reason)
+VALUES ('MKK', 'icp', '<工号>', 'supervisor', '<起始时刻，如 2026-10-28 09:00+03>', '<你的名字>', '<依据>')"
+
+# 撤销：关区间，不删行
+sudo -u postgres psql -d oss911 -c "
+UPDATE meta.agent_role_override SET valid_to = '<结束时刻>'
+ WHERE site_code = 'MKK' AND agent_no = '<工号>' AND valid_to = 'infinity'"
 ```
 
-下一次 `build_icp_reference` 生成该坐席的新版本（从 `set_at` 起）。M-10 做好后这一步走界面，并写留痕。
+同一坐席的两段标记不能重叠（排他约束 `ex_agent_role_override_overlap`）。下一次 `build_icp_reference` 在起止时刻各切
+一版。M-10 做好后这一步走界面，并写留痕。
 
 ## 若测试 `fact_call_leg_dimension_links` 失败
 
@@ -181,3 +210,30 @@ sudo -u airflow bash -c 'set -a; . /etc/oss911/dbt.env; set +a; cd /tmp && DBT_S
 - 网关会不会自动同步、多久一次（Q33）；版本号会不会归零（Q30）；内容不变的同步会不会升版本（Q34）
 - 真实的类型与字段（文档的类型与样例不一致，DD-94 〇-i）
 - 多 VDN（AS-30 / Q31）：程序会照常接入并开待澄清，但事实表没有 VDN 维
+
+## 0008 与契约 v3（2026-10-28，DD-94 十五至十七 · DD-95）
+
+结构变更 0008 用到扩展 `btree_gist`（PostgreSQL 自带的 contrib），它由 20-database 按 inventory 的 `pg_extensions`
+创建——owner 角色不能建扩展，所以**先跑 20，再跑 40**：
+
+```bash
+sudo -v
+cd ~/src/nexora_bi && git pull --rebase
+cd infra
+ansible-playbook playbooks/20-database.yml  -e ansible_connection=local -K
+ansible-playbook playbooks/40-schema.yml    -e ansible_connection=local -K
+ansible-playbook playbooks/30-python.yml    -e ansible_connection=local -K
+ansible-playbook playbooks/45-contracts.yml -e ansible_connection=local -K
+ansible-playbook playbooks/50-dags.yml      -e ansible_connection=local -K
+```
+
+| 剧本 | 第一遍预期 |
+| --- | --- |
+| 20 | `Enable extensions` 一项 changed（btree_gist），其余不变 |
+| 40 | 执行 0008；`Structural changes 0000 to 0008 executed`；权限验证全过（147 项） |
+| 30 | 重装接入程序 |
+| 45 | 新发布目录；`icp_reference\|updated\|3` |
+| 50 | 安装新的 dbt 项目 |
+
+已有的主管标记（0007 的表）原样搬进新表：`valid_from = set_at`，区间开放。没有标记过的，新表是空的。
+

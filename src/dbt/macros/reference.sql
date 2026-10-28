@@ -1,167 +1,239 @@
 {#- Reference data from ICP snapshots into core dimensions and meta.reference_value (contract if03d · DD-94 · DD-12).
 
-    Which snapshot is in force, per scope (ingest_batch.snapshot_scope, e.g. agents@1/1):
-      - a processable snapshot this model has not applied yet, newer than every one it has applied: the oldest such
-        one is applied in this run ("new") -- one version per run, oldest first, so a rename at v14 undone at v15 is
-        kept as two versions rather than skipped
-      - otherwise the newest one applied ("in force, not new"): nothing from the source changes, but an M-10 role
-        mark set since is still applied (DD-94 item six)
-    A released snapshot older than one already applied is registered and never applied (DD-82 item four).
+    Only the snapshots of the contract's site_vdn are used (DD-94 item seventeen): the scope of a dataset is
+    "<dataset>@<ccId>/<vdnId>" ("vdns@<ccId>" for the CTI-level dataset); snapshots of any other CTI or VDN stay in
+    raw and in the clarification queue (ingestion raises it).
 
-    How a dimension changes (SCD2, DD-12): the current version is closed (valid_to) and a new one inserted; rows are
-    never rewritten or deleted (change 0007 allows dbt nothing else). The time of a change:
-      - an entity seen for the first time ever: valid from the sentinel 1970-01-01 00:00 UTC -- the first version
-        covers the time before it was observed (DD-94 item five)
-      - a change from a new snapshot: the gateway sync's endTime (stg_icp_reference.synced_at)
-      - a change from an M-10 role mark: the mark's set_at; a cleared mark: now()
-      always later than the previous version's valid_from, so versions never overlap or share a valid_from.
-    An entity missing from a NEW snapshot is closed at that snapshot's sync time; a snapshot already applied never
-    closes anything.
+    A snapshot is pending for a model when it is processable, staged, not applied by the model yet, and newer than
+    every one the model has applied. A released snapshot older than one already applied is registered and never
+    applied (DD-82 item four).
 
-    The pieces below are used by a model and its hooks with the same arguments, so the pre-hook (close) and the model
-    (insert) compute the same change time: both read "the latest version" (current or closed), which the pre-hook's
-    closing does not move.
+    The dimensions (dim_agent, dim_queue) apply every pending snapshot in one run, and cut versions at the union of
+    the change points of two sources (LD-02 chapter 7, third rule · DD-94 item sixteen):
+      - each pending snapshot, at its gateway sync time (endTime; DD-94 item five)
+      - each start and end of an M-10 role mark (meta.agent_role_override, dim_agent only), once it is not in the future
+    At each point the state of an entity is evaluated -- the source attributes of the newest snapshot synced by
+    then (or the latest version's, if none), the role of the mark in force then (call_taker without one) -- and a
+    version starts wherever the state differs from the one before: one version per change point, never two changes
+    of different times merged into one. Absent from a snapshot = gone: the version is closed at that point.
+    Rows are only inserted and closed (change 0007). So nothing is cut before the entity's latest version: a point
+    earlier than that (a mark entered with a past valid_from, a snapshot synced before a mark already applied) takes
+    effect one second after the latest version's valid_from -- the "catch-up" point every entity is evaluated at.
+    An entity seen for the first time ever starts at the sentinel 1970-01-01 00:00 UTC (DD-94 item five).
+
+    meta.reference_value is not SCD2 and still applies one pending snapshot per run, oldest first (ref_snapshot_in_force).
 -#}
 
-{#- Snapshots of a dataset a model is to use now: run_id, batch_seq, snapshot_scope, snapshot_version, synced_at,
-    is_new. Only batches staging has taken (registered for stg_icp_reference) count. -#}
+{#- The site's scope of a dataset, from the contract (endpoint.site_vdn). -#}
+{% macro site_scope(dataset) -%}
+    ('{{ dataset }}@' || {{ contract_text('icp_reference', 'endpoint,site_vdn,cc_id') }}
+     {%- if dataset != 'vdns' %} || '/' || {{ contract_text('icp_reference', 'endpoint,site_vdn,vdn_id') }}{% endif %})
+{%- endmacro %}
+
+{#- Processable, staged snapshots of the site's scope of a dataset: run_id, batch_seq, snapshot_version, synced_at,
+    applied (registered for model_name). -#}
+{% macro ref_snapshot_candidates(dataset, model_name) -%}
+    select b.run_id, b.batch_seq, b.snapshot_scope, b.snapshot_version,
+           coalesce(b.snapshot_synced_at, b.committed_at) as synced_at,
+           exists (select 1 from meta.staging_batch_state s
+                    where s.model = '{{ model_name }}' and s.run_id = b.run_id and s.batch_seq = b.batch_seq) as applied
+      from meta.ingest_batch b
+     where b.source_id = 'icp_reference' and b.mode = 'snapshot'
+       and b.snapshot_scope = {{ site_scope(dataset) }}
+       and not exists (select 1 from meta.quarantine_batch q
+                        where q.run_id = b.run_id and q.batch_seq = b.batch_seq and q.state in ('pending', 'discarded'))
+       and exists (select 1 from meta.staging_batch_state s
+                    where s.model = 'stg_icp_reference' and s.run_id = b.run_id and s.batch_seq = b.batch_seq)
+{%- endmacro %}
+
+{#- Every pending snapshot, oldest first. -#}
+{% macro ref_snapshots_pending(dataset, model_name) -%}
+    with cand as ({{ ref_snapshot_candidates(dataset, model_name) }})
+    select c.run_id, c.batch_seq, c.snapshot_version, c.synced_at
+      from cand c
+     where not c.applied
+       and c.snapshot_version > coalesce((select max(a.snapshot_version) from cand a where a.applied), -1)
+{%- endmacro %}
+
+{#- meta.reference_value: the one snapshot in force -- the oldest pending one ("new"), or else the newest applied. -#}
 {% macro ref_snapshot_in_force(dataset, model_name) -%}
-    with cand as (
-        select b.run_id, b.batch_seq, b.snapshot_scope, b.snapshot_version,
-               coalesce(b.snapshot_synced_at, b.committed_at) as synced_at,
-               exists (select 1 from meta.staging_batch_state s
-                        where s.model = '{{ model_name }}' and s.run_id = b.run_id and s.batch_seq = b.batch_seq) as applied
-          from meta.ingest_batch b
-         where b.source_id = 'icp_reference' and b.mode = 'snapshot'
-           and split_part(b.snapshot_scope, '@', 1) = '{{ dataset }}'
-           and not exists (select 1 from meta.quarantine_batch q
-                            where q.run_id = b.run_id and q.batch_seq = b.batch_seq and q.state in ('pending', 'discarded'))
-           and exists (select 1 from meta.staging_batch_state s
-                        where s.model = 'stg_icp_reference' and s.run_id = b.run_id and s.batch_seq = b.batch_seq)
-    ),
-    done as (
-        select snapshot_scope, max(snapshot_version) as v from cand where applied group by snapshot_scope
-    ),
+    with cand as ({{ ref_snapshot_candidates(dataset, model_name) }}),
     pending as (
-        select distinct on (c.snapshot_scope) c.run_id, c.batch_seq, c.snapshot_scope, c.snapshot_version, c.synced_at
-          from cand c left join done d on d.snapshot_scope = c.snapshot_scope
-         where not c.applied and c.snapshot_version > coalesce(d.v, -1)
-         order by c.snapshot_scope, c.snapshot_version, c.batch_seq
+        select c.run_id, c.batch_seq, c.snapshot_scope, c.snapshot_version, c.synced_at
+          from cand c
+         where not c.applied
+           and c.snapshot_version > coalesce((select max(a.snapshot_version) from cand a where a.applied), -1)
+         order by c.snapshot_version, c.batch_seq
+         limit 1
     ),
     current_applied as (
-        select distinct on (c.snapshot_scope) c.run_id, c.batch_seq, c.snapshot_scope, c.snapshot_version, c.synced_at
+        select c.run_id, c.batch_seq, c.snapshot_scope, c.snapshot_version, c.synced_at
           from cand c
-         where c.applied and not exists (select 1 from pending p where p.snapshot_scope = c.snapshot_scope)
-         order by c.snapshot_scope, c.snapshot_version desc, c.batch_seq desc
+         where c.applied and not exists (select 1 from pending)
+         order by c.snapshot_version desc, c.batch_seq desc
+         limit 1
     )
     select p.*, true as is_new from pending p
     union all
     select a.*, false as is_new from current_applied a
 {%- endmacro %}
 
-{#- Post-hook: register the snapshot applied in this run, and every older processable one not applied (a late
-    release); newer ones wait for the next runs. -#}
-{% macro register_snapshot_batches(dataset) -%}
+{#- Post-hook: register what this run applied -- every pending snapshot (all_pending, the dimensions) or the one in
+    force (meta.reference_value) -- and every older processable one not applied (a late release). -#}
+{% macro register_snapshot_batches(dataset, all_pending=false) -%}
     insert into meta.staging_batch_state (model, run_id, batch_seq)
-    select '{{ this.identifier }}', b.run_id, b.batch_seq
-      from meta.ingest_batch b
-      join ({{ ref_snapshot_in_force(dataset, this.identifier) }}) f on f.snapshot_scope = b.snapshot_scope
-     where b.source_id = 'icp_reference' and b.mode = 'snapshot'
-       and b.snapshot_version <= f.snapshot_version
-       and not exists (select 1 from meta.quarantine_batch q
-                        where q.run_id = b.run_id and q.batch_seq = b.batch_seq and q.state in ('pending', 'discarded'))
-       and exists (select 1 from meta.staging_batch_state s
-                    where s.model = 'stg_icp_reference' and s.run_id = b.run_id and s.batch_seq = b.batch_seq)
-       and not exists (select 1 from meta.staging_batch_state s
-                        where s.model = '{{ this.identifier }}' and s.run_id = b.run_id and s.batch_seq = b.batch_seq)
+    select '{{ this.identifier }}', c.run_id, c.batch_seq
+      from ({{ ref_snapshot_candidates(dataset, this.identifier) }}) c
+     where not c.applied
+       and c.snapshot_version <= (select max(f.snapshot_version) from (
+               {%- if all_pending %}{{ ref_snapshots_pending(dataset, this.identifier) }}
+               {%- else %}{{ ref_snapshot_in_force(dataset, this.identifier) }}{% endif %}) f)
 {%- endmacro %}
 
-{#- Per natural key: what is to happen to the dimension. desired: the model's SELECT of src_natural_key, is_new,
-    synced_at, override_at and the attribute columns; snap: ref_snapshot_in_force(...); override_attrs: the attributes
-    set in M-10 rather than by the source (dim_agent: role_code). Output columns: nk, action (new / change / gone /
-    same), change_at, current_sk, plus the desired columns (NULL for a gone entity).
-
-    change_at, compared with the entity's latest version (current, or closed -- by an earlier run, or by this run's
-    pre-hook, which leaves valid_from alone):
-      never seen before                                      the sentinel (DD-94 item five)
-      gone from a new snapshot                               that snapshot's sync time
-      back in a new snapshot after being gone                that snapshot's sync time
-      a source attribute differs in a new snapshot           that snapshot's sync time
-      otherwise (only an M-10 attribute differs)             the mark's set_at, or now() for a cleared mark
-    never earlier than the latest version's valid_from + 1 second. -#}
-{% macro scd2_changes(desired, snap, attrs, sk, override_attrs=[]) -%}
-    {%- set source_attrs = attrs | reject('in', override_attrs) | list -%}
-    with d as ({{ desired }}),
-    cur as (
-        select * from {{ this }}
-         where site_sk = core.site_namespace('{{ var("site_code") }}') and valid_to = 'infinity'
+{#- The changes of a dimension in this run, one row per change point of an entity (see the header).
+      dataset       the snapshot dataset
+      source_sql    SELECT of nk, run_id, batch_seq, contract_version and the source attributes, from staging
+      src_attrs     the source attributes
+      mark_sql      SELECT of nk, valid_from, valid_to and the mark attributes (or none)
+      mark_attrs    [(attribute, value without a mark)]
+    Output: nk, at (the change point), next_at (the entity's next change point in this run, or NULL), present,
+    prev_present, the attributes and prev_<attribute>, is_first, base_sk / base_open (the entity's latest version
+    and whether it is the current one), run_id, contract_version, reason.
+    Computed the same in the pre-hooks and in the model: "the latest version" is read whether current or closed, and
+    the pre-hook's closing (built_at = now()) is recognised, so the close does not change the result. -#}
+{% macro scd2_timeline(dataset, source_sql, src_attrs, sk, mark_sql=none, mark_attrs=[]) -%}
+    {%- set m_names = mark_attrs | map(attribute=0) | list -%}
+    {%- set attrs = src_attrs + m_names -%}
+    with pend as (
+        select p.run_id, p.batch_seq, p.snapshot_version,
+               max(p.synced_at) over (order by p.snapshot_version, p.batch_seq) as at
+          from ({{ ref_snapshots_pending(dataset, this.identifier) }}) p
+    ),
+    src as (
+        select x.*, p.snapshot_version
+          from ({{ source_sql }}) x
+          join pend p on p.run_id = x.run_id and p.batch_seq = x.batch_seq
     ),
     lat as (
-        select distinct on (src_natural_key) *
+        select distinct on (src_natural_key) src_natural_key as nk, {{ sk }} as sk, valid_from, valid_to,
+               (valid_to = 'infinity' or built_at = now()) as present,
+               {% for a in attrs %}{{ a }}, {% endfor %}run_id, contract_version
           from {{ this }}
          where site_sk = core.site_namespace('{{ var("site_code") }}')
          order by src_natural_key, valid_from desc
     ),
-    fresh as (
-        select max(synced_at) as synced_at from ({{ snap }}) f where f.is_new
-    )
-    select coalesce(d.src_natural_key, c.src_natural_key)                       as nk,
-           case when d.src_natural_key is null then 'gone'
-                when c.src_natural_key is null then 'new'
-                when row({% for a in attrs %}d.{{ a }}{{ ", " if not loop.last }}{% endfor %})
-                     is distinct from
-                     row({% for a in attrs %}c.{{ a }}{{ ", " if not loop.last }}{% endfor %}) then 'change'
-                else 'same' end                                                  as action,
-           case when l.src_natural_key is null then '1970-01-01 00:00:00+00'::timestamptz
-                else greatest(
-                    case when d.src_natural_key is null then (select synced_at from fresh)
-                         when l.valid_to <> 'infinity' and l.built_at < now() then d.synced_at
-                         when d.is_new and row({% for a in source_attrs %}d.{{ a }}{{ ", " if not loop.last }}{% endfor %})
-                              is distinct from
-                              row({% for a in source_attrs %}l.{{ a }}{{ ", " if not loop.last }}{% endfor %}) then d.synced_at
-                         else coalesce(d.override_at, now()) end,
-                    l.valid_from + interval '1 second') end                      as change_at,
-           c.{{ sk }}                                                            as current_sk,
-           d.*
-      from d
-      full join cur c on c.src_natural_key = d.src_natural_key
-      left join lat l on l.src_natural_key = coalesce(d.src_natural_key, c.src_natural_key)
-     -- an entity missing from the snapshot is gone only if that snapshot is new
-     where d.src_natural_key is not null or (select synced_at from fresh) is not null
-{%- endmacro %}
-
-{#- Pre-hook: close the current version of every changed or gone entity. -#}
-{% macro scd2_close(desired, snap, attrs, sk, override_attrs=[]) -%}
-    update {{ this }} t
-       set valid_to = x.change_at, built_at = now()
-      from ({{ scd2_changes(desired, snap, attrs, sk, override_attrs) }}) x
-     where t.{{ sk }} = x.current_sk and x.action in ('change', 'gone')
-{%- endmacro %}
-
-{#- Post-hook: one audit row per changed field (LD-01 9.3 · DD-94 item eleven). This run's rows are the ones with
-    built_at = now(): dbt runs a model's hooks and its insert in one transaction. -#}
-{% macro scd2_log(attrs, sk) -%}
-    with ins as (
-        select * from {{ this }} where built_at = now() and valid_to = 'infinity'
+    base as (
+        select e.nk, l.sk, (l.nk is null) as is_new, coalesce(l.present, false) as present,
+               (l.valid_to = 'infinity') as open,
+               coalesce(l.valid_from, '1970-01-01 00:00:00+00'::timestamptz - interval '1 second') as l_from,
+               {% for a in attrs %}case when l.present then l.{{ a }} end as {{ a }}, {% endfor %}
+               l.run_id, l.contract_version
+          from (select nk from lat union select nk from src) e
+          left join lat l on l.nk = e.nk
     ),
-    closed as (
-        select * from {{ this }} where built_at = now() and valid_to <> 'infinity'
+    -- per entity and pending snapshot: in it or not, from when (an entity never seen before: its first snapshot
+    -- holds from the sentinel)
+    st as (
+        select b.nk, p.snapshot_version, p.run_id as snap_run_id,
+               case when b.is_new and p.snapshot_version = (select min(s2.snapshot_version) from src s2 where s2.nk = b.nk)
+                    then '1970-01-01 00:00:00+00'::timestamptz else p.at end as eff,
+               (s.nk is not null) as present,
+               {% for a in src_attrs %}s.{{ a }}, {% endfor %}s.run_id, s.contract_version
+          from base b
+          cross join pend p
+          left join src s on s.nk = b.nk and s.snapshot_version = p.snapshot_version
+    ),
+    {% if mark_sql %}
+    marks as ({{ mark_sql }}),
+    {% endif %}
+    pts as (
+        select b.nk, b.l_from + interval '1 second' as p from base b
+        union
+        select st.nk, st.eff from st join base b on b.nk = st.nk where st.eff > b.l_from + interval '1 second'
+        {% if mark_sql %}
+        union
+        select m.nk, m.valid_from from marks m join base b on b.nk = m.nk
+         where m.valid_from > b.l_from + interval '1 second' and m.valid_from <= now()
+        union
+        select m.nk, m.valid_to from marks m join base b on b.nk = m.nk
+         where m.valid_to > b.l_from + interval '1 second' and m.valid_to <= now()
+        {% endif %}
+    ),
+    state as (
+        select pt.nk, pt.p,
+               coalesce(ss.present, b.present) as present,
+               {% for a in src_attrs %}case when ss.nk is null then b.{{ a }} when ss.present then ss.{{ a }} end as {{ a }},
+               {% endfor %}
+               {% for a, dflt in mark_attrs %}coalesce(mm.{{ a }}, {{ dflt }}) as {{ a }},
+               {% endfor %}
+               coalesce(ss.run_id, ss.snap_run_id, b.run_id) as run_id, coalesce(ss.contract_version, b.contract_version) as contract_version,
+               case when ss.eff = pt.p or (ss.nk is not null and pt.p = b.l_from + interval '1 second')
+                    then 'snapshot v' || ss.snapshot_version end as by_snapshot,
+               {% if mark_sql %}case when mm.nk is not null and mm.valid_from < pt.p and pt.p = b.l_from + interval '1 second'
+                    then mm.valid_from end{% else %}null::timestamptz{% endif %} as late_mark_from
+          from pts pt
+          join base b on b.nk = pt.nk
+          left join lateral (select * from st where st.nk = pt.nk and st.eff <= pt.p
+                              order by st.snapshot_version desc limit 1) ss on true
+          {% if mark_sql %}
+          left join lateral (select * from marks m where m.nk = pt.nk and m.valid_from <= pt.p and pt.p < m.valid_to
+                              order by m.valid_from desc limit 1) mm on true
+          {% endif %}
+    ),
+    seq as (
+        select s.*,
+               lag(s.present, 1, b.present) over w as prev_present,
+               {% for a in attrs %}lag(s.{{ a }}, 1, b.{{ a }}) over w as prev_{{ a }},
+               {% endfor %}
+               b.sk as base_sk, b.open as base_open
+          from state s join base b on b.nk = s.nk
+        window w as (partition by s.nk order by s.p)
+    ),
+    changes as (
+        select * from seq
+         where present is distinct from prev_present
+            or (present and row({% for a in attrs %}{{ a }}{{ ", " if not loop.last }}{% endfor %})
+                            is distinct from
+                            row({% for a in attrs %}prev_{{ a }}{{ ", " if not loop.last }}{% endfor %}))
     )
+    select c.nk, c.p as at, lead(c.p) over (partition by c.nk order by c.p) as next_at,
+           c.present, c.prev_present,
+           {% for a in attrs %}c.{{ a }}, c.prev_{{ a }}, {% endfor %}
+           row_number() over (partition by c.nk order by c.p) = 1 as is_first,
+           c.base_sk, c.base_open, c.run_id, c.contract_version,
+           'version valid from ' || c.p || coalesce(' (' || c.by_snapshot || ')', ' (role mark)')
+           || coalesce('; mark valid from ' || c.late_mark_from || ', versions before are not rewritten', '') as reason
+      from changes c
+{%- endmacro %}
+
+{#- Pre-hook: close the current version of every entity that changes, at its first change point. -#}
+{% macro scd2_close(timeline, sk) -%}
+    update {{ this }} t
+       set valid_to = x.at, built_at = now()
+      from ({{ timeline }}) x
+     where x.is_first and x.base_open and t.{{ sk }} = x.base_sk and t.valid_to = 'infinity'
+{%- endmacro %}
+
+{#- Pre-hook, before the close: one audit row per changed field (LD-01 9.3 · DD-94 item eleven), from the same
+    timeline the model inserts. -#}
+{% macro scd2_log(timeline, attrs) -%}
+    with x as ({{ timeline }})
     insert into audit.reference_data_change_log (target_table, target_key, field_name, old_value, new_value,
                                                  changed_by, reason)
     {% for a in attrs %}
-    select '{{ this.schema }}.{{ this.identifier }}', core.nk(i.src_natural_key), '{{ a }}', p.{{ a }}::text,
-           i.{{ a }}::text, 'icp_sync', 'new version valid from ' || i.valid_from
-      from ins i
-      left join closed p on p.src_natural_key = i.src_natural_key
-     where (p.{{ sk }} is null and i.{{ a }} is not null)
-        or (p.{{ sk }} is not null and p.{{ a }} is distinct from i.{{ a }})
+    select '{{ this.schema }}.{{ this.identifier }}', core.nk(x.nk), '{{ a }}', x.prev_{{ a }}::text, x.{{ a }}::text,
+           'icp_sync', x.reason
+      from x
+     where x.present and (not x.prev_present or x.prev_{{ a }} is distinct from x.{{ a }})
+       and (x.prev_present or x.{{ a }} is not null)
     union all
     {% endfor %}
-    select '{{ this.schema }}.{{ this.identifier }}', core.nk(p.src_natural_key), 'is_current', 'true', 'false', 'icp_sync',
-           'no longer in the source snapshot; closed at ' || p.valid_to
-      from closed p
-     where not exists (select 1 from ins i where i.src_natural_key = p.src_natural_key)
+    select '{{ this.schema }}.{{ this.identifier }}', core.nk(x.nk), 'is_current',
+           x.prev_present::text, x.present::text, 'icp_sync',
+           case when x.present then 'back in the source snapshot; ' || x.reason
+                else 'no longer in the source snapshot; closed at ' || x.at end
+      from x
+     where x.present <> x.prev_present and not (x.present and x.base_sk is null)
 {%- endmacro %}
 
 {#- Post-hook: a source name changed under a confirmed translation -> pending_reconfirm (DD-56 · DD-94 item eight).
@@ -207,6 +279,28 @@
     {% do run_query(sql) %}
     {% do run_query('commit') %}
     {{ log('relink_all_call_legs: done', info=true) }}
+{%- endmacro %}
+
+{#- Post-hook of fact_call_leg, dim_agent and dim_queue: a call leg whose agent or queue no dimension version covers
+    at its start -- removed from ICP's configuration while calls still reached it -- stays unlinked (no sentinel
+    member, no closed version stretched) and is counted in an explicit unlinked bucket by the marts; each such ID gets
+    one clarification item, not raised again while one is open (DD-95). Silent while the dimension is empty, or
+    every leg written before if03d would be raised. Reads the unlinked legs through the partial indexes on
+    (agent_sk / queue_sk, wait_begin). device_type: 1 skill queue, 2 agent. -#}
+{% macro raise_unlinked_member_items(device_type) -%}
+    {%- set dim, sk, label = ('core.dim_agent', 'agent_sk', 'agentNo') if device_type == 2
+                             else ('core.dim_queue', 'queue_sk', 'skillId') -%}
+    insert into meta.clarification_queue (source_id, src_column, src_value, impacted_rows)
+    select 'icp_reference', '{{ label }} of call legs, not in the configuration at their start (DD-95)', f.device_no,
+           count(*)
+      from core.fact_call_leg f
+     where f.device_type_code = {{ device_type }} and f.{{ sk }} is null and f.device_no is not null
+       and exists (select 1 from {{ dim }})
+       and not exists (select 1 from meta.clarification_queue q
+                        where q.source_id = 'icp_reference' and q.src_value = f.device_no
+                          and q.src_column = '{{ label }} of call legs, not in the configuration at their start (DD-95)'
+                          and q.status in ('open', 'asked'))
+     group by f.device_no
 {%- endmacro %}
 
 {#- Pre-hook, first, of fact_call_leg, dim_agent and dim_queue: one at a time, also outside Airflow.

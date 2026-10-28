@@ -2,39 +2,43 @@
     (macros/reference.sql explains how it is applied). Kept here, not in the model files, because the models' hooks
     need them too, and hooks are rendered when they run, not when the project is parsed. -#}
 
-{#- core.dim_agent (DD-94): agentName as received in both name columns (items eight, fourteen); role call_taker
-    unless M-10 marked the agent (item six, AS-36); team = agent group (item seven). -#}
-{% macro agent_snapshot() -%}{{ ref_snapshot_in_force('agents', 'dim_agent') }}{%- endmacro %}
-{% macro agent_attrs() -%}{{ return(['name_ar', 'name_en', 'role_code', 'team_code']) }}{%- endmacro %}
-{% macro agent_desired() -%}
-    select s.src_natural_key, f.is_new, f.synced_at, o.set_at as override_at,
+{#- core.dim_agent (DD-94): agentName as received in both name columns (items eight, fourteen); team = agent group
+    (item seven); role call_taker unless an M-10 mark is in force (items six, sixteen, AS-36). -#}
+{% macro agent_source() -%}
+    select s.src_natural_key as nk, s.run_id, s.batch_seq, s.contract_version,
            s.payload ->> 'agentName'                                   as name_ar,
            s.payload ->> 'agentName'                                   as name_en,
-           coalesce(o.role_code, 'call_taker')                         as role_code,
-           s.payload ->> 'groupId'                                     as team_code,
-           s.run_id, s.contract_version
-      from ({{ agent_snapshot() }}) f
-      join {{ ref('stg_icp_reference') }} s on s.run_id = f.run_id and s.batch_seq = f.batch_seq
-      left join meta.agent_role_override o
-        on o.site_code = '{{ var("site_code") }}' and o.src_system = 'icp' and o.src_natural_key = s.src_natural_key
-     where s.src_natural_key is not null
+           s.payload ->> 'groupId'                                     as team_code
+      from {{ ref('stg_icp_reference') }} s
+     where s.dataset = 'agents' and s.src_natural_key is not null
+{%- endmacro %}
+{% macro agent_marks() -%}
+    select o.agent_no as nk, o.valid_from, o.valid_to, o.role_code
+      from meta.agent_role_override o
+     where o.site_code = '{{ var("site_code") }}' and o.src_system = 'icp'
+{%- endmacro %}
+{% macro agent_src_attrs() -%}{{ return(['name_ar', 'name_en', 'team_code']) }}{%- endmacro %}
+{% macro agent_mark_attrs() -%}{{ return([('role_code', "'call_taker'::text")]) }}{%- endmacro %}
+{% macro agent_attrs() -%}{{ return(agent_src_attrs() + ['role_code']) }}{%- endmacro %}
+{% macro agent_timeline() -%}
+    {{ scd2_timeline('agents', agent_source(), agent_src_attrs(), 'agent_sk', agent_marks(), agent_mark_attrs()) }}
 {%- endmacro %}
 
 {#- core.dim_queue (DD-94): every skill (item thirteen); skillName as received in both NOT NULL name columns (item
     eight); skill_group_code NULL, skills and skill groups being many-to-many (item nine). -#}
-{% macro queue_snapshot() -%}{{ ref_snapshot_in_force('skills', 'dim_queue') }}{%- endmacro %}
-{% macro queue_attrs() -%}{{ return(['code', 'name_ar', 'name_en', 'media_type_code', 'skill_group_code']) }}{%- endmacro %}
-{% macro queue_desired() -%}
-    select s.src_natural_key, f.is_new, f.synced_at, null::timestamptz as override_at,
+{% macro queue_source() -%}
+    select s.src_natural_key as nk, s.run_id, s.batch_seq, s.contract_version,
            s.src_natural_key                                           as code,
            coalesce(s.payload ->> 'skillName', '')                     as name_ar,
            coalesce(s.payload ->> 'skillName', '')                     as name_en,
            staging.try_int(s.payload ->> 'mediaType')::smallint        as media_type_code,
-           null::text                                                  as skill_group_code,
-           s.run_id, s.contract_version
-      from ({{ queue_snapshot() }}) f
-      join {{ ref('stg_icp_reference') }} s on s.run_id = f.run_id and s.batch_seq = f.batch_seq
-     where s.src_natural_key is not null
+           null::text                                                  as skill_group_code
+      from {{ ref('stg_icp_reference') }} s
+     where s.dataset = 'skills' and s.src_natural_key is not null
+{%- endmacro %}
+{% macro queue_attrs() -%}{{ return(['code', 'name_ar', 'name_en', 'media_type_code', 'skill_group_code']) }}{%- endmacro %}
+{% macro queue_timeline() -%}
+    {{ scd2_timeline('skills', queue_source(), queue_attrs(), 'queue_sk') }}
 {%- endmacro %}
 
 {#- meta.reference_value: four datasets, one domain each, the source's text into src_label (DD-94 items seven, nine). -#}

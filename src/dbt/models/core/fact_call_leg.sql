@@ -16,7 +16,8 @@
     unique_key='call_leg_sk',
     on_schema_change='fail',
     pre_hook=["{{ lock_call_leg_links() }}", "{{ ensure_leg_partitions() }}"],
-    post_hook=["{{ raise_leg_guard_items() }}", "{{ register_core_batches() }}"]
+    post_hook=["{{ raise_leg_guard_items() }}", "{{ raise_unlinked_member_items(2) }}", "{{ raise_unlinked_member_items(1) }}",
+               "{{ register_core_batches() }}"]
 ) }}
 
 with obs as (

@@ -4,6 +4,9 @@
     snapshot it belongs to -- dataset, scope, the source's version, the sync time -- from meta.ingest_batch. Staging
     keeps every snapshot; which one is in force is decided by the core models (macros/reference.sql).
 
+    Only the snapshots of the contract's site_vdn (DD-94 item seventeen). The batches of any other CTI or VDN are left
+    in raw, and NOT registered: if site_vdn is corrected (Q31), they are staged by the next run.
+
     No typing of the payload here beyond the record's id: the eight datasets have eight shapes, and each consuming
     model reads the fields it needs from payload (as received, DD-94 item fourteen: an empty or repeated name is
     taken as it is).
@@ -38,3 +41,5 @@ select
   from raw.icp_reference r
   join batches x on x.run_id = r.run_id and x.batch_seq = r.batch_seq
   join meta.ingest_batch b on b.run_id = r.run_id and b.batch_seq = r.batch_seq
+ where r.cc_id = {{ contract_text('icp_reference', 'endpoint,site_vdn,cc_id') }}
+   and (r.dataset = 'vdns' or r.vdn_id = {{ contract_text('icp_reference', 'endpoint,site_vdn,vdn_id') }})
