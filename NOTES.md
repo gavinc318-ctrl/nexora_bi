@@ -1570,3 +1570,13 @@ Q30（config_version 是否单调、是否归零）已在单上，答复同样�
 2. 要不要进待澄清队列（一个工号一条），还是 WARN 足够
 3. 指标口径定下来之前，开发机不在 fact_call_leg 里加任何「未知坐席」哨兵行
 
+## 2026-10-28  Mac 侧：if03d 评审三条全部采纳（DD-94 十五至十七）
+
+1. `snapshot.py`：声明了自然键的快照型数据集，存在任一缺键记录 → 该数据集整批隔离（原因写明「snapshot incomplete: N rows without key」），
+   raw 照常写入；全部缺键同样。隔离批次不参与「消失即置非当前」。
+2. M-10 主管标记改为变更记录表 `meta.agent_role_override`（agent_no、role_code、valid_from、valid_to、changed_by、reason；
+   撤销 = 关 valid_to），放进下一个结构变更；`reference_models.sql` 按「源端快照变化点 ∪ 角色标记变化点」切版本，
+   每个变化点一版。开发期可先由 SQL 维护该表，M-10 做好后接上。
+3. `stg_icp_reference` 只处理契约配置的 `(ccId, vdnId)`；其他 VDN 的快照留 raw + 待澄清（接入已做），不进 dim。
+已记 DD-94 注十五至十七、LD-02 第 7 章第三条规则。
+
