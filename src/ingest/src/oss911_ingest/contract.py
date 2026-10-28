@@ -47,6 +47,7 @@ REQUIRED = {
     # Reference data by version-gated snapshots (snapshot.py, DD-94). Logs in with the CDR contract's account
     ("rest_api", "icp_reference"): [
         "endpoint.host_ref", "endpoint.version_probe.path", "endpoint.datasets",
+        "endpoint.site_vdn.cc_id", "endpoint.site_vdn.vdn_id",   # the one VDN the dimensions are built from
         "auth.inherits", "window.schedule", "window.version_stale_days", "idempotent_key",
     ],
 }
@@ -274,6 +275,16 @@ def validate_contract(doc: dict) -> list[str]:
             dups = sorted({n for n in names if isinstance(n, str) and names.count(n) > 1})
             if dups:
                 p.append(f"endpoint.datasets: listed more than once: {dups}")
+
+    # The site's CTI and VDN (DD-94 item seventeen): compared with the ids of the version probe, which are read as text
+    site_vdn = (endpoint or {}).get("site_vdn") if isinstance(endpoint, dict) else None
+    if site_vdn is not None:
+        if not isinstance(site_vdn, dict):
+            p.append("endpoint.site_vdn must be a mapping of cc_id and vdn_id")
+        else:
+            for leaf in ("cc_id", "vdn_id"):
+                if leaf in site_vdn and not (isinstance(site_vdn[leaf], str) and re.fullmatch(r"[0-9]+", site_vdn[leaf])):
+                    p.append(f"endpoint.site_vdn.{leaf} must be a quoted string of digits, e.g. \"1\"")
 
     # Classification of codes into fixed classes (release causes -> agent / caller / system, DD-91 item 5): every
     # class known, codes integers, no code in two classes

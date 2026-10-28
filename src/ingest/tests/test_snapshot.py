@@ -63,8 +63,12 @@ class BatchCheckTest(unittest.TestCase):
         problems, _ = check_snapshot([{"agentNo": "1"}, {"agentNo": "1"}], "agentNo", None)
         self.assertTrue(problems and "repeated" in problems[0])
 
-    def test_keyless_counted_not_quarantined(self):
-        self.assertEqual(check_snapshot([{"agentNo": ""}, {"agentNo": None}, {"x": 1}], "agentNo", None), ([], 3))
+    def test_keyless_quarantines(self):
+        # DD-94 item fifteen: a snapshot with unidentifiable records is incomplete, all keyless as well
+        problems, keyless = check_snapshot([{"agentNo": "1"}, {"agentNo": ""}, {"agentNo": None}, {"x": 1}], "agentNo", None)
+        self.assertEqual(keyless, 3)
+        self.assertTrue(any("snapshot incomplete: 3 row(s) without agentNo" in p for p in problems))
+        self.assertTrue(check_snapshot([{"x": 1}], "agentNo", None)[0])
 
     def test_empty_after_non_empty_quarantines(self):
         self.assertTrue(check_snapshot([], "agentNo", 60)[0])
@@ -91,8 +95,8 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(self.problems(REF), [])
 
     def test_required(self):
-        for section, leaf in (("endpoint", "version_probe"), ("endpoint", "datasets"), ("auth", "inherits"),
-                              ("window", "version_stale_days")):
+        for section, leaf in (("endpoint", "version_probe"), ("endpoint", "datasets"), ("endpoint", "site_vdn"),
+                              ("auth", "inherits"), ("window", "version_stale_days")):
             doc = copy.deepcopy(REF)
             del doc[section][leaf]
             self.assertTrue(any(f"{section}.{leaf}" in p for p in self.problems(doc)), leaf)
@@ -111,6 +115,12 @@ class ContractTest(unittest.TestCase):
         doc = copy.deepcopy(REF)
         doc["endpoint"]["datasets"].append(copy.deepcopy(doc["endpoint"]["datasets"][1]))
         self.assertTrue(any("more than once" in p for p in self.problems(doc)))
+
+    def test_site_vdn(self):
+        for bad in ({"cc_id": 1, "vdn_id": "1"}, {"cc_id": "1", "vdn_id": "x"}):
+            doc = copy.deepcopy(REF)
+            doc["endpoint"]["site_vdn"] = bad
+            self.assertTrue(any("endpoint.site_vdn." in p for p in self.problems(doc)), bad)
 
     def test_stale_days_override(self):
         self.assertEqual(validate_overrides(REF, {"version_stale_days": "3"}), [])     # lower: allowed

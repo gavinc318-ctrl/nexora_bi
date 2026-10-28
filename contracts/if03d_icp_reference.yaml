@@ -8,7 +8,8 @@
 source_id: icp_reference
 connector: rest_api
 target_raw: raw.icp_reference
-contract_version: 2                  # v2（2026-10-27）：按接口文档与 DD-94 重写——版本按 VDN 而非按数据集、
+contract_version: 3                  # v3（2026-10-28）：本中心的 CTI / VDN（site_vdn，DD-94 十七）；缺键整批隔离（DD-94 十五）
+                                     # v2（2026-10-27）：按接口文档与 DD-94 重写——版本按 VDN 而非按数据集、
                                      # 整份快照写入、只在同步成功时取、副本多日未刷新告警、被叫配置只落 raw
 enabled: true
 
@@ -22,6 +23,9 @@ endpoint:
       返回一个 CTI 级版本（每个 ccId 一个）与每个 VDN 一个版本（vdnsVersion[]）；VDN 版本一次覆盖该 VDN 的
       全部七个数据集，不是按数据集。另带 startTime / endTime（毫秒时间戳）与 status（0 初始 / 1 进行中 /
       2 成功 / 3 失败）。文档把 result 标为 array，样例是对象，两种都要能读（DD-94 〇-a、〇-i）
+  site_vdn:                            # 本中心使用的 CTI 与 VDN（AS-30 单一 VDN）。维度只从它的快照建（DD-94 十七）；
+    cc_id: "1"                         # 版本号里出现的其他 ccId / VDN 照常接入 raw 并进待澄清，不进维度。
+    vdn_id: "1"                        # 取值是开发机假接口的；真实值待 Q31 书面确认，联调时核实（integration_checks）
   datasets:                            # scope：cti = 用 CTI 版本；vdn = 用该 VDN 的版本，路径里的 {ccId}/{vdnId} 逐个 VDN 填
     - name: vdns
       path: /cmsgateway/resource/synwas/vdns
@@ -111,10 +115,11 @@ quality:
   batch_checks:
     - "同一快照内自然键重复：整批隔离（快照即全集，重复说明读到的不是一份完整一致的副本）"
     - "快照为空而该范围上一次取到的快照不空：整批隔离——照单应用会把全部坐席或队列置为非当前"
-    - "自然键缺失的记录照写 raw，staging 计数、不造键"
+    - "有自然键的数据集里任一条记录缺键：整批隔离（raw 照写）——缺键的快照不完整，不能据以判断谁「消失」（DD-94 十五）"
     - "版本号变化但全量比对无差异的，记入运行日志并告警——说明版本号的含义与预期不符（由 dbt 判，Q34）"
     - "坐席或技能队列消失时不删行，置为非当前（SCD2）。源端删除不等于历史不存在"
-    - "versions 列出的 VDN 多于一个：照常接入，并进待澄清队列（AS-30 不再成立）"
+    - "versions 里出现 site_vdn 以外的 ccId / VDN：照常接入 raw，进待澄清队列，不进维度（AS-30 不再成立，DD-94 十七）"
+    - "versions 里没有 site_vdn：进待澄清队列——配置的 VDN 不存在，维度不会再有任何变化"
   change_log: "逐字段差异写 audit.reference_data_change_log（changed_by = icp_sync），并在 M-10 可查（LD-01 9.3）"
 
 # 联调时必须用真实环境核实、不能按文档推断的事项。核实结论回写到本节并递增 contract_version
@@ -137,4 +142,8 @@ integration_checks:
   - id: response_types
     question: "ccId / vdnId、startTime / endTime、status、versions.result 的实际类型（文档类型与样例不符，DD-94 〇-i）"
     why: "接入程序两种都能读；核实后收紧，免得一种类型错误被宽容地吞掉"
+    status: open
+  - id: site_vdn
+    question: "本中心实际使用的 ccId 与 vdnId 是多少？是否只有一个 VDN？（Q31 · AS-30）"
+    why: "维度只从 site_vdn 的快照建；取值错了，维度永远停在空表，所有快照都进待澄清"
     status: open

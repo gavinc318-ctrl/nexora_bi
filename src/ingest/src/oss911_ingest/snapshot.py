@@ -10,6 +10,8 @@ so the version is compared per (dataset, scope), against what meta.ingest_batch 
   smaller   not applied: a clarification item -- a rollback, or a lagging node; a person decides (DD-82 item four)
 Every batch counts as taken, quarantined ones too: a held snapshot is not fetched again every 30 minutes.
 Only a scope whose sync status is 2 (succeeded) is fetched; in progress or failed is skipped and reported.
+Every CTI and VDN the probe lists is taken into raw, but the dimensions are built from the contract's site_vdn only
+(DD-94 item seventeen): any other one, or the site's missing from the probe, is a clarification item.
 
 Each batch commits on its own, as in the CDR path: a failure stops the run, and the datasets not yet taken at that
 version are fetched by the next run. Nothing here calls the gateway's sync actions (POST syncti / synvdn): they
@@ -113,6 +115,10 @@ def check_snapshot(records, key: str | None, previous_rows: int | None) -> tuple
         if dups:
             # A snapshot is the whole set: a repeated id means it is not one consistent copy
             problems.append(f"{key} repeated within the snapshot: {dups[:10]}" + (" ..." if len(dups) > 10 else ""))
+        if keyless:
+            # Nor is one with records that cannot be identified: applied, every entity among them would look gone
+            # (DD-94 item fifteen)
+            problems.append(f"snapshot incomplete: {keyless} row(s) without {key}")
     if not records and previous_rows:
         # Applied as it is, an empty snapshot would close every agent or queue in core
         problems.append(f"empty snapshot, while the last one taken for this scope had {previous_rows} record(s)")
@@ -140,10 +146,17 @@ class SnapshotIngest:
         vdn_versions = [v for v in versions if v.vdn_id is not None]
         self.r.wm_to = "; ".join(f"{v.label} v{v.version}" for v in versions)
 
-        if len(vdn_versions) > 1:
-            # AS-30: one VDN. Everything is still taken -- raw records what the source has -- but someone must know
-            self._clarify("vdnsVersion", f"{len(vdn_versions)} VDNs: "
-                          + ", ".join(v.vdn_id for v in vdn_versions), len(vdn_versions))
+        # AS-30: one VDN, the contract's site_vdn. Everything is still taken -- raw records what the source has --
+        # but only the site's snapshots become dimensions, so someone must know about any other (DD-94 item seventeen)
+        site = ep["site_vdn"]
+        for v in versions:
+            if v.cc_id != site["cc_id"] or (v.vdn_id is not None and v.vdn_id != site["vdn_id"]):
+                self._clarify("vdnsVersion", f"{v.label} is not the site's (ccId {site['cc_id']}, vdnId "
+                              f"{site['vdn_id']}): taken into raw, not into the dimensions", 1)
+        if not any(v.cc_id == site["cc_id"] and v.vdn_id == site["vdn_id"] for v in vdn_versions):
+            label = f"VDN {site['cc_id']}/{site['vdn_id']}"
+            self._clarify("site_vdn", f"{label} is not in the version probe", 1)
+            self.messages.append(f"{label} (site_vdn) is not in the version probe: the dimensions cannot change")
 
         for v in versions:
             datasets = [ds for ds in ep["datasets"] if ds["scope"] == ("cti" if v.vdn_id is None else "vdn")]
