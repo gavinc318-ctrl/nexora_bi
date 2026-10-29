@@ -94,11 +94,16 @@
       dataset       the snapshot dataset
       source_sql    SELECT of nk, run_id, batch_seq, contract_version and the source attributes, from staging
       src_attrs     the source attributes
-      mark_sql      SELECT of nk, valid_from, valid_to and the mark attributes (or none)
+      mark_sql      SELECT of nk, valid_from, valid_to, requested_from, changed_by, cleared_by and the mark attributes
+                    (or none)
       mark_attrs    [(attribute, value without a mark)]
     Output: nk, at (the change point), next_at (the entity's next change point in this run, or NULL), present,
     prev_present, the attributes and prev_<attribute>, is_first, base_sk / base_open (the entity's latest version
-    and whether it is the current one), run_id, contract_version, reason.
+    and whether it is the current one), run_id, contract_version, reason; mark_by and mark_reason, for the mark
+    attributes: who set the mark in force at the point or, with none in force, who cleared the last one (DD-94 item
+    eighteen) -- NULL where no mark is involved, the change then being the source's. A back-dated mark is noted in
+    mark_reason only: the mark in force at a point may have been applied long before, and only a changed mark
+    attribute says this point applies it.
     Computed the same in the pre-hooks and in the model: "the latest version" is read whether current or closed, and
     the pre-hook's closing (built_at = now()) is recognised, so the close does not change the result. -#}
 {% macro scd2_timeline(dataset, source_sql, src_attrs, sk, mark_sql=none, mark_attrs=[]) -%}
@@ -170,7 +175,9 @@
                case when ss.eff = pt.p or (ss.nk is not null and pt.p = b.l_from + interval '1 second')
                     then 'snapshot v' || ss.snapshot_version end as by_snapshot,
                {% if mark_sql %}case when mm.nk is not null and mm.valid_from < pt.p and pt.p = b.l_from + interval '1 second'
-                    then mm.valid_from end{% else %}null::timestamptz{% endif %} as late_mark_from
+                    then mm.valid_from end{% else %}null::timestamptz{% endif %} as late_mark_from,
+               {% if mark_sql %}case when mm.valid_from = pt.p then mm.requested_from end{% else %}null::timestamptz{% endif %} as requested_from,
+               {% if mark_sql %}coalesce(mm.changed_by, me.cleared_by, me.changed_by){% else %}null::text{% endif %} as mark_by
           from pts pt
           join base b on b.nk = pt.nk
           left join lateral (select * from st where st.nk = pt.nk and st.eff <= pt.p
@@ -178,6 +185,8 @@
           {% if mark_sql %}
           left join lateral (select * from marks m where m.nk = pt.nk and m.valid_from <= pt.p and pt.p < m.valid_to
                               order by m.valid_from desc limit 1) mm on true
+          left join lateral (select * from marks m where m.nk = pt.nk and m.valid_to <= pt.p
+                              order by m.valid_to desc limit 1) me on true
           {% endif %}
     ),
     seq as (
@@ -201,8 +210,11 @@
            {% for a in attrs %}c.{{ a }}, c.prev_{{ a }}, {% endfor %}
            row_number() over (partition by c.nk order by c.p) = 1 as is_first,
            c.base_sk, c.base_open, c.run_id, c.contract_version,
-           'version valid from ' || c.p || coalesce(' (' || c.by_snapshot || ')', ' (role mark)')
-           || coalesce('; mark valid from ' || c.late_mark_from || ', versions before are not rewritten', '') as reason
+           'version valid from ' || c.p || coalesce(' (' || c.by_snapshot || ')', ' (role mark)') as reason,
+           c.mark_by,
+           'version valid from ' || c.p || ' (role mark)'
+           || coalesce('; requested from ' || c.requested_from, '')
+           || coalesce('; mark valid from ' || c.late_mark_from || ', versions before are not rewritten', '') as mark_reason
       from changes c
 {%- endmacro %}
 
@@ -215,14 +227,16 @@
 {%- endmacro %}
 
 {#- Pre-hook, before the close: one audit row per changed field (LD-01 9.3 · DD-94 item eleven), from the same
-    timeline the model inserts. -#}
-{% macro scd2_log(timeline, attrs) -%}
+    timeline the model inserts. changed_by names who caused the change (DD-94 item eighteen): the M-10 operator for a
+    mark attribute changed by a mark, icp_sync for what the source snapshots change. -#}
+{% macro scd2_log(timeline, attrs, mark_attrs=[]) -%}
     with x as ({{ timeline }})
     insert into audit.reference_data_change_log (target_table, target_key, field_name, old_value, new_value,
                                                  changed_by, reason)
     {% for a in attrs %}
     select '{{ this.schema }}.{{ this.identifier }}', core.nk(x.nk), '{{ a }}', x.prev_{{ a }}::text, x.{{ a }}::text,
-           'icp_sync', x.reason
+           {% if a in mark_attrs %}coalesce(x.mark_by, 'icp_sync'), case when x.mark_by is null then x.reason else x.mark_reason end
+           {%- else %}'icp_sync', x.reason{% endif %}
       from x
      where x.present and (not x.prev_present or x.prev_{{ a }} is distinct from x.{{ a }})
        and (x.prev_present or x.{{ a }} is not null)

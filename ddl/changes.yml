@@ -78,3 +78,9 @@
   summary: Supervisor marks as validity intervals (DD-94 item sixteen) -- meta.agent_role_override rebuilt with valid_from / valid_to, no overlap per agent (btree_gist), clearing closes valid_to
   files:
     - changes/0008_agent_role_intervals.sql
+
+- id: "0009"
+  run_as: owner
+  summary: Provenance of supervisor marks (DD-94 item eighteen) -- requested_from kept when M-10 moves a back-dated start, cleared_by for who closed valid_to
+  files:
+    - changes/0009_agent_role_mark_provenance.sql

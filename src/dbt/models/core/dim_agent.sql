@@ -9,7 +9,8 @@
     materialized='incremental',
     incremental_strategy='append',
     on_schema_change='fail',
-    pre_hook=["{{ lock_call_leg_links() }}", "{{ scd2_log(agent_timeline(), agent_attrs()) }}",
+    pre_hook=["{{ lock_call_leg_links() }}",
+              "{{ scd2_log(agent_timeline(), agent_attrs(), agent_mark_attrs() | map(attribute=0) | list) }}",
               "{{ scd2_close(agent_timeline(), 'agent_sk') }}"],
     post_hook=["{{ flag_renamed_labels('name_en') }}", "{{ relink_call_legs('agent_sk', 2) }}",
                "{{ raise_unlinked_member_items(2) }}", "{{ register_snapshot_batches('agents', true) }}"]

@@ -1,5 +1,5 @@
 -- =====================================================================
--- Verification of database roles and grants (structural changes 0002 to 0008 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
+-- Verification of database roles and grants (structural changes 0002 to 0009 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
 --
 -- It verifies the five privilege roles themselves: inside a transaction the script creates one temporary
 -- login user per role, the superuser session does SET ROLE to that login user, and then runs statements
@@ -405,7 +405,7 @@ RESET ROLE;
 SET ROLE :"admin_user";
 SELECT pg_temp.expect_ok    ($$INSERT INTO meta.agent_role_override (site_code, src_system, agent_no, role_code, valid_from,
                                    changed_by, reason) VALUES ('MKK', 'icp', 'zz_check', 'supervisor', '2026-01-01Z', 'x', 'shift lead')$$);
-SELECT pg_temp.expect_ok    ($$UPDATE meta.agent_role_override SET valid_to = '2026-02-01Z' WHERE agent_no = 'zz_check'$$);
+SELECT pg_temp.expect_ok    ($$UPDATE meta.agent_role_override SET valid_to = '2026-02-01Z', cleared_by = 'y' WHERE agent_no = 'zz_check'$$);
 SELECT pg_temp.expect_denied($$UPDATE meta.agent_role_override SET role_code = 'call_taker' WHERE false$$);
 SELECT pg_temp.expect_denied($$DELETE FROM meta.agent_role_override WHERE false$$);
 SELECT pg_temp.expect_ok    ($$INSERT INTO meta.agent_role_override (site_code, src_system, agent_no, role_code, valid_from,
@@ -422,6 +422,15 @@ SELECT pg_temp.expect_error ($$INSERT INTO meta.agent_role_override (site_code, 
 SELECT pg_temp.expect_error ($$INSERT INTO meta.agent_role_override (site_code, src_system, agent_no, role_code, valid_from,
                                    changed_by, reason) VALUES ('MKK', 'icp', 'zz_check3', 'supervisor', now(), 'x', '  ')$$,
                              '%agent_role_override_reason_check%');
+-- change 0009: the start asked for is kept only when before the one in effect; cleared_by only on a closed mark
+SELECT pg_temp.expect_ok    ($$INSERT INTO meta.agent_role_override (site_code, src_system, agent_no, role_code, valid_from,
+                                   requested_from, changed_by, reason) VALUES ('MKK', 'icp', 'zz_check5', 'supervisor',
+                                   '2026-03-02Z', '2026-03-01Z', 'x', 'back-dated')$$);
+SELECT pg_temp.expect_error ($$INSERT INTO meta.agent_role_override (site_code, src_system, agent_no, role_code, valid_from,
+                                   requested_from, changed_by, reason) VALUES ('MKK', 'icp', 'zz_check6', 'supervisor',
+                                   '2026-03-01Z', '2026-03-01Z', 'x', 'x')$$, '%ck_agent_role_override_requested%');
+SELECT pg_temp.expect_error ($$UPDATE meta.agent_role_override SET cleared_by = 'y' WHERE agent_no = 'zz_check5'$$,
+                             '%ck_agent_role_override_cleared%');
 RESET ROLE;
 -- Hot-tuned stale limit: whitelisted, typed
 SELECT pg_temp.expect_ok    ($$INSERT INTO meta.source_runtime_param (source_id, param_name, param_value, updated_by)

@@ -48,9 +48,13 @@ ICP 的配置同步接口（synwas，接口文档 p.907–933）给出坐席、�
 版本按「源端快照的同步时刻 ∪ 标记的起止时刻」逐点切分，每个变化点一版（DD-94 十六）：08:00 同步的改名和 09:00 起的
 主管标记，即使在同一次构建里应用，也是两版。一次构建会应用所有待应用的快照，不再一次一份。
 
-维度只增不改，所以**不能切到已有最新版本之前**：起始时刻早于该坐席最新版本的标记（补登过去的事），从最新版本之后
-一秒起生效，留痕的 reason 里写明「mark valid from …, versions before are not rewritten」。起始时刻在将来的标记，
-到点之后的那次构建才生效。
+维度只增不改，所以**不能切到已有最新版本之前**。补登过去的事时，M-10 先显示「将从 X 起生效」（X = 该坐席最新版本
+之后一秒）并要求确认，`valid_from` 写 X，原来要的起点写进 `requested_from`（结构变更 0009，DD-94 十八）。万一保存时
+维度又多了一版、起点仍早于最新版本，dbt 照样从最新版本之后一秒起生效，留痕的 reason 里写明「mark valid from …,
+versions before are not rewritten」。起始时刻在将来的标记，到点之后的那次构建才生效。
+
+留痕的 `changed_by` 回答「谁造成了这次变化」（DD-94 十八）：`role_code` 那一行是标记的操作人（撤销引起的是撤销人
+`cleared_by`），reason 带 `(role mark)`；名字、组等源端字段是 `icp_sync`。
 
 ### 五、角色：默认接警员，主管由 M-10 标
 
@@ -173,9 +177,16 @@ sudo -u postgres psql -d oss911 -c "
 INSERT INTO meta.agent_role_override (site_code, src_system, agent_no, role_code, valid_from, changed_by, reason)
 VALUES ('MKK', 'icp', '<工号>', 'supervisor', '<起始时刻，如 2026-10-28 09:00+03>', '<你的名字>', '<依据>')"
 
-# 撤销：关区间，不删行
+# 补登：起点早于该坐席最新版本时，先查 X，valid_from 写 X，原起点写 requested_from
+sudo -u postgres psql -d oss911 -Atc "
+SELECT max(valid_from) + interval '1 second' FROM core.dim_agent WHERE src_natural_key = '<工号>'"
 sudo -u postgres psql -d oss911 -c "
-UPDATE meta.agent_role_override SET valid_to = '<结束时刻>'
+INSERT INTO meta.agent_role_override (site_code, src_system, agent_no, role_code, valid_from, requested_from, changed_by, reason)
+VALUES ('MKK', 'icp', '<工号>', 'supervisor', '<上面查到的 X>', '<原来要的起点>', '<你的名字>', '<依据>')"
+
+# 撤销：关区间，不删行，写上撤销人
+sudo -u postgres psql -d oss911 -c "
+UPDATE meta.agent_role_override SET valid_to = '<结束时刻>', cleared_by = '<你的名字>'
  WHERE site_code = 'MKK' AND agent_no = '<工号>' AND valid_to = 'infinity'"
 ```
 
@@ -237,3 +248,24 @@ ansible-playbook playbooks/50-dags.yml      -e ansible_connection=local -K
 
 已有的主管标记（0007 的表）原样搬进新表：`valid_from = set_at`，区间开放。没有标记过的，新表是空的。
 
+## 0009（2026-10-29，DD-94 十八）
+
+结构变更 0009 给标记表加 `requested_from` 与 `cleared_by`；dbt 的留痕按字段写操作人。没有新扩展，20 不必先跑；dbt 有改动，
+所以 45 要在 50 之前（发布目录按内容命名）：
+
+```bash
+sudo -v
+cd ~/src/nexora_bi && git pull --rebase
+cd infra
+ansible-playbook playbooks/40-schema.yml    -e ansible_connection=local -K
+ansible-playbook playbooks/45-contracts.yml -e ansible_connection=local -K
+ansible-playbook playbooks/50-dags.yml      -e ansible_connection=local -K
+```
+
+| 剧本 | 第一遍预期 |
+| --- | --- |
+| 40 | 执行 0009；`Structural changes 0000 to 0009 executed`；权限验证全过（150 项） |
+| 45 | 新发布目录；契约都是同版本同内容，跳过 |
+| 50 | 安装新的 dbt 项目 |
+
+已有的标记 `requested_from`、`cleared_by` 为空；已写的留痕不重写（只增）。

@@ -13,7 +13,7 @@
      where s.dataset = 'agents' and s.src_natural_key is not null
 {%- endmacro %}
 {% macro agent_marks() -%}
-    select o.agent_no as nk, o.valid_from, o.valid_to, o.role_code
+    select o.agent_no as nk, o.valid_from, o.valid_to, o.requested_from, o.changed_by, o.cleared_by, o.role_code
       from meta.agent_role_override o
      where o.site_code = '{{ var("site_code") }}' and o.src_system = 'icp'
 {%- endmacro %}

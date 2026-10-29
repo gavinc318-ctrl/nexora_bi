@@ -1646,3 +1646,25 @@ Q30（config_version 是否单调、是否归零）已在单上，答复同样�
 | 11 | 同意 |
 已记 DD-94 注十八。
 
+
+## 2026-10-29  开发机：DD-94 注十八已实现（结构变更 0009 · 留痕按字段记操作人）
+
+对 Mac 侧「对 DD-94 十五至十七与 DD-95 已实现十一处的答复」的处理：
+
+| 答复 | 处理 |
+| --- | --- |
+| 2 `requested_from` | 0009 加 `meta.agent_role_override.requested_from`（可空；`CHECK requested_from < valid_from`）。约定：**`valid_from` 写 M-10 确认后的 X，`requested_from` 写原来要的起点**；按时生效的标记留空。dbt 的「最新版本 + 1 秒」兜底保留：M-10 显示 X 之后、保存之前维度又多一版时仍会发生 |
+| 4 先 20 后 40 | runbook 08「跑」一节开头写明；runbook 14 的 0008 节原已写 |
+| 6 留痕 `changed_by` | 按**字段**分：`role_code` 那一行取标记的操作人、reason 带 `(role mark)`（补登时另带 `requested from …`）；名字、组等源端字段与 `is_current` 仍是 `icp_sync`。同一变化点上既有快照又有标记（例如同一次构建里改名与撤销），各字段各记各的来源 |
+
+**实现中新增一处，请 Mac 侧知悉并登记：`cleared_by`。** 撤销标记只关 `valid_to`，表里原本不记是谁撤销的；按「留痕要回答谁造成了这次变化」，
+撤销引起的版本不该记成当初设标记的人。0009 一并加 `cleared_by`（可空；只在 `valid_to` 非无穷时可填），M-10 获 `UPDATE(cleared_by)`。
+撤销引起的版本，留痕取 `coalesce(cleared_by, changed_by)`——录入时就带结束时刻的标记，`changed_by` 同时代表设与撤。
+被拒方案：另建撤销记录表（多一张表，只为一列）；撤销改成插一条 `call_taker` 标记（与「撤销 = 关 `valid_to`」的十六条冲突，且「回到默认」与「明确标为接警员」从此无法区分）。
+
+**顺带修正 df471ad 的一处**：补登说明「mark valid from …, versions before are not rewritten」原先挂在变化点上，同一点上源端字段的留痕也带着它；
+标记早已生效、只是后来又有改名时，改名那行会错误地写上这句。现在只写在 `role_code` 那一行。
+
+临时库：alice 标记、carol 补登（带 `requested_from`）、bob 撤销与同一次构建里的源端改名、frank 补登到最新版本之前（兜底路径），留痕各记各人；
+重跑写入 0 行；全量构建 PASS=32；权限验证 150 项（新增三项：`requested_from` 合法与不合法、开放区间不能填 `cleared_by`）。
+真机步骤见 runbook 14 末节「0009」（40 → 45 → 50）。

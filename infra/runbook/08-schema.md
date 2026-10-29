@@ -60,6 +60,10 @@ TRUNCATE 会被直接拒绝，而不是靠写代码的人记得。
 
 ## 跑
 
+**先 20 后 40。** 结构变更用到的扩展（PostGIS、btree_gist 等）由 20-database 按 inventory 的 `pg_extensions` 建——owner
+角色不能建扩展：0001 的 `CREATE EXTENSION IF NOT EXISTS` 只在扩展已经在时才过得去，0008 开头直接断言 btree_gist 在。
+所以新增扩展的那次发布，20 必须先于 40 跑；`site.yml` 本来就是这个顺序。
+
 ### 0  前置检查（只读，什么都不改）
 
 ```bash
