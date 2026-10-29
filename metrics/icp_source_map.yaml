@@ -64,7 +64,7 @@ metrics:
 
   - code: M-C06            # 平均等待时长
     source: self_cdr
-    self_rule: "queue_leg 的 WAITEND − WAITBEGIN 的均值。不取整通呼叫的首末时间差。"
+    self_rule: "每通有队列腿的通话一个样本：其 queue_leg 的 WAITEND − WAITBEGIN 合计（fact_call.wait_seconds），分母含放弃（DD-96）。不取整通呼叫的首末时间差。"
     recon_index: [IDX_03_06_003, IDX_03_06_001, IDX_01_02_013]
     recon_grain: skill_day / vdn_day
     caveat: "平台把「已应答呼叫的等待」（IDX_03_06_003）与「全部排队呼叫的等待」（IDX_03_06_001）分列。对账前须先声明本方算的是哪一个——这是最容易对不上的一处。"
@@ -95,7 +95,7 @@ metrics:
 
   - code: M-C11            # 挂断方
     source: self_cdr
-    self_rule: "取 agent_leg 的 RELEASECAUSE，按释放源归为坐席方或主叫方。释放原因码与释放源对照表见接口文档附录 Call Release Cause Codes。"
+    self_rule: "取末腿（CALLIDNUM = -1）的 RELEASECAUSE，按释放源归类（fact_call.released_by），按完整通话计占比；非末腿的原因码无意义（Q23 · DD-96）。释放原因码与释放源对照表见接口文档附录 Call Release Cause Codes。"
     recon_index: [IDX_03_04_005, IDX_03_04_006]
     recon_grain: skill_day
     caveat: "释放原因码数量多且跨多页，归类表须在联调时用真实数据核对一遍，不能只按文档归类。"
@@ -121,7 +121,7 @@ metrics:
 
   - code: M-C15            # 同一主叫失败次数
     source: self_cdr
-    self_rule: "按 CALLERNO 与时间窗分组，统计窗内无 CALLBEGIN 非空 agent_leg 的呼叫次数。"
+    self_rule: "按 CALLERNO 与时间窗分组，统计窗内无 CALLBEGIN 非空 agent_leg 的呼叫次数。mart 内按号码分组、只输出计数（DD-96）。"
     recon_index: []
     recon_grain: null
     caveat: "平台无对应指标，无对账基准。另需确认主叫号码是否在话单中完整保留——若按隐私策略做了掩码或匿名，本指标的分组键失效（并入 IR-46 一并问）。"

@@ -1779,3 +1779,31 @@ C 在 B 等待期间插入并提交，A 放锁后 B 读到 0 行。
 | 5 | fact_call 排在维度模型之后 | 维度模型重新关联腿会改通话的坐席与首队列；临时库上 fact_call 先于 dim_agent 跑过一次，当次没跟上（下次构建补上）。已用 `depends_on` 固定顺序；fact_call 同时取 `lock_call_leg_links` |
 
 `dim_call_result` 的键：`core.sk('MKK', 'oss911', code)`——取值是本系统的分类，不是哪个源端的，所以 src_system 用 `oss911`，不用 `icp`。
+
+## 2026-10-30  开发机：第 8 步第二段（注册表同步 46-metrics 与 mart 第一组）开工前，九处需定
+
+清单第 7–10 条与 M-C05 的参数已改（metrics.yaml、icp_source_map.yaml，本节同一提交）。**M-C07、M-C11 的口径变了但没有递增 version**
+（见下表第 5 条）。第 11–13 条对照 `meta.metric_registry` 的现有结构、LD-02 第 10、11 章的封账与发布规则，有以下几处写表之前必须定，
+否则表结构要返工。
+
+**注册表（46-metrics）**
+
+| # | 问题 | 开发机建议 |
+| --- | --- | --- |
+| 1 | `meta.metric_registry` 主键只有 `metric_code`，DD-97 要「按（编码, 版本）指向列」；也没有 mart_table / mart_column / params 列 | 结构变更：主键改 (metric_code, metric_version)，加 `mart_table`、`mart_column`（见第 3 条）、`params jsonb`、`entity_date`、`retrospective`；同步时只增不改旧版本行 |
+| 2 | 表里 `name_ar`、`name_en`、`sql_expression` 都是 NOT NULL，metrics.yaml 只有 `name_zh` 与 `measure`；DD-97 又说注册表不生成 SQL | metrics.yaml 补 `name_en`、`name_ar`（59 条的译名谁出？）；`sql_expression` 改可空或改名为 `measure` 存文字说明 |
+| 3 | **比率与均值指标映射到哪一列？** M-C04 应答率、M-C06 平均等待、M-C11 占比……日 × 队列的均值无法再按周、按全部队列汇总（均值的均值是错的） | mart 只存可加的列（计数与合计），比率与均值在服务层由两列相除；注册表对 count/sum 类写 `mart_column`，对 ratio/avg 类写 `mart_numerator` 与 `mart_denominator`，部署时三者都校验 |
+| 4 | **「已发布的指标必须对应到存在的 mart 列，否则部署失败」**：metrics.yaml 里 51 条 `published: true`，其中 CAD 一侧的 mart 一张都还没有 | 只校验声明了 mart_table 的指标；已发布但没声明的照常同步、标「未实现」，服务层对它返回明确的「未实现」而不是空。否则 46 要等全部 mart 建完才能第一次跑通 |
+| 5 | 版本后缀从哪一版算起 | 很多指标已是 version 2（设计期的修订），还没有任何一版进过生产。建议：**进入生产之前的口径修改不递增版本**（本次 M-C07、M-C11 即按此处理），首次上线时的版本对应不带后缀的列，之后递增才加 `_v<n>`。若要递增，请 Mac 侧改 metrics.yaml |
+
+**mart 的封账与发布（DD-81 · LD-02 第 10、11 章）**
+
+| # | 问题 | 开发机建议 |
+| --- | --- | --- |
+| 6 | 当日临时数（每小时）存在哪、是不是「行」 | 未封账的日子以 `close_version = 0` 的行存在，每小时整日替换（删了重写）；「不改旧行」只约束已封账（≥ 1）的行 |
+| 7 | 某一天什么时候封账 | D 日在「D 日的每日回扫完成之后的第一次夜间构建」封账（回扫在源端时区次日 02:00），写 `close_version = 1` 的行并删掉 D 日的 0 行。封账时仍未完整的通话不计入，之后完整了走第 8 条 |
+| 8 | 修正怎么发现、往回看几天 | 夜间构建重算已封账的最近 N 天（建议 7），与该日最新一版逐行比，有任一行不同就整日写一版 `close_version + 1`。N 天之外的变化不自动修正，进监控（变化计数）由人决定 |
+| 9 | `meta.data_publication` 的 kind | LD-02 只列 nightly · correction。每小时的临时数也改变查询结果，按 DD-81 缓存要失效，所以要加 `intraday`；每次写 mart 一行，mart 行带写入它的 `publication_seq`。此表随本段的结构变更建立（LD-02 第 11 章「随写入方一起建」） |
+
+另两处细节开发机先这样做，不阻塞：「进行中」作为 `mart.calls__day__volume` 的单独列（未完整的通话数，只在临时行有值），不当作一个结果值；
+坐席或队列为空的行（DD-95）在 mart 里以 `agent_key` / `queue_key = 'unlinked'` 成桶，同时保留源端工号列供 M-03 下钻。

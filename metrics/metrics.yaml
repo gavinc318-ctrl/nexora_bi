@@ -92,6 +92,7 @@ metrics:
     definition: "等待不超过 X 秒即被应答的比例"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
     source_tables: [core.fact_call]
+    params: {x_seconds: 20}             # DD-97 第三条：参数值记在注册表，默认 20 秒；MOI 定档后改此处
     version: 1
     depends_unverified: false
     retrospective: false
@@ -105,7 +106,7 @@ metrics:
     aggregation: avg
     measure: "排队腿 WAITEND − WAITBEGIN"
     entity_date: date_key
-    definition: "呼叫在技能队列上的等待时长均值"
+    definition: "呼叫在技能队列上的等待时长均值。每通有队列腿的通话一个样本（其队列腿等待合计），分母为全部有队列腿的通话，含放弃（DD-96 第十条）"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
     source_tables: [core.fact_call]
     version: 2
@@ -113,17 +114,17 @@ metrics:
     retrospective: false
     published: true
     rfp: "1.6.2.20"
-    notes: "不取整通呼叫的首末时间差。平台把已应答呼叫的等待与全部排队呼叫的等待分列，对账前须声明算的是哪一个——见 metrics/icp_source_map.yaml"
+    notes: "不取整通呼叫的首末时间差。对账时另算「仅已应答」的一份与 IDX_03_06_003 比（DD-96）。平台把已应答呼叫的等待与全部排队呼叫的等待分列，对账前须声明算的是哪一个——见 metrics/icp_source_map.yaml"
   - code: M-C07
     domain: 接警话务
     name_zh: "平均通话时长"
-    grain: call   # 通话
+    grain: call_leg   # 坐席腿（DD-96 第十条）
     aggregation: avg
     measure: "坐席腿 CALLEND − CALLBEGIN"
     entity_date: date_key
-    definition: "呼叫在坐席上的通话时长均值；一通呼叫经多个坐席时各腿分别计入"
+    definition: "坐席通话时长均值：每条接通的坐席腿一个样本（CALLEND − CALLBEGIN）；一通呼叫经多个坐席时各腿分别计入"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
-    source_tables: [core.fact_call]
+    source_tables: [core.fact_call_leg]
     version: 2
     depends_unverified: false
     retrospective: false
@@ -182,12 +183,12 @@ metrics:
     domain: 接警话务
     name_zh: "挂断方"
     grain: call   # 通话
-    aggregation: avg
+    aggregation: ratio
     measure: "见 definition"
     entity_date: date_key
-    definition: "按话单释放原因归为坐席方挂断或主叫方挂断"
+    definition: "完整通话按挂断方（坐席 · 主叫 · 系统 · 未映射）的占比；挂断方取末腿的释放原因归类（DD-96 第七、十条）"
     dimensions: [dim_date, dim_site, dim_agent]
-    source_tables: [core.fact_call_leg]
+    source_tables: [core.fact_call]
     version: 2
     depends_unverified: true            # RELEASECAUSE 归类为 mapped_unverified（DD-06 · LD-03，Mac 侧 2026-10-27）
     retrospective: false
@@ -257,7 +258,7 @@ metrics:
     retrospective: false
     published: true
     rfp: "1.6.2.20"
-    notes: "IR-11 已答，改为可交付。平台无对应指标，无对账基准；另须确认主叫号码是否按隐私策略做过掩码，掩码则分组键失效（IR-46）"
+    notes: "IR-11 已答，改为可交付。mart 内按 caller_number 分组、只输出计数不输出号码，不等 caller_number_hash（DD-96 第十条 · DD-92）。平台无对应指标，无对账基准；另须确认主叫号码是否按隐私策略做过掩码，掩码则分组键失效（IR-46）"
   - code: M-I01
     domain: 警情处置
     name_zh: "警情量"
