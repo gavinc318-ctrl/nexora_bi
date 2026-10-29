@@ -179,6 +179,8 @@ staging 对 raw 的消费以批次为单位，正确性依据是批次处理登�
 | 重放 | 复现历史版本的能力来自 raw 与 run_id 水位的重放，不要求 core 双时态 |
 | ai 层 | 实体级宽表、特征表、媒体索引与导出快照。演进节奏与权限等级均不同于 mart，故并列而非合并（HLD 5.6） |
 
+【2026-10-30 补充，DD-96 · DD-97】fact_call 增列 is_complete（末腿已到）；dim_call_result 取值改为 answered · abandoned · unanswered_system · ivr_only（结构变更）。话务 mart 第一组四张表与注册表对应规则见 LD-03 2.4 与第 5 章补充。
+
 ## 11  meta 与 audit
 
 meta 与 audit 连同 raw 是仅有的三个不可重建的 schema。meta 中值得单独说明的三张表：

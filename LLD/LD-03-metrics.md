@@ -57,6 +57,16 @@ CAD 的单据是一棵树：接警单、派警单（每警种一张）、出警�
 
 > 三个数都对，回答的是三个不同的问题    因此 meta.metric_registry 的 grain 列为非空，metrics.yaml 中 grain 与 aggregation 两项必填，缺任一项不得合并。含糊其辞的「平均到场时长」不允许进入指标注册表，报表标题与口径说明中必须写明按什么粒度、用什么聚合。 凭方案讨论的记忆去理解需求会漏掉硬指标。条款级的逐条复核不可省略。HD-02 追溯矩阵中"需人工复核的条款"一页保留了 32 条尚未被需求直接引用的条款，开发组应在开工前逐条确认它们确实已被领域需求覆盖。这一页不应长期保持非空。
 
+### 2.4  话务：通话级从腿级怎么聚出来（2026-10-30 补充，DD-96）
+
+### 腿的顺序是 IVR 腿 → 技能队列腿（排队等空闲坐席）→ 坐席腿（向坐席振铃，wait_begin 是振铃开始、call_begin 是接起）。一通电话 = 同一 CALLID 的全部腿。规则：
+
+### 一、首腿（CALLIDNUM = 1）未到不建通话行——没有首腿就没有 offered_at；腿照常留在 fact_call_leg，「缺首腿的 CALLID 数」作监控项。二、末腿（-1）未到的通话照建，is_complete = false；发布的指标只算完整通话，进行中的数量单独呈现为「进行中」；日切在每日回扫之后，跨日通话到封账时已完整。三、offered_at = 首腿 wait_begin，date_key 按它归日；answered_at = 最早接通（call_begin 非空）的坐席腿的 call_begin；ended_at = 末腿 call_end，未接通则 wait_end。四、call_type_code 与 direction 取首腿；各腿不一致进待澄清。五、agent_sk = 最早接通的坐席；first_queue = 最早的队列腿。六、wait_seconds = 队列腿等待合计；talk_seconds = 坐席腿通话合计；agent_leg_count = 坐席腿数；answered_leg_count = 其中 call_begin 非空者。七、released_by = 末腿的 release_source；非末腿的原因码无意义（ICP 问题单 Q23）。八、is_transferred 第一版只按「接通的坐席腿 ≥ 2」；原因码路径待 ICP 原因码分类答复后再加，M-C13 维持 depends_unverified。
+
+### 九、呼叫结果 call_result，按优先级判定：未完整 → 空；有接通的坐席腿 → answered；否则有队列腿或坐席腿、且末腿由主叫释放 → abandoned；否则有坐席腿 → unanswered_system（主叫未挂、坐席未接、系统释放）；否则 → ivr_only。先看谁挂的、再看有没有坐席腿：主叫挂断一律是放弃，不论当时电话在队列里还是在坐席振铃——放弃是主叫的行为；坐席那一侧的「未接」是腿级指标 M-C12（每条呈现到坐席而 call_begin 为空的坐席腿），同一通电话通话级为 abandoned、坐席腿同时计入 M-C12，两个数回答两个问题。dim_call_result 的取值改为 answered · abandoned · unanswered_system · ivr_only；原 transferred 与 malicious 不是结果而是标志（is_transferred · is_malicious），从结果码中移除。
+
+### 十、四处口径修正：M-C07 平均通话时长按坐席腿算（每条接通的坐席腿一个样本），来源改为 fact_call_leg；M-C11 挂断方按通话、取末腿，来源 fact_call.released_by，聚合为占比；M-C06 平均等待时长的分母为全部有队列腿的通话（含放弃），对账时另算「仅已应答」与平台指标比；M-C15 同一主叫失败次数在 mart 内按 caller_number 分组、只输出计数不输出号码，不等 caller_number_hash（DD-92）。
+
 ## 3  手动关闭带来的三处后果
 
 派警单与出警单在 CAD 上由人工关闭。结构上不受影响，口径上有三处后果，都必须显式处置。
@@ -107,6 +117,8 @@ ended_at 是点击关闭的时间，不是实际处置结束的时间。会有�
 理由是口径属于结构性配置。如果能在管理界面上点一下改掉，事后就查不清当时用的是哪一版——而封账机制的全部意义正是「去年打印的报表今年重跑一致」。
 
 发布随 DD-49 的制品流程：指标定义与契约、模型、DDL、部署脚本、组件清单一同打包，带版本号与校验和，manifest 中携带变更摘要与评审记录，登记入 meta.release_registry。
+
+【2026-10-30 补充，DD-97】注册表与 mart 的对应。注册表不生成 SQL：mart 模型由人写 dbt；metrics.yaml 每条指标增加 mart_table 与 mart_column 两项，部署同步 meta.metric_registry 时校验「已发布的指标必须对应到存在的 mart 列」，否则部署失败——口径的权威在注册表，实现的权威在模型，两者的一致由部署步骤强制而不是靠约定。口径版本升一次，mart 新增带版本后缀的列（如 _v2），旧列保留，注册表按（编码, 版本）指向列，第 6 章「历史不重算」由此落地。参数型指标（如 M-C05 的 X 秒）的参数值记在注册表，默认 20 秒。话务 mart 第一组四张表：mart.calls__day__volume（日 × 方向 × 结果）、mart.calls__day_queue__service（日 × 队列：呈现、应答、X 秒内应答、平均等待）、mart.legs__day_agent__handling（日 × 坐席：呈现、接通、未接、通话时长、转接）、mart.calls__day__release（日 × 挂断方）；坐席或队列为空的行归 unlinked（DD-95）；每行带 close_version 与 publication_seq（DD-81）。
 
 ## 6  口径版本
 

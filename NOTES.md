@@ -1688,3 +1688,31 @@ Mac 侧同时开始第 8 步的设计：LD-03 fact_call 规则与指标注册表
 2. dbt 维度构建：pre-hook `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`；`scd2_timeline` 只算一次落临时表，留痕 / 关旧版 / 插新版
    三步都读它。M-10 写 `agent_role_override` 为独立短事务，不取构建锁；构建中提交的标记下次构建应用（写进 runbook 14 与 LD-06 M-10 节）。
 
+## 2026-10-30  Mac 侧：第 8 步设计已定（DD-96、DD-97），fact_call 与话务 mart 可开工
+
+规则全文：LD-03 2.4（fact_call 十条）与第 5 章补充（注册表与 mart）。给开发机的清单：
+
+**结构变更**
+1. `core.fact_call` 加 `is_complete boolean NOT NULL`；`dim_call_result` 取值改为 `answered · abandoned · unanswered_system · ivr_only`（删 transferred / malicious 两行；若 CHECK 约束，改之）。
+2. `fact_call` 的 `released_by` CHECK 加 `unmapped`（与 fact_call_leg 一致，DD-91 第 4 条）。
+
+**dbt：`core.fact_call`**（只写变了的行，同 fact_call_leg 的做法）
+3. 按 CALLID 聚合；**首腿未到不建行**；末腿未到 `is_complete = false`。
+4. 取法按 LD-03 2.4 第三至八条；`call_result` 按第九条优先级（先看末腿 release_source，再看有无坐席腿）。
+5. 各腿 CALLTYPE / direction 不一致 → 待澄清一条（按 CALLID）。
+6. 测试：每列可从腿重算（DD-66 表注释）；`is_complete` 与末腿存在一致；结果码四值互斥完备；`answered` 蕴含 `answered_leg_count ≥ 1`。
+
+**metrics.yaml**（口径文件在开发机）
+7. M-C07：source_tables 改 `core.fact_call_leg`，定义「每条接通的坐席腿一个样本」。
+8. M-C11：grain call、aggregation ratio、source `core.fact_call`（released_by）。
+9. M-C06：定义补「分母为全部有队列腿的通话（含放弃）」。
+10. M-C15：实现说明「mart 内按 caller_number 分组，只输出计数」。
+11. 每条已发布指标加 `mart_table` / `mart_column`；M-C05 加 `params: {x_seconds: 20}`。
+12. 注册表同步步骤（与 45-contracts 同模式，建议 46-metrics）：校验 published 指标的 mart 列存在，否则失败。
+
+**mart 第一组**
+13. `mart.calls__day__volume`、`mart.calls__day_queue__service`、`mart.legs__day_agent__handling`、`mart.calls__day__release`；
+    只算 `is_complete`；另给「进行中」计数；agent/queue 为空归 `unlinked`（DD-95 第十一条）；每行 `close_version`、`publication_seq`（DD-81，
+    `meta.data_publication` 已有）。夜间构建 DAG 另起；当日临时数每小时一次。
+14. `unanswered_system` 命名：Gavin 2026-10-30 定。
+
