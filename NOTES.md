@@ -1629,3 +1629,20 @@ Q30（config_version 是否单调、是否归零）已在单上，答复同样�
 | 10 | DD-95 的待澄清：source_id `icp_reference`，`src_column` 为「agentNo / skillId of call legs, not in the configuration at their start (DD-95)」；由 fact_call_leg 与两个维度模型的 post-hook 开 | 根因在参照数据（要问 ICP 运维），不在话单；三处都可能产生空关联。经部分索引 (agent_sk / queue_sk, wait_begin) 只读空关联的腿 |
 | 11 | mart 的 unlinked 桶尚未实现 | mart 还没有；随 fact_call / mart 一批做 |
 
+## 2026-10-29  Mac 侧：对「DD-94 十五至十七与 DD-95 已实现」十一处的答复
+
+| # | 答复 |
+| --- | --- |
+| 1 | 同意 |
+| 2 | **M-10 不拒绝、不静默**：录入时显示「将从 X 起生效」（X = 该成员最新版本 + 1 秒）并要求确认；记录保留原始申请起点 `requested_from`。不改写已生效版本（维度只增只关 · DD-12 统计按当时） |
+| 3 | 同意 |
+| 4 | 同意；「真机先 20 后 40」写进 runbook 顺序说明 |
+| 5 | 同意 |
+| 6 | **改**：标记引起的版本，留痕 `changed_by` 取 `agent_role_override.changed_by`（M-10 操作人），`reason` 写 `(role mark)`；`icp_sync` 只用于源端驱动的版本。留痕要回答「谁造成了这次变化」 |
+| 7 | 同意；开发值 1/1 随发布进生产 → 列入 LD-08 7.2 发布核对清单的必核项（Mac 侧补文档） |
+| 8 | 同意 |
+| 9 | 同意 |
+| 10 | 同意 |
+| 11 | 同意 |
+已记 DD-94 注十八。
+
