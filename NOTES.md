@@ -1671,3 +1671,13 @@ Q30（config_version 是否单调、是否归零）已在单上，答复同样�
 
 > **Mac 侧（2026-10-29）**：`cleared_by` 同意并登记（DD-94 注），被拒方案的理由成立。下一步计划待 Gavin 定后写入 CLAUDE.md 第 10 节。
 
+## 2026-10-29  Mac 侧：下一步计划已定（方案甲：ICP 垂直切片打穿到报表），开发机请开始第 7 步
+
+计划全文在 CLAUDE.md 第 10 节。**第 7 步 if03b / if03c 可立即开始**：契约现成（if03b_icp_agent_session、if03c_icp_agent_day），
+维度已有；raw 表与结构变更、staging、core 的 fact_agent_session / fact_agent_day 照 fact_call_leg 的做法。注意：
+- 两个接口都有「平台报表批先跑完」的前置（契约 prerequisite），报表批时刻未答（ICP 问题单 Q27）——假接口按契约假设实现，联调核实项记进契约 integration_checks。
+- if03c 的日累计会被平台重算改写（restate_days 3），core_version 取 observed_at（契约已写）。
+- DD-65：坐席状态时长取平台指标是唯一例外，其余考核指标仍自算；if03c 的值与 if03b 区间合计、与话单按坐席腿计数对账（契约 note）。
+- 新决策请照旧在 NOTES 列「需定」，不自定。
+Mac 侧同时开始第 8 步的设计：LD-03 fact_call 规则与指标注册表落地形态，写完发 NOTES。
+
