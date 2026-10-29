@@ -97,8 +97,9 @@ def record_hash(record: dict) -> bytes:
                                      separators=(",", ":")).encode("utf-8")).digest()
 
 
-def check_snapshot(records, key: str | None, previous_rows: int | None) -> tuple[list[str], int]:
-    """Batch checks (contract if03d quality.batch_checks). Returns (quarantine reasons, records without a key)."""
+def check_snapshot(records, key: str | None, baseline_rows: int | None) -> tuple[list[str], int]:
+    """Batch checks (contract if03d quality.batch_checks). Returns (quarantine reasons, records without a key).
+    baseline_rows: the records of the scope's last trusted snapshot (SnapshotIngest._baseline_rows), None if none."""
     if not isinstance(records, list) or not all(isinstance(r, dict) for r in records):
         return ["result is not a list of records"], 0
     problems = []
@@ -119,9 +120,9 @@ def check_snapshot(records, key: str | None, previous_rows: int | None) -> tuple
             # Nor is one with records that cannot be identified: applied, every entity among them would look gone
             # (DD-94 item fifteen)
             problems.append(f"snapshot incomplete: {keyless} row(s) without {key}")
-    if not records and previous_rows:
+    if not records and baseline_rows:
         # Applied as it is, an empty snapshot would close every agent or queue in core
-        problems.append(f"empty snapshot, while the last one taken for this scope had {previous_rows} record(s)")
+        problems.append(f"empty snapshot, while the last trusted one for this scope had {baseline_rows} record(s)")
     return problems, keyless
 
 
@@ -164,7 +165,7 @@ class SnapshotIngest:
                 self.messages.append(f"{v.label}: sync status {v.status}, not fetched")
                 continue
             taken = {ds["name"]: self._taken(self._scope(ds, v)) for ds in datasets}
-            newest = max((t[0] for t in taken.values() if t[0] is not None), default=None)
+            newest = max((t for t in taken.values() if t is not None), default=None)
             if newest is not None and v.version < newest:
                 # One version covers all the datasets of its scope, so a step back is one item, not one per dataset
                 self._clarify("snapshot_version", f"{v.label}: version {v.version} is older than {newest}, "
@@ -173,7 +174,7 @@ class SnapshotIngest:
                 self._stale(v)
                 continue
             for ds in datasets:
-                self._one_dataset(ds, v, *taken[ds["name"]])
+                self._one_dataset(ds, v, taken[ds["name"]])
             self._stale(v)
         self.conn.commit()
         return "; ".join(self.messages) or None
@@ -182,22 +183,39 @@ class SnapshotIngest:
     def _scope(self, ds: dict, v: Version) -> str:
         return f"{ds['name']}@{v.cc_id}" if v.vdn_id is None else f"{ds['name']}@{v.cc_id}/{v.vdn_id}"
 
-    def _taken(self, scope: str) -> tuple[int | None, int | None]:
-        """The newest version taken for the scope, and how many records that snapshot had."""
+    def _taken(self, scope: str) -> int | None:
+        """The newest version taken for the scope, quarantined or not: a quarantined one is not fetched again."""
         row = self.conn.execute(
-            """SELECT snapshot_version, row_count FROM meta.ingest_batch
-                WHERE source_id = %s AND mode = 'snapshot' AND snapshot_scope = %s
-                ORDER BY snapshot_version DESC, committed_at DESC LIMIT 1""",
+            """SELECT max(snapshot_version) FROM meta.ingest_batch
+                WHERE source_id = %s AND mode = 'snapshot' AND snapshot_scope = %s""",
             (self.r.source_id, scope)).fetchone()
-        return (row[0], row[1]) if row else (None, None)
+        return row[0]
 
-    def _one_dataset(self, ds: dict, v: Version, taken: int | None, taken_rows: int | None) -> None:
+    def _baseline_rows(self, scope: str) -> int | None:
+        """How many records the scope's last trusted snapshot had: one not quarantined, or released in M-03 and
+        applied (registered by a dbt model). What an empty snapshot is measured against (DD-94 item nineteen): a
+        quarantined one never becomes the baseline, so empty snapshot after empty snapshot is quarantined, each
+        against the same last good one -- emptying the whole configuration takes an explicit release."""
+        row = self.conn.execute(
+            """SELECT b.row_count FROM meta.ingest_batch b
+                WHERE b.source_id = %s AND b.mode = 'snapshot' AND b.snapshot_scope = %s
+                  AND (NOT EXISTS (SELECT 1 FROM meta.quarantine_batch q
+                                    WHERE q.run_id = b.run_id AND q.batch_seq = b.batch_seq)
+                       OR (EXISTS (SELECT 1 FROM meta.quarantine_batch q
+                                    WHERE q.run_id = b.run_id AND q.batch_seq = b.batch_seq AND q.state = 'released')
+                           AND EXISTS (SELECT 1 FROM meta.staging_batch_state s
+                                        WHERE s.run_id = b.run_id AND s.batch_seq = b.batch_seq)))
+                ORDER BY b.snapshot_version DESC, b.committed_at DESC LIMIT 1""",
+            (self.r.source_id, scope)).fetchone()
+        return row[0] if row else None
+
+    def _one_dataset(self, ds: dict, v: Version, taken: int | None) -> None:
         scope = self._scope(ds, v)
         if taken == v.version:
             return
         path = ds["path"].replace("{ccId}", v.cc_id).replace("{vdnId}", v.vdn_id or "")
         records, body = self.client.get_json(path)
-        quarantine, keyless = check_snapshot(records, ds.get("key"), taken_rows)
+        quarantine, keyless = check_snapshot(records, ds.get("key"), self._baseline_rows(scope))
         rows = records if isinstance(records, list) and all(isinstance(x, dict) for x in records) else []
         self.seq += 1
         self.conn.execute(

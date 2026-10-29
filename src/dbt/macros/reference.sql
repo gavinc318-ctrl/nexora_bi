@@ -22,6 +22,13 @@
     An entity seen for the first time ever starts at the sentinel 1970-01-01 00:00 UTC (DD-94 item five).
 
     meta.reference_value is not SCD2 and still applies one pending snapshot per run, oldest first (ref_snapshot_in_force).
+
+    Computed once (DD-94 item twenty). A build is several statements -- log, close, insert, relink, register -- and
+    under READ COMMITTED each sees the latest commits: a snapshot staged or a mark entered in between would be logged
+    but not inserted, or registered as applied without being applied (and then never chosen again). So after the
+    lock, each model first fixes the snapshots it uses (fix_snapshot_set) and, for the dimensions, the timeline
+    (fix_timeline) in temporary tables dropped at commit; every later statement reads those. Whatever is committed
+    meanwhile is the next build's.
 -#}
 
 {#- The site's scope of a dataset, from the contract (endpoint.site_vdn). -#}
@@ -44,6 +51,14 @@
                         where q.run_id = b.run_id and q.batch_seq = b.batch_seq and q.state in ('pending', 'discarded'))
        and exists (select 1 from meta.staging_batch_state s
                     where s.model = 'stg_icp_reference' and s.run_id = b.run_id and s.batch_seq = b.batch_seq)
+{%- endmacro %}
+
+{#- The snapshots this run uses, fixed by the pre-hook fix_snapshot_set: every pending one (the dimensions) or the
+    one in force (meta.reference_value). -#}
+{% macro snapshot_set(dataset) -%}pg_temp."{{ this.identifier }}__{{ dataset }}"{%- endmacro %}
+{% macro fix_snapshot_set(dataset, all_pending=false) -%}
+    create temporary table {{ snapshot_set(dataset) }} on commit drop as
+    {% if all_pending %}{{ ref_snapshots_pending(dataset, this.identifier) }}{% else %}{{ ref_snapshot_in_force(dataset, this.identifier) }}{% endif %}
 {%- endmacro %}
 
 {#- Every pending snapshot, oldest first. -#}
@@ -80,14 +95,12 @@
 
 {#- Post-hook: register what this run applied -- every pending snapshot (all_pending, the dimensions) or the one in
     force (meta.reference_value) -- and every older processable one not applied (a late release). -#}
-{% macro register_snapshot_batches(dataset, all_pending=false) -%}
+{% macro register_snapshot_batches(dataset) -%}
     insert into meta.staging_batch_state (model, run_id, batch_seq)
     select '{{ this.identifier }}', c.run_id, c.batch_seq
       from ({{ ref_snapshot_candidates(dataset, this.identifier) }}) c
      where not c.applied
-       and c.snapshot_version <= (select max(f.snapshot_version) from (
-               {%- if all_pending %}{{ ref_snapshots_pending(dataset, this.identifier) }}
-               {%- else %}{{ ref_snapshot_in_force(dataset, this.identifier) }}{% endif %}) f)
+       and c.snapshot_version <= (select max(f.snapshot_version) from {{ snapshot_set(dataset) }} f)
 {%- endmacro %}
 
 {#- The changes of a dimension in this run, one row per change point of an entity (see the header).
@@ -104,15 +117,14 @@
     eighteen) -- NULL where no mark is involved, the change then being the source's. A back-dated mark is noted in
     mark_reason only: the mark in force at a point may have been applied long before, and only a changed mark
     attribute says this point applies it.
-    Computed the same in the pre-hooks and in the model: "the latest version" is read whether current or closed, and
-    the pre-hook's closing (built_at = now()) is recognised, so the close does not change the result. -#}
+    Computed once per build, before the close, by fix_timeline; the log, the close and the insert read the table. -#}
 {% macro scd2_timeline(dataset, source_sql, src_attrs, sk, mark_sql=none, mark_attrs=[]) -%}
     {%- set m_names = mark_attrs | map(attribute=0) | list -%}
     {%- set attrs = src_attrs + m_names -%}
     with pend as (
         select p.run_id, p.batch_seq, p.snapshot_version,
                max(p.synced_at) over (order by p.snapshot_version, p.batch_seq) as at
-          from ({{ ref_snapshots_pending(dataset, this.identifier) }}) p
+          from {{ snapshot_set(dataset) }} p
     ),
     src as (
         select x.*, p.snapshot_version
@@ -121,7 +133,7 @@
     ),
     lat as (
         select distinct on (src_natural_key) src_natural_key as nk, {{ sk }} as sk, valid_from, valid_to,
-               (valid_to = 'infinity' or built_at = now()) as present,
+               (valid_to = 'infinity') as present,
                {% for a in attrs %}{{ a }}, {% endfor %}run_id, contract_version
           from {{ this }}
          where site_sk = core.site_namespace('{{ var("site_code") }}')
@@ -218,19 +230,25 @@
       from changes c
 {%- endmacro %}
 
+{#- Pre-hook, after fix_snapshot_set: the timeline of this build, once. -#}
+{% macro timeline_table() -%}pg_temp."{{ this.identifier }}__timeline"{%- endmacro %}
+{% macro fix_timeline(timeline) -%}
+    create temporary table {{ timeline_table() }} on commit drop as {{ timeline }}
+{%- endmacro %}
+
 {#- Pre-hook: close the current version of every entity that changes, at its first change point. -#}
-{% macro scd2_close(timeline, sk) -%}
+{% macro scd2_close(sk) -%}
     update {{ this }} t
        set valid_to = x.at, built_at = now()
-      from ({{ timeline }}) x
+      from {{ timeline_table() }} x
      where x.is_first and x.base_open and t.{{ sk }} = x.base_sk and t.valid_to = 'infinity'
 {%- endmacro %}
 
 {#- Pre-hook, before the close: one audit row per changed field (LD-01 9.3 · DD-94 item eleven), from the same
     timeline the model inserts. changed_by names who caused the change (DD-94 item eighteen): the M-10 operator for a
     mark attribute changed by a mark, icp_sync for what the source snapshots change. -#}
-{% macro scd2_log(timeline, attrs, mark_attrs=[]) -%}
-    with x as ({{ timeline }})
+{% macro scd2_log(attrs, mark_attrs=[]) -%}
+    with x as (select * from {{ timeline_table() }})
     insert into audit.reference_data_change_log (target_table, target_key, field_name, old_value, new_value,
                                                  changed_by, reason)
     {% for a in attrs %}

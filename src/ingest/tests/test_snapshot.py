@@ -72,6 +72,9 @@ class BatchCheckTest(unittest.TestCase):
 
     def test_empty_after_non_empty_quarantines(self):
         self.assertTrue(check_snapshot([], "agentNo", 60)[0])
+        # the baseline is the last trusted snapshot, not the last one taken: an empty one quarantined (v15) does not
+        # become it, so the next empty one (v16) is measured against the same 60 and quarantined too (DD-94 item 19)
+        self.assertIn("60 record(s)", check_snapshot([], "agentNo", 60)[0][0])
         self.assertEqual(check_snapshot([], "agentNo", None), ([], 0))     # first snapshot may be empty
         self.assertEqual(check_snapshot([], "agentNo", 0), ([], 0))
 

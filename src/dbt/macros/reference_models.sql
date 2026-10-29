@@ -50,7 +50,7 @@
     {% for ds, domain, label in refvalue_domains() %}
     select '{{ domain }}'::text as domain, s.src_natural_key as code, s.payload ->> '{{ label }}' as src_label,
            f.is_new, s.contract_version
-      from ({{ ref_snapshot_in_force(ds, 'reference_value') }}) f
+      from {{ snapshot_set(ds) }} f
       join {{ ref('stg_icp_reference') }} s on s.run_id = f.run_id and s.batch_seq = f.batch_seq
      where s.src_natural_key is not null
     {{ "union all" if not loop.last }}
@@ -59,7 +59,7 @@
 {#- Domains whose snapshot is new in this run: only those can have codes that are gone. -#}
 {% macro refvalue_fresh_domains() -%}
     {% for ds, domain, label in refvalue_domains() %}
-    select '{{ domain }}'::text from ({{ ref_snapshot_in_force(ds, 'reference_value') }}) f where f.is_new
+    select '{{ domain }}'::text from {{ snapshot_set(ds) }} f where f.is_new
     {{ "union all" if not loop.last }}
     {% endfor %}
 {%- endmacro %}
@@ -101,6 +101,13 @@
     select 'meta.reference_value', core.nk(t.domain, t.code), 'src_label', null, t.src_label, 'icp_sync', 'new code'
       from meta.reference_value t
      where t.src_system = 'icp' and t.first_seen_at = now()
+{%- endmacro %}
+
+{#- Pre-hook, after the lock: the snapshot in force of each dataset, fixed for the whole build (DD-94 item twenty). -#}
+{% macro refvalue_fix_snapshots() -%}
+    {% for ds, domain, label in refvalue_domains() %}
+    {{ fix_snapshot_set(ds) }};
+    {% endfor %}
 {%- endmacro %}
 
 {% macro refvalue_register() -%}

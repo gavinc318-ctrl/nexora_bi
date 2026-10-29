@@ -11,7 +11,7 @@
     materialized='incremental',
     incremental_strategy='append',
     on_schema_change='fail',
-    pre_hook=["{{ refvalue_log_changes() }}", "{{ refvalue_update_changed() }}", "{{ refvalue_close_gone() }}"],
+    pre_hook=["{{ refvalue_fix_snapshots() }}", "{{ refvalue_log_changes() }}", "{{ refvalue_update_changed() }}", "{{ refvalue_close_gone() }}"],
     post_hook=["{{ refvalue_log_new() }}", "{{ refvalue_register() }}"]
 ) }}
 
