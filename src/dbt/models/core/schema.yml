@@ -26,6 +26,26 @@ models:
                 to: source('core', 'dim_site')
                 field: site_sk
 
+  - name: fact_call
+    description: "core.fact_call -- aggregated from fact_call_leg (DD-66 · DD-96), written by this model, owned by oss911_owner."
+    columns:
+      - name: call_sk
+        description: "Unique across all partitions (the primary key includes date_key)."
+        data_tests: [not_null, unique]
+      - name: src_natural_key
+        data_tests: [not_null, unique]
+      - name: released_by
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['agent', 'caller', 'system', 'unmapped']
+      - name: call_result_sk
+        data_tests:
+          - relationships:
+              arguments:
+                to: source('core', 'dim_call_result')
+                field: call_result_sk
+
   - name: dim_agent
     description: "core.dim_agent -- SCD2 from ICP's agents snapshot (DD-94). Rows are only inserted and closed."
     columns:
@@ -49,3 +69,4 @@ sources:
     schema: core
     tables:
       - name: dim_site
+      - name: dim_call_result

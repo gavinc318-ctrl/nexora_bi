@@ -84,3 +84,9 @@
   summary: Provenance of supervisor marks (DD-94 item eighteen) -- requested_from kept when M-10 moves a back-dated start, cleared_by for who closed valid_to
   files:
     - changes/0009_agent_role_mark_provenance.sql
+
+- id: "0010"
+  run_as: owner
+  summary: core.fact_call rules (DD-96) -- is_complete, the four call results in core.dim_call_result, index on fact_call_leg.last_change_at for rebuilding the calls whose legs changed
+  files:
+    - changes/0010_fact_call_rules.sql

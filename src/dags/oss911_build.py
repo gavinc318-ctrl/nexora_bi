@@ -42,10 +42,11 @@ UTC = pendulum.timezone("UTC")
 # Which dbt models each source builds (staging, then core). A source in the manifest without an entry has no build
 # DAG yet: its data stays in raw until its models are written. Listed explicitly, like the pools of the ingestion DAGs.
 BUILDS = {
-    "icp_cdr_voice": "stg_icp_cdr_voice fact_call_leg",
-    # The dimension models also relink the call legs already in core (macros/reference.sql); the shared pool keeps
-    # them from running at the same time as build_icp_cdr_voice
-    "icp_reference": "stg_icp_reference dim_agent dim_queue reference_value",
+    "icp_cdr_voice": "stg_icp_cdr_voice fact_call_leg fact_call",
+    # The dimension models also relink the call legs already in core (macros/reference.sql), which changes the calls'
+    # agent and first queue: fact_call follows them. The shared pool keeps them from running at the same time as
+    # build_icp_cdr_voice
+    "icp_reference": "stg_icp_reference dim_agent dim_queue reference_value fact_call",
 }
 
 DEFAULT_ARGS = {
