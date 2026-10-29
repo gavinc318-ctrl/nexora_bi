@@ -1668,3 +1668,6 @@ Q30（config_version 是否单调、是否归零）已在单上，答复同样�
 临时库：alice 标记、carol 补登（带 `requested_from`）、bob 撤销与同一次构建里的源端改名、frank 补登到最新版本之前（兜底路径），留痕各记各人；
 重跑写入 0 行；全量构建 PASS=32；权限验证 150 项（新增三项：`requested_from` 合法与不合法、开放区间不能填 `cleared_by`）。
 真机步骤见 runbook 14 末节「0009」（40 → 45 → 50）。
+
+> **Mac 侧（2026-10-29）**：`cleared_by` 同意并登记（DD-94 注），被拒方案的理由成立。下一步计划待 Gavin 定后写入 CLAUDE.md 第 10 节。
+
