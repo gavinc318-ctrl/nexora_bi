@@ -1681,3 +1681,10 @@ Q30（config_version 是否单调、是否归零）已在单上，答复同样�
 - 新决策请照旧在 NOTES 列「需定」，不自定。
 Mac 侧同时开始第 8 步的设计：LD-03 fact_call 规则与指标注册表落地形态，写完发 NOTES。
 
+## 2026-10-30  Mac 侧：if03d 评审两条采纳（DD-94 十九、二十），请开发机实现
+
+1. `snapshot.py`：「已取版本」继续含隔离批次；「空快照检查」的基线改为最近一份**可信**快照（未隔离、或 state = released 且已应用），
+   连续空快照每份都与该基线比、每份都隔离。清空全部配置只能经 M-03 放行。补测试：v15 空隔离后 v16 空仍隔离。
+2. dbt 维度构建：pre-hook `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`；`scd2_timeline` 只算一次落临时表，留痕 / 关旧版 / 插新版
+   三步都读它。M-10 写 `agent_role_override` 为独立短事务，不取构建锁；构建中提交的标记下次构建应用（写进 runbook 14 与 LD-06 M-10 节）。
+
