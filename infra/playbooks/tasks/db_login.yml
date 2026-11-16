@@ -89,6 +89,22 @@
   become_user: postgres
   when: _member.stdout | trim == '0'
 
+# A role-level setting takes effect on the next server connection: pgBouncer's existing ones keep the old value until
+# they are recycled (server_lifetime). Read before and after, changed only when they differ (as 41-cad-mirror.yml).
+- name: "{{ login.name }}: set its statement_timeout"
+  ansible.builtin.command:
+    cmd: psql -X -q -tA -v ON_ERROR_STOP=1 -d postgres
+    stdin: |
+      SELECT 'before ' || coalesce(array_to_string(rolconfig, ','), '') FROM pg_roles WHERE rolname = '{{ login.name }}';
+      ALTER ROLE {{ login.name }} SET statement_timeout = '{{ login.statement_timeout }}';
+      SELECT 'after ' || coalesce(array_to_string(rolconfig, ','), '') FROM pg_roles WHERE rolname = '{{ login.name }}';
+  become_user: postgres
+  register: _st
+  changed_when: >-
+    (_st.stdout_lines | select('match', '^before ') | first) | regex_replace('^before ', '')
+    != (_st.stdout_lines | select('match', '^after ') | first) | regex_replace('^after ', '')
+  when: login.statement_timeout is defined
+
 # The real consumer (the airflow account) reads its own env file and logs in through pgBouncer.
 # Do not verify as postgres instead: postgres uses peer authentication on the local socket, which verifies
 # neither the password nor auth_query (CLAUDE.md section 5, item two).

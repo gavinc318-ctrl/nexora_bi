@@ -39,6 +39,7 @@ DEVICE_QUEUE, DEVICE_AGENT, DEVICE_IVR = 1, 2, 3
 CALLTYPE_INBOUND = [0, 0, 0, 0, 0, 0, 0, 0, 5, 13]      # 绝大多数是普通呼入
 CALLTYPE_UNKNOWN = 9999                                 # 不在值表内（边界情况 6）
 RELEASE_CAUSES = [518, 518, 518, 537, 502]              # 只在末腿上有意义（第 17 条）
+RELEASE_SYSTEM = 503                                    # 契约 release_cause.classes 的 system 类之一
 QUEUE_IDS = [11, 12, 13]                                # 阿语 / 英语 / 医疗之类的技能队列
 AGENT_IDS = list(range(101, 161))                       # VDN 用户工号段（第 903 页）
 IVR_ACCESS = "9110"
@@ -124,7 +125,39 @@ def _minute_calls(seed: int, minute: int) -> list[Call]:
             call.legs.append(Leg(DEVICE_AGENT, str(agent2), "DEVICE_AGENT", a_end, b_wait_end,
                                  b_wait_end, b_end, 0, 0, 0))
         calls.append(call)
+    calls.extend(_minute_extra_calls(seed, minute, base))
     return calls
+
+
+def _minute_extra_calls(seed: int, minute: int, base: datetime) -> list[Call]:
+    """IVR → 排队 → 坐席之外的三种呼叫（2026-11-16 加，DD-96 第一、九条的更正要有数据可测）。
+
+    用另一条随机流、另一段 CALLID 序号（91 起），不改动上面那些呼叫：已接入的话单在回看与回扫时内容不变。
+      ivr_only       只有 IVR 一条腿——只有一张话单，结束后以 CALLIDNUM = -1 出现（首腿取 -1 腿，Q39）
+      queue_timeout  IVR 与排队两条腿，排队超时由系统释放 → unanswered_system
+      agent_noanswer IVR、排队、坐席振铃未接，由系统释放 → unanswered_system
+    """
+    rng = random.Random(f"{seed}:{minute}:extra")
+    if rng.random() >= 0.15:
+        return []
+    kind = rng.choice(["ivr_only", "queue_timeout", "agent_noanswer"])
+    t0 = base + timedelta(seconds=rng.randint(0, 59))
+    epoch_s = int((t0 - EPOCH).total_seconds())
+    call = Call(callid=f"{epoch_s}-91", callerno="05" + "".join(str(rng.randint(0, 9)) for _ in range(8)),
+                calltype=rng.choice(CALLTYPE_INBOUND),
+                release=rng.choice(RELEASE_CAUSES) if kind == "ivr_only" else RELEASE_SYSTEM)
+    ivr_end = t0 + timedelta(seconds=rng.randint(3, 25))
+    call.legs.append(Leg(DEVICE_IVR, IVR_ACCESS, IVR_ACCESS, t0, ivr_end, ivr_end, ivr_end, 0, 0, 0))
+    if kind == "ivr_only":
+        return [call]
+    q_end = ivr_end + timedelta(seconds=rng.randint(60, 300))
+    call.legs.append(Leg(DEVICE_QUEUE, str(rng.choice(QUEUE_IDS)), "DEVICE_QUEUE", ivr_end, q_end, None, None, 2, 0, 0))
+    if kind == "queue_timeout":
+        return [call]
+    ring_end = q_end + timedelta(seconds=rng.randint(15, 30))
+    call.legs.append(Leg(DEVICE_AGENT, str(rng.choice(AGENT_IDS)), "DEVICE_AGENT", q_end, ring_end,
+                         None, None, 0, 0, 0))
+    return [call]
 
 
 def _rows_for_call(call: Call, now: datetime, emit_mode: str) -> list[dict]:

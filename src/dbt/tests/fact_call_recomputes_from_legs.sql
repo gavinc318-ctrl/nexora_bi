@@ -1,12 +1,15 @@
 -- Every derived column of core.fact_call recomputed from its legs another way -- one correlated subquery per column,
 -- not the model's aggregation -- and compared (DD-66 table comment: each column must be recomputable from the legs;
--- DD-96 · LD-03 2.4). One row per call that differs, with both versions.
+-- DD-96 · LD-03 2.4). One row per call that differs, with both versions. Over the calls of calls_to_check
+-- (macros/fact_call.sql; every call with var full_check), each from all of its legs: the subqueries do not filter
+-- the legs by time.
 {%- set legs = ref('fact_call_leg') -%}
 {%- set leg_order = "case when l.leg_seq = -1 then 2147483647 else l.leg_seq end" -%}
 -- Each subquery reads the leg table itself, so it uses the index on call_sk (ix_leg_parent). A shared CTE of the legs
 -- would be materialized (it is referenced many times) and scanned in full by every subquery for every call: hours on
 -- the real machine's data (2026-11-16).
-with r as (
+with checked as ({{ calls_to_check() }}),
+r as (
     select c.call_sk,
            (select count(*) from {{ legs }} l where l.call_sk = c.call_sk)                                          as leg_count,
            exists (select 1 from {{ legs }} l where l.call_sk = c.call_sk and l.leg_seq = -1)                       as is_complete,
@@ -27,12 +30,14 @@ with r as (
            (select count(*) from {{ legs }} l where l.call_sk = c.call_sk and l.device_type_code = 2
                and l.call_begin is not null)                                                              as answered_leg_count
       from {{ ref('fact_call') }} c
+     where c.call_sk in (select call_sk from checked)
 ),
 mine as (
     select c.call_sk, c.leg_count, c.is_complete, c.first_leg_seq, c.offered_at, c.call_type_code, c.direction, c.answered_at, c.agent_sk,
            c.first_queue_code, c.ended_at, c.released_by, c.wait_seconds, c.talk_seconds, c.agent_leg_count,
            c.answered_leg_count, c.is_transferred, c.date_key
       from {{ ref('fact_call') }} c
+     where c.call_sk in (select call_sk from checked)
 )
 select m.*, r.*
   from mine m join r on r.call_sk = m.call_sk

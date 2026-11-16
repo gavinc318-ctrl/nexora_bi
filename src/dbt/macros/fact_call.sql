@@ -49,3 +49,23 @@
     having count(distinct l.call_type_code) > 1 or count(distinct l.direction) > 1
         or (count(l.call_type_code) > 0 and count(l.call_type_code) < count(*))
 {%- endmacro %}
+
+{#- The calls the two consistency tests look at (fact_call_recomputes_from_legs, fact_call_for_every_call). The window
+    selects calls, never legs: each selected call is recomputed from all of its legs, so a call that began yesterday
+    and ended today is checked with yesterday's legs too.
+      - calls fact_call wrote in the last day: a row written wrong;
+      - calls with a leg written or relinked in the last day: a change the model missed (the row was not rewritten, so
+        its built_at is old) or a call without a row.
+    With var full_check (the nightly maintenance_checks DAG) every call is checked; it also covers changes older than
+    the window, for example after the builds were stopped for more than a day. -#}
+{% macro calls_to_check() -%}
+    {%- if var('full_check', false) -%}
+    select f.call_sk from {{ ref('fact_call') }} f
+    union
+    select l.call_sk from {{ ref('fact_call_leg') }} l
+    {%- else -%}
+    select f.call_sk from {{ ref('fact_call') }} f where f.built_at > now() - interval '1 day'
+    union
+    select l.call_sk from {{ ref('fact_call_leg') }} l where l.last_change_at > now() - interval '1 day'
+    {%- endif -%}
+{%- endmacro %}

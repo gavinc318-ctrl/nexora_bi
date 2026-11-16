@@ -9,6 +9,9 @@ Like the ingestion DAGs, generated from the DAG manifest /opt/oss911/release/dag
                            (meta.staging_batch_state, DD-89), so build and ingestion need no ordering
   maintenance_partitions   daily: monthly partitions for this month and the next three, every partitioned table in
                            core, audit and raw (DD-77). A missing partition makes every write for that month fail
+  maintenance_checks       daily: the call-level consistency tests over every call (var full_check). The builds run
+                           them over the calls of the last day only (macros/fact_call.sql, calls_to_check): over all
+                           calls their time grows with the data, and a build runs every few minutes
 
 All of them use the pool dbt_build (one slot for the whole cluster, DD-85): dbt invocations never overlap, which the
 core models rely on (macros/fact_call_leg.sql, register_core_batches) and which keeps dbt's threads within the
@@ -85,3 +88,10 @@ with DAG(dag_id="maintenance_partitions", description="Monthly partitions for th
          schedule="30 1 * * *", start_date=datetime(2026, 10, 1, tzinfo=UTC), catchup=False, max_active_runs=1,
          default_args=DEFAULT_ARGS, tags=["maintenance"]) as maintenance_partitions:
     _task("ensure_partitions", "run-operation ensure_partitions_ahead --args '{months: 3}'")
+
+# 03:30 Asia/Riyadh: after the source's 02:00 resweep and its builds
+with DAG(dag_id="maintenance_checks", description="Call-level consistency tests over every call (full_check)",
+         schedule="30 0 * * *", start_date=datetime(2026, 10, 1, tzinfo=UTC), catchup=False, max_active_runs=1,
+         default_args=DEFAULT_ARGS, tags=["maintenance"]) as maintenance_checks:
+    _task("full_checks", "test --select fact_call_recomputes_from_legs fact_call_for_every_call "
+                         "--vars '{full_check: true}'")

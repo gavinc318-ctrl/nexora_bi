@@ -40,6 +40,11 @@
 测试 `fact_call_recomputes_from_legs` 用另一种写法把每一列从腿重算一遍再比；`fact_call_result_rules` 检查结果码的规则；
 `fact_call_for_every_call` 检查腿表里的每通电话都有行。三条都是 ERROR 级：通话级与腿级一旦对不上，报表就会自相矛盾。
 
+**检查哪些通话**：构建里跑的这两条（重算、每通都有行）只查「最近一天 fact_call 写过的通话」加「最近一天有腿变化的通话」——
+前者抓写错，后者抓漏更新（腿变了而通话行没跟着改，它的 `built_at` 是旧的）与漏建行。时间只用来选通话，选中的通话读它的**全部腿**：
+昨天开始、今天结束的长通话，今天检查时带着昨天的腿。全部通话的检查耗时随数据量增长，不能每 5 分钟跑一次，放在夜间的
+`maintenance_checks`（03:30 利雅得时间）跑一遍，也兜住构建停了一天以上、变化落在窗口外的情况。
+
 ## 执行（结构变更 0010、0011）
 
 0010 给 `fact_call` 加 `is_complete`，往 `dim_call_result` 写入四种结果，给腿表加 `last_change_at` 索引。没有新扩展，20 不必先跑；
@@ -104,3 +109,38 @@ SELECT first_leg_seq, is_complete, count(*) FROM core.fact_call GROUP BY 1, 2 OR
 ```
 
 两个数相等；构建日志里 `fact_call_recomputes_from_legs`、`fact_call_result_rules`、`fact_call_for_every_call` 都是 PASS。
+
+## 2026-11-16 第二批：检查范围、夜间全量检查、dbt 语句超时、假接口新增三类通话
+
+| 改了什么 | 生效靠 |
+| --- | --- |
+| 两条一致性测试只查近一天的通话（见「四」）；新 DAG `maintenance_checks` 每晚全量查一遍 | 45 → 50 |
+| dbt 登录用户 `statement_timeout = 25min`（略小于构建任务 30 分钟的超时：Airflow 超时只杀 dbt 进程，库里的查询会留下来） | 40 |
+| 假接口另加三类通话：只经 IVR（单张话单、编 -1）、排队超时由系统释放、坐席振铃未接由系统释放，约占 6% | 重启假接口 |
+
+```bash
+sudo -v
+cd ~/src/nexora_bi && git pull --rebase
+cd infra
+ansible-playbook playbooks/40-schema.yml    -e ansible_connection=local -K
+ansible-playbook playbooks/45-contracts.yml -e ansible_connection=local -K
+ansible-playbook playbooks/50-dags.yml      -e ansible_connection=local -K
+sudo -u airflow bash -c "set -a; . /etc/oss911/airflow.env; set +a; /opt/oss911/venv-airflow/bin/airflow dags unpause maintenance_checks"
+```
+
+40 里 `dbt: set its statement_timeout` 第一遍 changed、第二遍 ok；没有新的结构变更。50 应列出 `maintenance_checks`。
+假接口：到它的终端 Ctrl+C，再 `test/fake_icp/start.sh`（参照数据的版本见 runbook 14「执行」一节的说明）。原有通话的内容不变，
+新增的三类通话 CALLID 以 `-91` 结尾，回扫会把前一天的也补进来。
+
+```bash
+# 语句超时已在库里
+sudo -u postgres psql -d oss911 -tAc "SELECT rolconfig FROM pg_roles WHERE rolname = 'dbt'"       # {statement_timeout=25min}
+
+# 新通话到了之后（下一次 build_icp_cdr_voice），四种结果都应出现；ivr_only 的 first_leg_seq 为 -1
+sudo -u postgres psql -d oss911 -P pager=off -c "
+SELECT r.code, f.first_leg_seq, count(*)
+  FROM core.fact_call f LEFT JOIN core.dim_call_result r USING (call_result_sk)
+ WHERE f.is_complete GROUP BY 1, 2 ORDER BY 1, 2"
+```
+
+语句超时在 pgBouncer 已有的服务端连接上不立即生效，连接回收（`server_lifetime`）后才带上；不影响什么，只是别以为马上就有。

@@ -1926,3 +1926,18 @@ params / name_ar_state / effective_from、`sql_expression` 可空、`data_public
 - **孤儿查询**：Airflow 超时只杀 dbt 进程，库里的查询照跑，下一次构建又起一个，越积越多、互相抢 CPU。建议给 `dbt` 角色设
   `statement_timeout`（略小于任务超时，如 25 分钟），让库自己终止；属角色设置，开发机下一次改角色剧本时一并做，不另开结构变更。请 Mac 侧知悉。
 - runbook 15 的 0011 一节补了「先暂停两个构建 DAG、确认没有残留 dbt 会话」。
+
+## 2026-11-16  开发机：一致性测试按「近一天的通话」查、夜间全量；dbt 语句超时；假接口补三类通话
+
+**检查范围**（Gavin 定）：`fact_call_recomputes_from_legs` 与 `fact_call_for_every_call` 在构建里只查「最近一天 fact_call 写过的通话」∪
+「最近一天有腿变化的通话」（宏 `calls_to_check`）；时间只选通话，选中的通话读全部腿。前者抓写错，后者抓漏更新与漏建行。
+新 DAG `maintenance_checks`（每日 00:30 UTC = 03:30 利雅得，回扫之后）以 `full_check` 查全部通话，兜住窗口外的变化。
+临时库：腿改了、通话行未重算 → 重算测试 FAIL 1；同一变化放到两天前 → 构建档 PASS、全量档 FAIL 1；删掉近期有腿变化的通话行 →
+每通都有行 FAIL 1；还原后全 PASS。真机 9 万通时全量重算 21.5 秒，其中约 7 秒是 JIT 编译。
+fact_call 的 `built_at` 没有索引，构建档每次顺扫 fact_call 一遍（现在毫秒级）；随第 8 步第二段的 0012 一并加。
+
+**dbt 语句超时**：`db_logins` 增可选 `statement_timeout`，dbt 设 25min（构建任务超时 30 分钟）；40 的登录用户步骤 `ALTER ROLE ... SET`。
+
+**假接口**：按真机核验时发现，原生成器每通都是 IVR → 排队 → 坐席，结果只有 answered 与 abandoned，Mac 侧这次更正的两条规则在真机上
+没有数据可测。另加三类（另一条随机流、CALLID 以 `-91` 结尾，不改原有通话的内容）：只经 IVR（单张话单、编 -1）、排队超时系统释放、
+坐席振铃未接系统释放，约 6%。临时库补取 7 小时后四种结果都出现，`ivr_only` 的 `first_leg_seq = -1`。比例是编的，不作口径依据。

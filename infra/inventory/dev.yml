@@ -243,9 +243,13 @@ all:
     # The service layer's query_svc / admin_svc users are created together with the service layer -- created now,
     # no program would use them, and they would only be two more passwords nobody rotates.
     #   env_prefix decides the variable names in the env file: DBT_USER / DBT_PASSWORD are the names the dbt profile reads
+    #   statement_timeout (optional) is set on the user (ALTER ROLE ... SET). dbt's is below the build task's
+    #   execution_timeout (30 minutes, src/dags/oss911_build.py): Airflow's timeout kills the dbt process only, and the
+    #   query it was running carried on in the database, one more every half hour (NOTES 2026-11-16)
     db_logins:
       - { name: ingest, role: oss911_ingest,    env_file: ingest.env, env_prefix: INGEST_DB, file_owner: airflow }
-      - { name: dbt,    role: oss911_transform, env_file: dbt.env,    env_prefix: DBT,       file_owner: airflow }
+      - { name: dbt,    role: oss911_transform, env_file: dbt.env,    env_prefix: DBT,       file_owner: airflow,
+          statement_timeout: 25min }
     # Initial partition window, monthly (DD-77): previous month, this month, three months ahead. From then on
     # orchestration calls meta.ensure_monthly_partitions to create future months in advance -- until orchestration is
     # in place the window runs out after partition_months_ahead months; then rerun the playbook to move it forward.
