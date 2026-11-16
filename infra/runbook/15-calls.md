@@ -11,11 +11,13 @@
 
 ## 先懂四件事
 
-### 一、首腿到了才有通话行，末腿到了才算完整
+### 一、每通电话都有一行；首腿取序号最小的正序号腿，末腿到了才算完整
 
-没有首腿（CALLIDNUM = 1）就没有「呼叫进来的时刻」，不建行；腿照留在 `fact_call_leg`，测试 `fact_call_leg_without_first_leg`
-（WARN）报告有多少这样的 CALLID。末腿（-1）没到的通话照建，`is_complete = false`，结果码、结束时刻、挂断方都为空——
-发布的指标只算完整的通话，没完整的单独算「进行中」。
+首腿是序号（CALLIDNUM）最小的正序号腿；只有 -1 腿的通话（只有一张话单的通话可能编 -1，ICP 问题 Q39）以 -1 腿为首腿。
+用的是哪一条记在 `first_leg_seq`：正常是 1，-1 是单张话单的通话，2 以上说明 1 号腿缺了或迟到——这时呼叫时刻、呼叫类型、
+首队列可能不准，测试 `fact_call_leg_without_first_leg`（WARN）报告有多少；1 号腿补到后该通话自动重算。
+末腿（-1）没到的通话照建，`is_complete = false`，结果码、结束时刻、挂断方都为空——发布的指标只算完整的通话，
+没完整的单独算「进行中」。
 
 ### 二、四种结果，先看谁挂的
 
@@ -23,8 +25,8 @@
 | --- | --- | --- |
 | 1 | `answered` | 有接通的坐席腿 |
 | 2 | `abandoned` | 有队列腿或坐席腿，末腿由主叫释放（不论当时在排队还是坐席在振铃） |
-| 3 | `unanswered_system` | 有坐席腿、都没接通，不是主叫挂的 |
-| 4 | `ivr_only` | 其余 |
+| 3 | `unanswered_system` | 有队列腿或坐席腿、都没接通，不是主叫挂的（含排队超时被系统释放） |
+| 4 | `ivr_only` | 既没有队列腿也没有坐席腿 |
 
 转接与恶意呼叫是标志（`is_transferred`、`is_malicious`），不是结果。坐席那一侧的「未接」看腿级（M-C12）。
 
@@ -36,9 +38,9 @@
 ### 四、每一列都能从腿重算
 
 测试 `fact_call_recomputes_from_legs` 用另一种写法把每一列从腿重算一遍再比；`fact_call_result_rules` 检查结果码的规则；
-`fact_call_for_every_first_leg` 检查有首腿的通话都有行。三条都是 ERROR 级：通话级与腿级一旦对不上，报表就会自相矛盾。
+`fact_call_for_every_call` 检查腿表里的每通电话都有行。三条都是 ERROR 级：通话级与腿级一旦对不上，报表就会自相矛盾。
 
-## 执行（结构变更 0010）
+## 执行（结构变更 0010、0011）
 
 0010 给 `fact_call` 加 `is_complete`，往 `dim_call_result` 写入四种结果，给腿表加 `last_change_at` 索引。没有新扩展，20 不必先跑；
 dbt 与 DAG 有改动，所以 45 在 50 之前：
@@ -54,11 +56,20 @@ ansible-playbook playbooks/50-dags.yml      -e ansible_connection=local -K
 
 | 剧本 | 第一遍预期 |
 | --- | --- |
-| 40 | 执行 0010；`Structural changes 0000 to 0010 executed`；权限验证全过 |
+| 40 | 执行 0010、0011（真机上 0010 已执行过，这次只执行 0011）；`Structural changes 0000 to 0011 executed`；权限验证全过 |
 | 45 | 新发布目录；契约跳过 |
 | 50 | 安装新的 dbt 项目与 DAG |
 
 第二遍都应 `changed=0`。之后第一次 `build_icp_cdr_voice` 会把已有的全部通话建出来（腿全都「近一天内变过」或表为空）。
+
+### 0011（2026-11-16 规则更正）
+
+0011 清空 `fact_call`（按 0010 规则建的行：缺 1 号腿的通话没有行，只有队列腿、系统释放的通话被记成 `ivr_only`），
+加 `first_leg_seq` 列。表空了，下一次构建就按新规则把全部通话重建。命令同上（40 → 45 → 50，中间不停）。
+
+40 跑完到 50 装好新模型之间，如果调度正好触发构建，**旧模型的 fact_call 会失败**（`The source and target schemas on this
+incremental model are out of sync`）——这是有意的：新列 NOT NULL、无默认值，旧模型写不进来，不会按旧规则把表填回去。
+50 之后的下一次构建正常。
 
 ## 核验
 
@@ -69,9 +80,13 @@ SELECT r.code, f.is_complete, count(*)
   FROM core.fact_call f LEFT JOIN core.dim_call_result r USING (call_result_sk)
  GROUP BY 1, 2 ORDER BY 1, 2"
 
-# 有首腿的 CALLID 数应等于通话行数
+# 腿表的通话数应等于通话行数
 sudo -u postgres psql -d oss911 -tAc "
-SELECT (SELECT count(DISTINCT call_sk) FROM core.fact_call_leg WHERE leg_seq = 1), (SELECT count(*) FROM core.fact_call)"
+SELECT (SELECT count(DISTINCT call_sk) FROM core.fact_call_leg), (SELECT count(*) FROM core.fact_call)"
+
+# 首腿是哪一条：1 正常；-1 单张话单的通话；2 以上是 1 号腿缺了或迟到
+sudo -u postgres psql -d oss911 -P pager=off -c "
+SELECT first_leg_seq, is_complete, count(*) FROM core.fact_call GROUP BY 1, 2 ORDER BY 1, 2"
 ```
 
-两个数相等；构建日志里 `fact_call_recomputes_from_legs`、`fact_call_result_rules`、`fact_call_for_every_first_leg` 都是 PASS。
+两个数相等；构建日志里 `fact_call_recomputes_from_legs`、`fact_call_result_rules`、`fact_call_for_every_call` 都是 PASS。

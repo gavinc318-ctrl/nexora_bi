@@ -18,16 +18,18 @@
             {{a}}.caller_number, {{a}}.caller_number_hash, {{a}}.first_queue_sk, {{a}}.first_queue_code, {{a}}.agent_sk,
             {{a}}.call_result_sk, {{a}}.offered_at, {{a}}.answered_at, {{a}}.ended_at, {{a}}.wait_seconds,
             {{a}}.talk_seconds, {{a}}.leg_count, {{a}}.agent_leg_count, {{a}}.answered_leg_count, {{a}}.ring_count,
-            {{a}}.released_by, {{a}}.is_transferred, {{a}}.is_malicious, {{a}}.source_tz_offset, {{a}}.is_complete)::text)
+            {{a}}.released_by, {{a}}.is_transferred, {{a}}.is_malicious, {{a}}.source_tz_offset, {{a}}.is_complete,
+            {{a}}.first_leg_seq)::text)
 {%- endmacro %}
 
-{#- Pre-hook: monthly partitions for the days the rebuilt calls fall on (their first leg's day). -#}
+{#- Pre-hook: monthly partitions for the days the rebuilt calls fall on (their first leg's day, within the range of
+    their legs' days). -#}
 {% macro ensure_call_partitions() -%}
     select meta.ensure_monthly_partitions('core.fact_call',
                min((l.wait_begin at time zone '{{ var("report_timezone") }}')::date),
                max((l.wait_begin at time zone '{{ var("report_timezone") }}')::date))
       from {{ ref('fact_call_leg') }} l
-     where l.leg_seq = 1 and l.call_sk in ({{ calls_to_rebuild() }})
+     where l.call_sk in ({{ calls_to_rebuild() }})
 {%- endmacro %}
 
 {#- Post-hook: the legs of one CALLID disagree on CALLTYPE or direction (DD-96 item four) -- the call takes its first

@@ -90,3 +90,9 @@
   summary: core.fact_call rules (DD-96) -- is_complete, the four call results in core.dim_call_result, index on fact_call_leg.last_change_at for rebuilding the calls whose legs changed
   files:
     - changes/0010_fact_call_rules.sql
+
+- id: "0011"
+  run_as: owner
+  summary: First leg of a call (DD-96 item one, 2026-11-16) -- core.fact_call emptied for a full rebuild under the corrected rules, first_leg_seq (lowest positive CALLIDNUM, else -1), unanswered_system covering queue-only calls released by the system
+  files:
+    - changes/0011_fact_call_first_leg.sql

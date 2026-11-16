@@ -1,7 +1,9 @@
 {#- core.fact_call: one row per call, aggregated from its legs in core.fact_call_leg (DD-66 · DD-96 · LD-03 2.4).
 
     Legs run IVR -> skill queue (waiting for a free agent) -> agent (wait_begin = ringing, call_begin = answered).
-      - No row until the first leg (CALLIDNUM 1) has arrived: without it there is no offered_at (item one).
+      - The first leg is the one with the lowest positive CALLIDNUM, or the -1 leg when it is the only one (item
+        one, corrected 2026-11-16: a single-CDR call may be numbered -1, ICP Q39); first_leg_seq keeps which. A row
+        exists for every call with a leg; a late CALLIDNUM 1 moves offered_at back when it arrives.
       - is_complete once the last leg (-1) has arrived; until then call_result, ended_at and released_by are NULL and
         the call is "in progress" (items two, nine).
       - offered_at = first leg's wait_begin, date_key its day; answered_at and agent_sk = the earliest answered agent
@@ -12,7 +14,8 @@
         answered leg counts (items five, six). released_by = last leg's release_source (item seven).
       - is_transferred = two or more answered agent legs; the reason-code path waits for ICP (item eight).
       - call_result: answered -> abandoned (any queue or agent leg, last leg released by the caller) ->
-        unanswered_system (agent legs, none answered) -> ivr_only (item nine).
+        unanswered_system (queue or agent legs, none answered) -> ivr_only (neither; item nine, corrected
+        2026-11-16).
     Rebuilt for the calls whose legs changed (macros/fact_call.sql); written only when the derived content differs
     (DD-78), delete+insert by call_sk so a call whose first leg moved day changes partition.
 -#}
@@ -54,7 +57,9 @@ agg as (
 ),
 
 first_leg as (
-    select * from legs where leg_seq = 1
+    select distinct on (call_sk) *
+      from legs
+     order by call_sk, leg_order
 ),
 
 last_leg as (
@@ -92,7 +97,7 @@ calls as (
             when not a.is_complete                                                       then null
             when a.answered_leg_count >= 1                                               then 'answered'
             when a.queue_leg_count + a.agent_leg_count > 0 and z.release_source = 'caller' then 'abandoned'
-            when a.agent_leg_count > 0                                                   then 'unanswered_system'
+            when a.queue_leg_count + a.agent_leg_count > 0                               then 'unanswered_system'
             else 'ivr_only'
         end                                                                               as call_result_code,
         f.wait_begin                                                                      as offered_at,
@@ -115,7 +120,8 @@ calls as (
         0::smallint                                                                       as correction_seq,
         now()                                                                             as last_change_at,
         now()                                                                             as built_at,
-        a.is_complete
+        a.is_complete,
+        f.leg_seq::smallint                                                               as first_leg_seq
       from first_leg f
       join agg a on a.call_sk = f.call_sk
       left join last_leg z on z.call_sk = f.call_sk
@@ -129,7 +135,7 @@ candidate as (
            c.answered_at, c.ended_at, c.wait_seconds, c.talk_seconds, c.leg_count, c.agent_leg_count,
            c.answered_leg_count, c.ring_count, c.released_by, c.is_transferred, c.is_malicious, c.source_tz_offset,
            c.src_system, c.run_id, c.contract_version, c.src_watermark, c.correction_seq, c.last_change_at,
-           c.built_at, c.is_complete
+           c.built_at, c.is_complete, c.first_leg_seq
       from calls c
       left join {{ source('core', 'dim_call_result') }} r
         on r.site_sk = c.site_sk and r.code = c.call_result_code

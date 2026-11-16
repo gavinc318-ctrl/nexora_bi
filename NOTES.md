@@ -1894,3 +1894,24 @@ Mac 侧下一件：第 9 步 LD-04 API 契约。
 10. **前置**：fact_call 首腿规则与「队列腿系统释放 → unanswered_system」先落到模型（现仍限定 `leg_seq = 1`），服务层验数在其后。
 已记 DD-99 注、LD-04 3.5、LD-03 第 5 章、LD-05 2.1。
 
+
+## 2026-11-16  开发机：fact_call 两处更正已实现（结构变更 0011）；译名已并入 metrics.yaml
+
+**fact_call（答复第二节第 1、2 条）**
+- 首腿 = 序号最小的正序号腿，只有 -1 腿的取 -1 腿。新列 `core.fact_call.first_leg_seq` 记下用的是哪一条：1 正常，-1 单张话单的通话（Q39），
+  2 以上是 1 号腿缺了或迟到。WARN 测试 `fact_call_leg_without_first_leg` 改为只报「2 以上」的通话；-1 的属待 Q39 答复的正常情形，不报。
+  「有首腿必有行」改为 `fact_call_for_every_call`：腿表里的每通电话都有行（ERROR）。
+- 结果码第 3 条改为「有队列腿或坐席腿、都未接通、非主叫释放」→ `unanswered_system`；`ivr_only` 只剩两者都没有。结果码测试同步。
+- 0011 **清空 fact_call** 后加列（NOT NULL 无默认）：按旧规则建的行有两类错（缺 1 号腿的通话没有行、队列腿系统释放记成 `ivr_only`），
+  表空则下一次构建全量重建。附带效果：40 与 50 之间若调度触发构建，旧模型因结构不一致失败，不会按旧规则把表填回去（runbook 15 已写）。
+  目前没有读 fact_call 的 mart，清空无下游影响。
+- 临时库（保留 0010 时的数据升级）：0011 后首建 999 通 = 腿表的通话数（原 997，多出的 2 通是只有 -1 腿的）；重跑写 0；
+  把一通只有队列腿的通话末腿改为系统释放 → `unanswered_system`；删掉某通的 1 号腿 → `first_leg_seq = 2`、WARN 1，补回 → 1、
+  呼叫时刻回到 1 号腿的时刻；旧版模型对新表结构报 out of sync。fact_call 及其测试 PASS=12。
+
+**译名（11-16 第二节）**：`metric_names.csv` 的 59 条并入 metrics.yaml（每条 `name_en`、`name_ar`、`name_ar_state: draft`），
+中文名逐条核对一致；csv 已删除，metrics.yaml 仍是唯一来源。M-R02–M-R04 标 `depends_unverified: true`（DD-98）。
+
+**下一步**：第 8 步第二段——结构变更 0012（注册表主键改为（编码, 版本）、mart_table / mart_column / mart_numerator / mart_denominator /
+params / name_ar_state / effective_from、`sql_expression` 可空、`data_publication` 加 `intraday`、`meta.mart_day_publication`）、
+46-metrics、`metrics/marts.yaml`、四张话务 mart 与封账发布 DAG。第 7 步（if03b/c）排在其后。

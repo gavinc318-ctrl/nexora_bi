@@ -9,9 +9,10 @@ r as (
     select c.call_sk,
            (select count(*) from l where l.call_sk = c.call_sk)                                          as leg_count,
            exists (select 1 from l where l.call_sk = c.call_sk and l.leg_seq = -1)                       as is_complete,
-           (select l.wait_begin from l where l.call_sk = c.call_sk and l.leg_seq = 1)                     as offered_at,
-           (select l.call_type_code from l where l.call_sk = c.call_sk and l.leg_seq = 1)                 as call_type_code,
-           (select l.direction from l where l.call_sk = c.call_sk and l.leg_seq = 1)                      as direction,
+           (select l.leg_seq from l where l.call_sk = c.call_sk order by l.leg_order limit 1)             as first_leg_seq,
+           (select l.wait_begin from l where l.call_sk = c.call_sk order by l.leg_order limit 1)          as offered_at,
+           (select l.call_type_code from l where l.call_sk = c.call_sk order by l.leg_order limit 1)      as call_type_code,
+           (select l.direction from l where l.call_sk = c.call_sk order by l.leg_order limit 1)           as direction,
            (select min(l.call_begin) from l where l.call_sk = c.call_sk and l.device_type_code = 2)       as answered_at,
            (select l.agent_sk from l where l.call_sk = c.call_sk and l.device_type_code = 2 and l.call_begin is not null
              order by l.call_begin, l.leg_order limit 1)                                                 as agent_sk,
@@ -27,19 +28,19 @@ r as (
       from {{ ref('fact_call') }} c
 ),
 mine as (
-    select c.call_sk, c.leg_count, c.is_complete, c.offered_at, c.call_type_code, c.direction, c.answered_at, c.agent_sk,
+    select c.call_sk, c.leg_count, c.is_complete, c.first_leg_seq, c.offered_at, c.call_type_code, c.direction, c.answered_at, c.agent_sk,
            c.first_queue_code, c.ended_at, c.released_by, c.wait_seconds, c.talk_seconds, c.agent_leg_count,
            c.answered_leg_count, c.is_transferred, c.date_key
       from {{ ref('fact_call') }} c
 )
 select m.*, r.*
   from mine m join r on r.call_sk = m.call_sk
- where row(m.leg_count, m.is_complete, m.offered_at, m.call_type_code, m.direction, m.answered_at, m.agent_sk,
+ where row(m.leg_count, m.is_complete, m.first_leg_seq, m.offered_at, m.call_type_code, m.direction, m.answered_at, m.agent_sk,
            m.first_queue_code, m.wait_seconds, m.talk_seconds, m.agent_leg_count, m.answered_leg_count,
            m.is_transferred,
            to_char(m.offered_at at time zone '{{ var("report_timezone") }}', 'YYYYMMDD')::integer)
        is distinct from
-       row(r.leg_count::smallint, r.is_complete, r.offered_at, r.call_type_code, r.direction, r.answered_at, r.agent_sk,
+       row(r.leg_count::smallint, r.is_complete, r.first_leg_seq::smallint, r.offered_at, r.call_type_code, r.direction, r.answered_at, r.agent_sk,
            r.first_queue_code, r.wait_seconds::integer, r.talk_seconds::integer, r.agent_leg_count::smallint,
            r.answered_leg_count::smallint, r.answered_leg_count >= 2, m.date_key)
     or (m.is_complete and row(m.ended_at, m.released_by) is distinct from row(r.ended_at, r.released_by))

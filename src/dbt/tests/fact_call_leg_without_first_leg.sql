@@ -1,11 +1,9 @@
--- Calls with legs in core but no first leg (CALLIDNUM 1): no fact_call row is built for them (DD-96 item one), so
--- they are missing from every call-level metric. A monitoring item, not a failure: the first leg may be late. If a
--- call with a single leg turns out to be numbered -1 rather than 1 (interface document: "1 the first CDR, -1 the
--- last"; NOTES 2026-10-30), such calls show here permanently. One row: how many calls, and the oldest.
+-- Calls whose CALLIDNUM 1 leg is missing while a later positive leg is in core: the call starts from that later leg
+-- (DD-96 item one), so its offered_at, call type and first queue may be wrong until CALLIDNUM 1 arrives. A monitoring
+-- item, not a failure: the first leg may be late. Calls with their -1 leg only are not counted here: a single-CDR call
+-- may be numbered -1 (ICP Q39); core.fact_call.first_leg_seq = -1 shows those. One row: how many calls, the oldest.
 {{ config(severity='warn') }}
-select count(*) as calls, min(first_wait_begin) as oldest
-  from (select l.call_sk, min(l.wait_begin) as first_wait_begin
-          from {{ ref('fact_call_leg') }} l
-         group by l.call_sk
-        having not bool_or(l.leg_seq = 1)) x
+select count(*) as calls, min(offered_at) as oldest
+  from {{ ref('fact_call') }}
+ where first_leg_seq > 1
 having count(*) > 0

@@ -14,6 +14,9 @@
 # entity_date 决定归日：
 #   date_key        发生类——当日派单量、当日出动量，封账即完整
 #   closed_date_key 结案类——当日结案数、处置时长，按 CAD 上手动关闭的日期归属
+#
+# 名称：name_en 定稿，改名不算口径变更（LD-03 第 6 章）；name_ar 的 name_ar_state 为 draft 时
+# 照常显示、M-04 标「待确认」，确认经 M-10 译名流程（DD-56），不走发布。
 # =====================================================================
 version: 1
 generated_from: HD-05 指标注册表（初稿），按 LD-03 修正粒度与聚合
@@ -21,6 +24,9 @@ metrics:
   - code: M-C01
     domain: 接警话务
     name_zh: "呼入量"
+    name_en: "Inbound calls"
+    name_ar: "المكالمات الواردة"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: count
     measure: "1"
@@ -37,6 +43,9 @@ metrics:
   - code: M-C02
     domain: 接警话务
     name_zh: "应答量"
+    name_en: "Answered calls"
+    name_ar: "المكالمات المُجابة"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: count
     measure: "1"
@@ -53,6 +62,9 @@ metrics:
   - code: M-C03
     domain: 接警话务
     name_zh: "放弃量"
+    name_en: "Abandoned calls"
+    name_ar: "المكالمات المتروكة"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: count
     measure: "1"
@@ -69,6 +81,9 @@ metrics:
   - code: M-C04
     domain: 接警话务
     name_zh: "应答率"
+    name_en: "Answer rate"
+    name_ar: "نسبة الرد"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: ratio
     measure: "应答量 / 呼入量"
@@ -85,6 +100,9 @@ metrics:
   - code: M-C05
     domain: 接警话务
     name_zh: "X 秒应答率"
+    name_en: "Answered within X seconds (rate)"
+    name_ar: "نسبة الرد خلال X ثانية"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: ratio
     measure: "等待不超过 X 秒即被应答的比例"
@@ -102,6 +120,9 @@ metrics:
   - code: M-C06
     domain: 接警话务
     name_zh: "平均等待时长"
+    name_en: "Average wait time"
+    name_ar: "متوسط زمن الانتظار"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: avg
     measure: "排队腿 WAITEND − WAITBEGIN"
@@ -118,6 +139,9 @@ metrics:
   - code: M-C07
     domain: 接警话务
     name_zh: "平均通话时长"
+    name_en: "Average talk time (per agent leg)"
+    name_ar: "متوسط زمن المحادثة (لكل مرحلة موظف)"
+    name_ar_state: draft
     grain: call_leg   # 坐席腿（DD-96 第十条）
     aggregation: avg
     measure: "坐席腿 CALLEND − CALLBEGIN"
@@ -134,6 +158,9 @@ metrics:
   - code: M-C08
     domain: 接警话务
     name_zh: "应答前振铃次数"
+    name_en: "Rings before answer"
+    name_ar: "عدد الرنّات قبل الرد"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: count
     measure: "见 definition"
@@ -150,6 +177,9 @@ metrics:
   - code: M-C09
     domain: 接警话务
     name_zh: "呈现给坐席的呼叫数"
+    name_en: "Calls offered to agent"
+    name_ar: "المكالمات المعروضة على الموظف"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: count
     measure: "见 definition"
@@ -166,6 +196,9 @@ metrics:
   - code: M-C10
     domain: 接警话务
     name_zh: "坐席实际处理数"
+    name_en: "Calls handled by agent"
+    name_ar: "المكالمات التي عالجها الموظف"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: count
     measure: "见 definition"
@@ -182,6 +215,9 @@ metrics:
   - code: M-C11
     domain: 接警话务
     name_zh: "挂断方"
+    name_en: "Releasing party (share)"
+    name_ar: "الطرف المُنهي للمكالمة (نسبة)"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: ratio
     measure: "见 definition"
@@ -198,6 +234,9 @@ metrics:
   - code: M-C12
     domain: 接警话务
     name_zh: "未接呼叫数"
+    name_en: "Calls not answered by agent"
+    name_ar: "المكالمات التي لم يُجب عليها الموظف"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: count
     measure: "见 definition"
@@ -214,6 +253,9 @@ metrics:
   - code: M-C13
     domain: 接警话务
     name_zh: "转接呼叫数"
+    name_en: "Transferred calls"
+    name_ar: "المكالمات المحوَّلة"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: count
     measure: "见 definition"
@@ -230,6 +272,9 @@ metrics:
   - code: M-C14
     domain: 接警话务
     name_zh: "骚扰呼叫数"
+    name_en: "Nuisance calls"
+    name_ar: "المكالمات المزعجة"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: count
     measure: "见 definition"
@@ -246,6 +291,9 @@ metrics:
   - code: M-C15
     domain: 接警话务
     name_zh: "同一主叫失败次数"
+    name_en: "Failed attempts by same caller"
+    name_ar: "المحاولات غير الناجحة للمتصل نفسه"
+    name_ar_state: draft
     grain: call   # 通话
     aggregation: count
     measure: "见 definition"
@@ -262,6 +310,9 @@ metrics:
   - code: M-I01
     domain: 警情处置
     name_zh: "警情量"
+    name_en: "Incidents"
+    name_ar: "عدد البلاغات"
+    name_ar_state: draft
     grain: intake   # 接警单
     aggregation: count
     measure: "1"
@@ -278,6 +329,9 @@ metrics:
   - code: M-I02
     domain: 警情处置
     name_zh: "派单率"
+    name_en: "Dispatch rate"
+    name_ar: "نسبة البلاغات المُحالة"
+    name_ar_state: draft
     grain: intake   # 接警单
     aggregation: ratio
     measure: "count(distinct 有派警单的接警单) / count(接警单)"
@@ -294,6 +348,9 @@ metrics:
   - code: M-I03
     domain: 警情处置
     name_zh: "受理时长"
+    name_en: "Intake time"
+    name_ar: "زمن استقبال البلاغ"
+    name_ar_state: draft
     grain: intake   # 接警单
     aggregation: avg
     measure: "created_at - 首呼 answered_at"
@@ -310,6 +367,9 @@ metrics:
   - code: M-I04
     domain: 警情处置
     name_zh: "派单时长"
+    name_en: "Dispatch time"
+    name_ar: "زمن الإحالة"
+    name_ar_state: draft
     grain: dispatch_order   # 派警单
     aggregation: avg
     measure: "issued_at - intake.created_at"
@@ -326,6 +386,9 @@ metrics:
   - code: M-I05
     domain: 警情处置
     name_zh: "到场时长（按出警单）"
+    name_en: "Arrival time (per turnout)"
+    name_ar: "زمن الوصول (لكل أمر مباشرة)"
+    name_ar_state: draft
     grain: turnout   # 出警单
     aggregation: avg
     measure: "arrived_at - dispatch.issued_at"
@@ -342,6 +405,9 @@ metrics:
   - code: M-I20
     domain: 警情处置
     name_zh: "警种到场时长（按派警单）"
+    name_en: "Agency arrival time (per dispatch order)"
+    name_ar: "زمن وصول الجهة (لكل أمر إحالة)"
+    name_ar_state: draft
     grain: dispatch_order   # 派警单
     aggregation: min
     measure: "min(turnout.arrived_at) - issued_at"
@@ -358,6 +424,9 @@ metrics:
   - code: M-I21
     domain: 警情处置
     name_zh: "首个到场时长（按接警单）"
+    name_en: "First arrival time (per incident)"
+    name_ar: "زمن أول وصول (لكل بلاغ)"
+    name_ar_state: draft
     grain: intake   # 接警单
     aggregation: min
     measure: "min(全部出警单 arrived_at) - intake.created_at"
@@ -374,6 +443,9 @@ metrics:
   - code: M-I06
     domain: 警情处置
     name_zh: "处置时长均值（按出警单）"
+    name_en: "Handling time, mean (per turnout)"
+    name_ar: "متوسط زمن المعالجة (لكل أمر مباشرة)"
+    name_ar_state: draft
     grain: turnout   # 出警单
     aggregation: avg
     measure: "ended_at - arrived_at"
@@ -390,6 +462,9 @@ metrics:
   - code: M-I22
     domain: 警情处置
     name_zh: "处置时长中位数（按出警单）"
+    name_en: "Handling time, median (per turnout)"
+    name_ar: "وسيط زمن المعالجة (لكل أمر مباشرة)"
+    name_ar_state: draft
     grain: turnout   # 出警单
     aggregation: median
     measure: "ended_at - arrived_at"
@@ -406,6 +481,9 @@ metrics:
   - code: M-I23
     domain: 警情处置
     name_zh: "处置时长 P90（按出警单）"
+    name_en: "Handling time, P90 (per turnout)"
+    name_ar: "زمن المعالجة - المئين 90 (لكل أمر مباشرة)"
+    name_ar_state: draft
     grain: turnout   # 出警单
     aggregation: p90
     measure: "ended_at - arrived_at"
@@ -422,6 +500,9 @@ metrics:
   - code: M-I07
     domain: 警情处置
     name_zh: "响应时长（按出警单）"
+    name_en: "Response time (per turnout)"
+    name_ar: "زمن الاستجابة (لكل أمر مباشرة)"
+    name_ar_state: draft
     grain: turnout   # 出警单
     aggregation: avg
     measure: "arrived_at - intake.created_at"
@@ -438,6 +519,9 @@ metrics:
   - code: M-I08
     domain: 警情处置
     name_zh: "全过程时长（按接警单）"
+    name_en: "End-to-end time (per incident)"
+    name_ar: "الزمن الكلي (لكل بلاغ)"
+    name_ar_state: draft
     grain: intake   # 接警单
     aggregation: avg
     measure: "closed_at - 首呼 offered_at"
@@ -454,6 +538,9 @@ metrics:
   - code: M-I10
     domain: 警情处置
     name_zh: "超时派单数"
+    name_en: "Late dispatches"
+    name_ar: "الإحالات المتأخرة"
+    name_ar_state: draft
     grain: dispatch_order   # 派警单
     aggregation: count
     measure: "1"
@@ -470,6 +557,9 @@ metrics:
   - code: M-I11
     domain: 警情处置
     name_zh: "撤案数"
+    name_en: "Cancelled incidents"
+    name_ar: "البلاغات الملغاة"
+    name_ar_state: draft
     grain: intake   # 接警单
     aggregation: count
     measure: "1"
@@ -486,6 +576,9 @@ metrics:
   - code: M-I12
     domain: 警情处置
     name_zh: "媒体附件数"
+    name_en: "Media attachments"
+    name_ar: "المرفقات"
+    name_ar_state: draft
     grain: intake   # 接警单
     aggregation: sum
     measure: "media_count"
@@ -502,6 +595,9 @@ metrics:
   - code: M-I13
     domain: 警情处置
     name_zh: "热点强度"
+    name_en: "Hotspot intensity"
+    name_ar: "شدة البؤر الساخنة"
+    name_ar_state: draft
     grain: grid_window   # 网格时窗
     aggregation: count
     measure: "1"
@@ -518,6 +614,9 @@ metrics:
   - code: M-I24
     domain: 警情处置
     name_zh: "结案数"
+    name_en: "Closed incidents"
+    name_ar: "البلاغات المغلقة"
+    name_ar_state: draft
     grain: intake   # 接警单
     aggregation: count
     measure: "1"
@@ -534,6 +633,9 @@ metrics:
   - code: M-I25
     domain: 警情处置
     name_zh: "当日发生警情的最终结案率"
+    name_en: "Final closure rate of the day's incidents"
+    name_ar: "نسبة الإغلاق النهائي لبلاغات اليوم"
+    name_ar_state: draft
     grain: intake   # 接警单
     aggregation: ratio
     measure: "count(已结案) / count(全部)"
@@ -550,6 +652,9 @@ metrics:
   - code: M-R01
     domain: 资源与勤务
     name_zh: "在岗坐席数"
+    name_en: "Agents on duty"
+    name_ar: "الموظفون على رأس العمل"
+    name_ar_state: draft
     grain: agent_day   # 坐席日
     aggregation: count
     measure: "见 definition"
@@ -566,6 +671,9 @@ metrics:
   - code: M-R02
     domain: 资源与勤务
     name_zh: "在岗时长"
+    name_en: "Time on duty"
+    name_ar: "مدة العمل"
+    name_ar_state: draft
     grain: agent_day   # 坐席日
     aggregation: avg
     measure: "见 definition"
@@ -574,7 +682,7 @@ metrics:
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
     source_tables: [core.fact_agent_session]
     version: 2
-    depends_unverified: false
+    depends_unverified: true   # 2026-11-16 · DD-98: hindex/agent date semantics open (ICP Q36-Q38)
     retrospective: false
     published: true
     rfp: ""
@@ -582,6 +690,9 @@ metrics:
   - code: M-R03
     domain: 资源与勤务
     name_zh: "状态时长"
+    name_en: "Time by agent state"
+    name_ar: "المدة حسب حالة الموظف"
+    name_ar_state: draft
     grain: agent_day   # 坐席日
     aggregation: avg
     measure: "见 definition"
@@ -590,7 +701,7 @@ metrics:
     dimensions: [dim_date, dim_site, dim_agent]
     source_tables: [core.fact_agent_day]
     version: 2
-    depends_unverified: false
+    depends_unverified: true   # 2026-11-16 · DD-98: hindex/agent date semantics open (ICP Q36-Q38)
     retrospective: false
     published: true
     rfp: ""
@@ -598,6 +709,9 @@ metrics:
   - code: M-R04
     domain: 资源与勤务
     name_zh: "占用率"
+    name_en: "Occupancy"
+    name_ar: "نسبة الإشغال"
+    name_ar_state: draft
     grain: agent_day   # 坐席日
     aggregation: avg
     measure: "（平台应答时长 + 事后处理时长） / 平台签入时长"
@@ -606,7 +720,7 @@ metrics:
     dimensions: [dim_date, dim_site, dim_agent]
     source_tables: [core.fact_agent_day]
     version: 2
-    depends_unverified: false
+    depends_unverified: true   # 2026-11-16 · DD-98: hindex/agent date semantics open (ICP Q36-Q38)
     retrospective: false
     published: true
     rfp: ""
@@ -614,6 +728,9 @@ metrics:
   - code: M-R05
     domain: 资源与勤务
     name_zh: "警员出动次数"
+    name_en: "Officer turnouts"
+    name_ar: "عدد مرات المباشرة"
+    name_ar_state: draft
     grain: turnout   # 出警单
     aggregation: count
     measure: "1"
@@ -630,6 +747,9 @@ metrics:
   - code: M-R06
     domain: 资源与勤务
     name_zh: "资源可用率"
+    name_en: "Resource availability"
+    name_ar: "نسبة توفر الموارد"
+    name_ar_state: draft
     grain: unit_day   # 单位日
     aggregation: ratio
     measure: "可用时长 / 总时长"
@@ -646,6 +766,9 @@ metrics:
   - code: M-R07
     domain: 资源与勤务
     name_zh: "勤务级别"
+    name_en: "Duty level"
+    name_ar: "مستوى الجاهزية"
+    name_ar_state: draft
     grain: day   # 日
     aggregation: n/a
     measure: "dim_date.duty_level_code"
@@ -662,6 +785,9 @@ metrics:
   - code: M-R08
     domain: 资源与勤务
     name_zh: "未关闭出警单数"
+    name_en: "Open turnouts"
+    name_ar: "أوامر المباشرة المفتوحة"
+    name_ar_state: draft
     grain: turnout   # 出警单
     aggregation: count
     measure: "1"
@@ -678,6 +804,9 @@ metrics:
   - code: M-R09
     domain: 资源与勤务
     name_zh: "最长未关闭时长"
+    name_en: "Longest open turnout"
+    name_ar: "أطول مدة لأمر مباشرة مفتوح"
+    name_ar_state: draft
     grain: turnout   # 出警单
     aggregation: max
     measure: "now() - assigned_at"
@@ -694,6 +823,9 @@ metrics:
   - code: M-P01
     domain: 绩效与质量
     name_zh: "个人处理量"
+    name_en: "Workload per person"
+    name_ar: "حجم العمل لكل فرد"
+    name_ar_state: draft
     grain: month   # 月
     aggregation: count
     measure: "见 definition"
@@ -710,6 +842,9 @@ metrics:
   - code: M-P02
     domain: 绩效与质量
     name_zh: "质检得分"
+    name_en: "Quality score"
+    name_ar: "درجة الجودة"
+    name_ar_state: draft
     grain: month   # 月
     aggregation: avg
     measure: "见 definition"
@@ -726,6 +861,9 @@ metrics:
   - code: M-P03
     domain: 绩效与质量
     name_zh: "满意度得分"
+    name_en: "Satisfaction score"
+    name_ar: "درجة الرضا"
+    name_ar_state: draft
     grain: month   # 月
     aggregation: avg
     measure: "见 definition"
@@ -742,6 +880,9 @@ metrics:
   - code: M-P04
     domain: 绩效与质量
     name_zh: "反馈量"
+    name_en: "Feedback received"
+    name_ar: "عدد الملاحظات الواردة"
+    name_ar_state: draft
     grain: month   # 月
     aggregation: count
     measure: "见 definition"
@@ -758,6 +899,9 @@ metrics:
   - code: M-P05
     domain: 绩效与质量
     name_zh: "投诉量"
+    name_en: "Complaints"
+    name_ar: "عدد الشكاوى"
+    name_ar_state: draft
     grain: month   # 月
     aggregation: count
     measure: "见 definition"
@@ -774,6 +918,9 @@ metrics:
   - code: M-S01
     domain: 系统运行
     name_zh: "可用性"
+    name_en: "Availability"
+    name_ar: "نسبة التوافر"
+    name_ar_state: draft
     grain: component_day   # 组件日
     aggregation: ratio
     measure: "见 definition"
@@ -790,6 +937,9 @@ metrics:
   - code: M-S02
     domain: 系统运行
     name_zh: "MTTR"
+    name_en: "MTTR"
+    name_ar: "متوسط زمن الإصلاح"
+    name_ar_state: draft
     grain: component_day   # 组件日
     aggregation: avg
     measure: "见 definition"
@@ -806,6 +956,9 @@ metrics:
   - code: M-S03
     domain: 系统运行
     name_zh: "MTBF"
+    name_en: "MTBF"
+    name_ar: "متوسط الزمن بين الأعطال"
+    name_ar_state: draft
     grain: component_day   # 组件日
     aggregation: avg
     measure: "见 definition"
@@ -822,6 +975,9 @@ metrics:
   - code: M-S04
     domain: 系统运行
     name_zh: "复制延迟"
+    name_en: "Replication lag"
+    name_ar: "تأخر النسخ المتماثل"
+    name_ar_state: draft
     grain: source_day   # 数据源日
     aggregation: avg
     measure: "见 definition"
@@ -838,6 +994,9 @@ metrics:
   - code: M-S05
     domain: 系统运行
     name_zh: "查询时延分布"
+    name_en: "Query latency distribution"
+    name_ar: "توزيع زمن الاستعلام"
+    name_ar_state: draft
     grain: source_day   # 数据源日
     aggregation: avg
     measure: "见 definition"
@@ -854,6 +1013,9 @@ metrics:
   - code: M-S06
     domain: 系统运行
     name_zh: "水位延迟"
+    name_en: "Ingestion watermark lag"
+    name_ar: "تأخر استقبال البيانات"
+    name_ar_state: draft
     grain: source_day   # 数据源日
     aggregation: avg
     measure: "见 definition"
@@ -870,6 +1032,9 @@ metrics:
   - code: M-S07
     domain: 系统运行
     name_zh: "拉取成功率"
+    name_en: "Ingestion success rate"
+    name_ar: "نسبة نجاح استقبال البيانات"
+    name_ar_state: draft
     grain: source_day   # 数据源日
     aggregation: ratio
     measure: "见 definition"
@@ -886,6 +1051,9 @@ metrics:
   - code: M-S08
     domain: 系统运行
     name_zh: "隔离批次数"
+    name_en: "Quarantined batches"
+    name_ar: "الدفعات المعزولة"
+    name_ar_state: draft
     grain: source_day   # 数据源日
     aggregation: avg
     measure: "见 definition"
@@ -902,6 +1070,9 @@ metrics:
   - code: M-S09
     domain: 系统运行
     name_zh: "未映射值占比"
+    name_en: "Unmapped value share"
+    name_ar: "نسبة القيم غير المصنَّفة"
+    name_ar_state: draft
     grain: source_day   # 数据源日
     aggregation: avg
     measure: "见 definition"
@@ -918,6 +1089,9 @@ metrics:
   - code: M-S10
     domain: 系统运行
     name_zh: "对账差异率"
+    name_en: "Reconciliation variance rate"
+    name_ar: "نسبة فروقات المطابقة"
+    name_ar_state: draft
     grain: source_day   # 数据源日
     aggregation: ratio
     measure: "见 definition"
@@ -934,6 +1108,9 @@ metrics:
   - code: M-S11
     domain: 系统运行
     name_zh: "容量利用率"
+    name_en: "Capacity utilisation"
+    name_ar: "نسبة استخدام السعة"
+    name_ar_state: draft
     grain: component_day   # 组件日
     aggregation: ratio
     measure: "见 definition"
@@ -950,6 +1127,9 @@ metrics:
   - code: M-S12
     domain: 系统运行
     name_zh: "查询与导出次数"
+    name_en: "Queries and exports"
+    name_ar: "عدد الاستعلامات وعمليات التصدير"
+    name_ar_state: draft
     grain: source_day   # 数据源日
     aggregation: avg
     measure: "见 definition"
