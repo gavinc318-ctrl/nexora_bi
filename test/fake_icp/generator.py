@@ -126,6 +126,7 @@ def _minute_calls(seed: int, minute: int) -> list[Call]:
                                  b_wait_end, b_end, 0, 0, 0))
         calls.append(call)
     calls.extend(_minute_extra_calls(seed, minute, base))
+    calls.extend(_minute_repeat_calls(seed, minute, base))
     return calls
 
 
@@ -157,6 +158,28 @@ def _minute_extra_calls(seed: int, minute: int, base: datetime) -> list[Call]:
     ring_end = q_end + timedelta(seconds=rng.randint(15, 30))
     call.legs.append(Leg(DEVICE_AGENT, str(rng.choice(AGENT_IDS)), "DEVICE_AGENT", q_end, ring_end,
                          None, None, 0, 0, 0))
+    return [call]
+
+
+def _minute_repeat_calls(seed: int, minute: int, base: datetime) -> list[Call]:
+    """同一主叫当日反复打不通（2026-11-16 加，M-C15 要有数据可测）。
+
+    又一条随机流、CALLID 序号 92，不改动其他呼叫。每分钟 3% 的概率来一通：主叫取自当天（UTC 日）固定的 15 个号码，
+    IVR 后排队超时、系统释放（unanswered_system），所以同一号码一天里多次未接通。
+    """
+    rng = random.Random(f"{seed}:{minute}:repeat")
+    if rng.random() >= 0.03:
+        return []
+    pool = random.Random(f"{seed}:{base.date().isoformat()}:repeat-pool")
+    callers = ["05" + "".join(str(pool.randint(0, 9)) for _ in range(8)) for _ in range(15)]
+    t0 = base + timedelta(seconds=rng.randint(0, 59))
+    epoch_s = int((t0 - EPOCH).total_seconds())
+    call = Call(callid=f"{epoch_s}-92", callerno=rng.choice(callers), calltype=rng.choice(CALLTYPE_INBOUND),
+                release=RELEASE_SYSTEM)
+    ivr_end = t0 + timedelta(seconds=rng.randint(3, 25))
+    call.legs.append(Leg(DEVICE_IVR, IVR_ACCESS, IVR_ACCESS, t0, ivr_end, ivr_end, ivr_end, 0, 0, 0))
+    q_end = ivr_end + timedelta(seconds=rng.randint(60, 300))
+    call.legs.append(Leg(DEVICE_QUEUE, str(rng.choice(QUEUE_IDS)), "DEVICE_QUEUE", ivr_end, q_end, None, None, 2, 0, 0))
     return [call]
 
 

@@ -10,8 +10,9 @@
         closing: the open days whose data is final, in date order up to the first one that is not, are written as
         close_version 1 and their provisional rows deleted. Final = the day's re-sweep has reached core: every
         source day (in the source's time zone) the report day overlaps was re-swept by a successful run whose
-        batches were all consumed by fact_call_leg; source days before the first re-sweep ever made count as
-        final -- no re-sweep will come for them (item seven). A day is never closed past an open one: the first
+        batches were all consumed by fact_call_leg -- or discarded in quarantine: a person decided, no data will
+        come (Mac side 2026-11-16); a batch still pending holds the day. Source days before the first re-sweep ever
+        made count as final -- no re-sweep will come for them (item seven). A day is never closed past an open one: the first
         open day is "the day after the last closed one", so a gap would be skipped for good. Calls still
         incomplete then are not counted (they show in incomplete_calls)
         correction: each of the last 7 closed days is recomputed and compared with its latest version, row by
@@ -37,7 +38,10 @@
                (max(b.window_to)::timestamp - interval '1 day')::date                   as source_day,
                bool_and(exists (select 1 from meta.staging_batch_state s
                                  where s.model = 'fact_call_leg' and s.run_id = b.run_id
-                                   and s.batch_seq = b.batch_seq))                    as in_core
+                                   and s.batch_seq = b.batch_seq)
+                        or exists (select 1 from meta.quarantine_batch q
+                                    where q.run_id = b.run_id and q.batch_seq = b.batch_seq
+                                      and q.state = 'discarded'))                     as in_core
           from meta.ingest_batch b
           join meta.run_log r on r.run_id = b.run_id and r.outcome = 'success'
          where b.source_id = '{{ source_id }}' and b.mode = 'resweep'

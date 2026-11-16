@@ -62,3 +62,11 @@ tables:
       site: site_sk
       released_by: released_by
     required_dimensions: [released_by]   # day_calls 是当日合计，在每个挂断方的行上重复
+
+  mart.calls__day__repeat_failed:
+    grain: 日 × 站点
+    roles: [supervisor, admin]     # Mac 侧 2026-11-16
+    row_filter: none
+    dimensions:
+      date: date_key
+      site: site_sk

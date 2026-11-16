@@ -1,12 +1,16 @@
 """Print metrics/metrics.yaml and metrics/marts.yaml as one JSON object, for metric_sync.sql (DD-97 · DD-99 ·
 LD-03 chapter 5).
 
-Usage:  <venv-ingest>/bin/python metrics_to_json.py <metrics.yaml> <marts.yaml>
+Usage:  <venv-ingest>/bin/python metrics_to_json.py <metrics.yaml> <marts.yaml> <dbt_project.yml>
 
 46-metrics.yml runs this on the target, over the release directory's copy, with venv-ingest's PyYAML. It checks
 what the database cannot see from one row -- every field present and typed, codes unique, the mart mapping complete
 for its aggregation -- and computes definition_sha256 over the fields that define a metric (LD-03 chapter 6: a
 change to any of them is a change of definition). Whether the mart columns exist is checked in the database.
+
+A metric's param_vars maps a parameter to the dbt variable the mart model computes it with (M-C05: x_seconds ->
+service_level_seconds); the two must be equal in dbt_project.yml, or the mart column would not mean what the registry
+says (Mac side 2026-11-16). param_vars is how the value reaches the model, not part of the definition: not hashed.
 
 Output: {"metrics": [...], "marts": {table: {...}}}. marts.yaml (who may read a mart table, through which
 dimensions, which columns are sensitive) is checked for form here and every metric's mart_table must be declared in
@@ -33,7 +37,7 @@ COLUMN = re.compile(r"^[a-z][a-z0-9_]*$")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def convert(doc):
+def convert(doc, dbt_vars):
     problems, out, seen = [], [], set()
     metrics = doc.get("metrics") if isinstance(doc, dict) else None
     if not isinstance(metrics, list) or not metrics:
@@ -63,6 +67,20 @@ def convert(doc):
         params = m.get("params", {})
         if not isinstance(params, dict):
             problems.append(f"{where}: params must be a mapping")
+            params = {}
+        pv = m.get("param_vars", {})
+        if not isinstance(pv, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in pv.items()):
+            problems.append(f"{where}: param_vars must map parameters to dbt variable names")
+            pv = {}
+        for param, var in pv.items():
+            if param not in params:
+                problems.append(f"{where}: param_vars names {param}, which is not in params")
+            elif var not in dbt_vars:
+                problems.append(f"{where}: param_vars names dbt variable {var}, which dbt_project.yml does not define")
+            elif dbt_vars[var] != params[param]:
+                problems.append(f"{where}: params {param} is {params[param]!r} but dbt variable {var} is "
+                                f"{dbt_vars[var]!r}: the mart is computed with the dbt value. Make them equal (a new "
+                                f"value is a new metric version and a new mart column, DD-97)")
         for k in ("dimensions", "source_tables"):
             if not isinstance(m.get(k), list) or not all(isinstance(x, str) for x in m[k]):
                 problems.append(f"{where}: {k} must be a list of names")
@@ -162,14 +180,16 @@ def convert_marts(doc):
 
 
 def main(argv):
-    if len(argv) != 3:
-        print("usage: metrics_to_json.py <metrics.yaml> <marts.yaml>", file=sys.stderr)
+    if len(argv) != 4:
+        print("usage: metrics_to_json.py <metrics.yaml> <marts.yaml> <dbt_project.yml>", file=sys.stderr)
         return 1
     with open(argv[1], encoding="utf-8") as fh:
         doc = yaml.safe_load(fh)
     with open(argv[2], encoding="utf-8") as fh:
         marts_doc = yaml.safe_load(fh)
-    out, problems = convert(doc)
+    with open(argv[3], encoding="utf-8") as fh:
+        dbt_vars = (yaml.safe_load(fh) or {}).get("vars") or {}
+    out, problems = convert(doc, dbt_vars)
     marts, mart_problems = convert_marts(marts_doc)
     problems += mart_problems
     for m in out or []:

@@ -2032,3 +2032,21 @@ ERROR 级检查（监控批次接通道之前先让它红）。
 **其余知悉并同意**：注册表四处；dbt 25 分钟语句超时；marts.yaml 同步进 meta 只读表、服务层读库；first_leg_seq；检查范围。
 已记 DD-96 / DD-97 注、LD-03 第 5 章。第 7 步、第 9 步照排。
 
+
+## 2026-11-16  开发机：Mac 侧答复的四处已实现
+
+- **M-C05 参数与 dbt 变量核对**：做成通用的——metrics.yaml 每条指标可写 `param_vars`（参数 → dbt 变量），`metrics_to_json.py`
+  读发布目录里的 `dbt/dbt_project.yml` 逐项比，不等即 46 失败。`param_vars` 只说参数怎样到达模型，不进口径哈希。
+  M-C05：`x_seconds → service_level_seconds`；M-C15：`min_failed → repeat_min_failed`（新 dbt 变量，值 2）。
+- **M-C15**：新 mart `mart.calls__day__repeat_failed`（日 × 站点）：`repeat_callers`、`repeat_failed_calls`，M-C15 映射到后者。
+  metrics.yaml 的 M-C15：definition 写入自然日窗口与「未接通」的界定，params `{window: calendar_day, min_failed: 2}`，dimensions 去掉
+  dim_agent（主叫跨坐席，按坐席拆无意义），source_tables 只留 fact_call。上线前，46 报 `redefined`。marts.yaml：supervisor、admin。
+  开发机自定一处请知悉：**同一主叫按「日 × 站点」计**（一个号码同日在两个站点各失败一次不算重复）；每个有呼入的日 × 站点都出一行，
+  零也是值。另：**跨日相加的含义是「各日重复失败之和」**，不是「一周内失败 ≥ 2 次」——后者是另一个口径。
+- **被丢弃的回扫批次视同定稿**：`mart_final_days` 里「进了 core」= 被 fact_call_leg 登记，或在隔离里 discarded。待定仍挡住。
+- **封账落后告警**：新测试 `mart_closing_not_behind`（最新封账日早于今天 − 3 天，或从未封账），入 `maintenance_checks`，ERROR。
+- 假接口加一类「同一主叫当日反复打不通」（另一随机流、CALLID 序号 92，每分钟 3%，主叫取自当天固定的 15 个号码），已有呼叫不变。
+- 临时库：回扫两天后，nightly 给这两天写出修正版本（8 个主叫 20 通、12 个主叫 34 通），与直接查 core 一致；判定探测：批次未进 core 或待定 → 该日不封，
+  丢弃 → 封；造一张落后的表 → 告警 FAIL，删去 → PASS；46 同步 M-C15 `redefined | implemented`；dbt 变量改成 25 → 46 报错。
+
+另：一个源端日回扫多次时（补跑、手工重跑），**任一次**完整进了 core 即算定稿；之后的回扫带来的差异由封账后 7 天的修正吸收。

@@ -17,3 +17,6 @@ models:
   - name: calls__day__release
     description: "Day x site x who released the call: calls and the day's total (M-C11)."
     data_tests: [mart_matches_publication]
+  - name: calls__day__repeat_failed
+    description: "Day x site: callers with two or more failed inbound calls that day, and those calls (M-C15)."
+    data_tests: [mart_matches_publication]

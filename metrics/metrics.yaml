@@ -123,6 +123,7 @@ metrics:
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
     source_tables: [core.fact_call]
     params: {x_seconds: 20}             # DD-97 第三条：参数值记在注册表，默认 20 秒；MOI 定档后改此处
+    param_vars: {x_seconds: service_level_seconds}   # 46 核对与 dbt 变量相等（Mac 侧 2026-11-16）
     version: 1
     depends_unverified: false
     retrospective: false
@@ -328,15 +329,19 @@ metrics:
     name_ar_state: draft
     grain: call   # 通话
     aggregation: count
-    measure: "见 definition"
+    measure: "当日未接通 ≥ 2 次的主叫，其未接通呼叫数"
     entity_date: date_key
-    definition: "同一主叫在时间窗内未接通的呼叫次数"
-    dimensions: [dim_date, dim_site, dim_agent]
-    source_tables: [core.fact_call, core.fact_call_leg]
+    definition: "同一主叫在时间窗内未接通的呼叫次数。时间窗为自然日（利雅得时间，Gavin 2026-11-16 定）；未接通 = 结果为 abandoned 或 unanswered_system 的完整呼入通话；当日未接通 ≥ 2 次的主叫计入，主叫号码为空的不参与"
+    params: {window: calendar_day, min_failed: 2}
+    param_vars: {min_failed: repeat_min_failed}
+    dimensions: [dim_date, dim_site]
+    source_tables: [core.fact_call]
     version: 2
     depends_unverified: false
     retrospective: false
     published: true
+    mart_table: mart.calls__day__repeat_failed
+    mart_column: repeat_failed_calls
     rfp: "1.6.2.20"
     notes: "IR-11 已答，改为可交付。mart 内按 caller_number 分组、只输出计数不输出号码，不等 caller_number_hash（DD-96 第十条 · DD-92）。平台无对应指标，无对账基准；另须确认主叫号码是否按隐私策略做过掩码，掩码则分组键失效（IR-46）"
   - code: M-I01

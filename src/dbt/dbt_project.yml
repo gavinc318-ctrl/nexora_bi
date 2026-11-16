@@ -28,6 +28,7 @@ vars:
   site_code: MKK             # DD-91 item 2; dim_site's row is written by structural change 0006
   report_timezone: Asia/Riyadh   # date_key is the day in this zone; day cut 00:00 AST (LD-02 chapter 6, AS-12)
   service_level_seconds: 20  # M-C05's X (metrics.yaml params x_seconds); another X is a new metric version and column
+  repeat_min_failed: 2       # M-C15: failed calls a day that make a repeat caller (metrics.yaml params min_failed)
 
 models:
   oss911:

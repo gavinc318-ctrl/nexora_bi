@@ -32,7 +32,7 @@
       vars:
         rel_create: false
 
-    - name: Convert and check metrics.yaml and marts.yaml
+    - name: Convert and check metrics.yaml and marts.yaml (and the parameters against the dbt variables)
       ansible.builtin.command:
         argv:
           - "{{ ingest_venv }}/bin/python"
@@ -40,6 +40,7 @@
           - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/metrics_to_json.py') }}"
           - "{{ rel_dir }}/metrics/metrics.yaml"
           - "{{ rel_dir }}/metrics/marts.yaml"
+          - "{{ rel_dir }}/dbt/dbt_project.yml"
       register: _metrics
       changed_when: false
       failed_when: false
