@@ -53,14 +53,23 @@
                           and q.status in ('open', 'asked'))
 {%- endmacro %}
 
-{#- Post-hook: register the staging batches this run has taken into core. Exact because dbt runs one at a time
-    (pool dbt_build, one slot, DD-85): nothing writes staging between this model's read and this hook. -#}
+{#- Post-hook: register the staging batches this run has taken into core, and the staged batches that wrote no row
+    to raw (rows_written = 0: every row already there, as in most re-sweep batches -- macros/batches.sql). Without the
+    second, such a batch is never registered and its day never counts as re-swept into core, which stops mart
+    closing (macros/mart.sql). Exact because dbt runs one at a time (pool dbt_build, one slot, DD-85): nothing writes
+    staging between this model's read and this hook; and a batch without raw rows has nothing to take. -#}
 {% macro register_core_batches() -%}
     insert into meta.staging_batch_state (model, run_id, batch_seq)
-    select distinct '{{ this.identifier }}', s.run_id, s.batch_seq
-      from {{ ref('stg_icp_cdr_voice') }} s
+    select '{{ this.identifier }}', x.run_id, x.batch_seq
+      from (select distinct s.run_id, s.batch_seq from {{ ref('stg_icp_cdr_voice') }} s
+            union
+            select b.run_id, b.batch_seq
+              from meta.ingest_batch b
+              join meta.staging_batch_state t
+                on t.model = 'stg_icp_cdr_voice' and t.run_id = b.run_id and t.batch_seq = b.batch_seq
+             where b.source_id = 'icp_cdr_voice' and b.rows_written = 0) x
      where not exists (select 1 from meta.staging_batch_state r
-                        where r.model = '{{ this.identifier }}' and r.run_id = s.run_id and r.batch_seq = s.batch_seq)
+                        where r.model = '{{ this.identifier }}' and r.run_id = x.run_id and r.batch_seq = x.batch_seq)
 {%- endmacro %}
 
 {#- Pre-hook: monthly partitions for every day the new observations fall on (DD-77 · DD-91 item 11), so a backfill of

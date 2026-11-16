@@ -2000,3 +2000,20 @@ metrics.yaml 每个 mart_table 都在其中声明。服务层从哪里读它（�
    因此按表取（LD-04 3.3），请知悉。
 5. **M-C15（同一主叫失败次数）未实现**：「时间窗」未定义（同日？滑动 N 小时？），mart 无从按 caller_number 分组计数。请定窗口。
 6. **坐席姓名拆为 `agent_name_ar`、`agent_name_en` 两列**，均为敏感列；维度 `agent` 取工号 `agent_no`（跨 SCD 版本），`agent_key` 为版本或 unlinked。
+
+## 2026-11-16  开发机：回扫的「全重复」批次不登记，封账卡住——已修
+
+真机第一次 nightly 封了 10-19 至 10-28，停在 10-29。原因：10-29、10-31 回扫的第 2 批（23:45–24:00）收到 93、96 行，全部与 raw 已有行
+相同，去重后 `rows_written = 0`，raw 没有它的行；staging 的登记只认 `row_count = 0` 为空批次，于是它既不被 staging 也不被 fact_call_leg
+登记，那天永远不算「回扫已进 core」，封账按日序停住。临时库的回扫每批都恰有新行，所以没测出来。
+
+- `register_staged_batches`：空批次的判定改为 `rows_written = 0`（未去重前的 `row_count` 不再用）。参考数据快照不去重
+  （`rows_written` 恒等于 `row_count`），行为不变。
+- `register_core_batches`（fact_call_leg）：另登记 staging 已登记、`rows_written = 0` 的批次。
+- 新测试 `batches_reach_core`：满一天、可处理（非隔离待定、非丢弃）、却未被 fact_call_leg 登记的 CDR 批次，一批一行；不引用模型，构建不选它，
+  `maintenance_checks` 夜间跑。
+- 临时库：对已回扫的 11-14 再回扫一次，两批均 `rows_written = 0`，构建后两批都登记；删去一批旧登记 → 测试 FAIL 1，恢复后 PASS。
+- 已卡住的批次无需手工处理：部署后下一次构建自动登记。
+
+请 Mac 侧知悉：隔离待定（pending）的回扫批次会让该日及之后不封账，直到 M-03 放行或丢弃；被丢弃的回扫批次在封账判定里仍算「未进 core」，
+目前会一直挡住封账——是否应把「已丢弃」视为该源端日已定稿，请定（开发机倾向视为定稿：丢弃是人做的决定，不会再有数据来）。

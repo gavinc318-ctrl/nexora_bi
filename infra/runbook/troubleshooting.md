@@ -653,3 +653,25 @@ dbt/dbt_core_experimental_parser-2.0.5.tar.gz
 
   mart 的封账靠回扫判断（runbook 17），回扫补齐之前封账停在第一个没回扫的日子；补跑成功后的下一次 nightly 自动补上
 - **预防** —— 开发机上假接口须常驻（例如 tmux 里开着）；生产没有这个问题，真实 ICP 一直在
+
+### 现象：nightly 只封账到某一天就不往后封了，回扫那几天都是 `success`
+
+- **原因** —— 某天的回扫有一个批次一直没被 `fact_call_leg` 登记。回扫会把整天重抓一遍，绝大多数行和 raw 里已有的完全相同，
+  入库时去重不写；某个批次（常见是最后 15 分钟那批）如果全是重复行，它 `row_count > 0` 而 `rows_written = 0`，raw 里一行也没有。
+  2026-11-16 之前 staging 只把 `row_count = 0` 的批次当空批次登记，这种批次就永远不登记，它那天也就永远不算「回扫已进 core」，
+  而封账不跳天（runbook 17），后面的日子全停住（真机停在 10-29 之前）。已修：staging 与 fact_call_leg 都按 `rows_written = 0` 登记
+- **查** —— 回扫批次里没进 core 的：
+
+  ```bash
+  sudo -u postgres psql -d oss911 -P pager=off -c "
+  SELECT b.run_id, b.batch_seq, b.window_from, b.window_to, b.row_count, b.rows_written, q.state AS quarantine
+    FROM meta.ingest_batch b
+    LEFT JOIN meta.quarantine_batch q ON q.run_id = b.run_id AND q.batch_seq = b.batch_seq
+   WHERE b.source_id = 'icp_cdr_voice' AND b.mode = 'resweep'
+     AND NOT EXISTS (SELECT 1 FROM meta.staging_batch_state s WHERE s.model = 'fact_call_leg'
+                      AND s.run_id = b.run_id AND s.batch_seq = b.batch_seq)"
+  ```
+
+  `rows_written = 0`：部署修复后下一次构建自动登记，下一次 nightly 接着封。`quarantine = pending`：批次在隔离里等人处理（M-03），
+  这一天按设计不封，放行或丢弃之后才往后走
+- **预防** —— `maintenance_checks` 每晚跑 `batches_reach_core`：满一天还没进 `fact_call_leg` 的批次（隔离待定的除外）列出来，测试 FAIL

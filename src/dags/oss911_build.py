@@ -11,7 +11,8 @@ Like the ingestion DAGs, generated from the DAG manifest /opt/oss911/release/dag
                            core, audit and raw (DD-77). A missing partition makes every write for that month fail
   maintenance_checks       daily: the call-level consistency tests over every call (var full_check). The builds run
                            them over the calls of the last day only (macros/fact_call.sql, calls_to_check): over all
-                           calls their time grows with the data, and a build runs every few minutes
+                           calls their time grows with the data, and a build runs every few minutes. Also
+                           batches_reach_core: CDR batches older than a day that never reached core.fact_call_leg
   publish_marts_intraday   hourly: the days not closed yet, as provisional rows (close_version 0), and their tests
   publish_marts_nightly    daily: fact_call brought up to date with the legs, then the days whose re-sweep has reached
                            core are closed (close_version 1) and the last 7 closed days corrected where they changed
@@ -111,5 +112,5 @@ with DAG(dag_id="publish_marts_nightly", description="Close the final days of ma
 with DAG(dag_id="maintenance_checks", description="Call-level consistency tests over every call (full_check)",
          schedule="30 4 * * *", start_date=datetime(2026, 10, 1, tzinfo=UTC), catchup=False, max_active_runs=1,
          default_args=DEFAULT_ARGS, tags=["maintenance"]) as maintenance_checks:
-    _task("full_checks", "test --select fact_call_recomputes_from_legs fact_call_for_every_call "
+    _task("full_checks", "test --select fact_call_recomputes_from_legs fact_call_for_every_call batches_reach_core "
                          "--vars '{full_check: true}'")
