@@ -1839,3 +1839,33 @@ Mac 侧下一件：第 9 步 LD-04 API 契约。
   才能翻为 `confirmed`；确认由 M-10 的译名流程做（DD-56），不走发布。
 - 带粒度的名称保留括号里的粒度（按出警单 / 按派警单 / 按接警单），LD-03 2.3 要求报表标题写明粒度，不要为了简短删掉。
 
+## 2026-11-16  Mac 侧：第 9 步服务层最小集（DD-99 · LD-04 3.5 · LD-07 2.3 补充），开工清单
+
+前置：第 8 步第二段的 mart 四张表与注册表（46-metrics）先有，服务层读它们。新决策照旧列「需定」。
+
+**工程**
+1. `src/svc/`，Python + FastAPI，独立 `venv-svc`，lock 进仓库、离线安装（同 venv-ingest 的剧本做法）；psycopg 3。新依赖逐个登记组件清单与许可（FastAPI MIT、Starlette BSD、uvicorn BSD、pydantic MIT；JWT 校验库请选宽松许可的，登记前在 NOTES 报名字）。
+2. systemd 单元，监听 8090（8080 Keycloak、8081 Airflow）；配置 `/etc/oss911/svc.env`；库连接经 pgBouncer `oss911_txn`，登录用户属角色 `oss911_query_svc`（21 的 HBA 已为它留了规则，此时第一次真正用到——请实测它连 `oss911` 被拒）。
+3. SQL 全部参数化、两段式表名；`statement_timeout` 10s（会话或语句级，经事务池时用 `SET LOCAL`）。
+
+**接口**（`/v1`）
+4. `POST /query`：`metrics[]`、`dimensions[]`、`filters{维度: [成员]}`、`range{from, to}`（日期，左闭右开，Asia/Riyadh）、`granularity`（day/week/month/quarter/year，周日起周）、`version`（latest | as_closed | 整数）、`locale`（ar | en）。
+5. 多指标须同一 `mart_table`，否则 `incompatible_grain`。count/sum 取 `mart_column` 求和；ratio/avg 取分子分母列各自求和后相除，分母 0 → null。
+6. 版本：latest = 每日最大 close_version（含 0）；as_closed = 仅 1，未封账日列入 `meta.unclosed_dates`。
+7. 响应 `meta`：每指标 `metric_version`、`depends_unverified`；`data_as_of`、`publication_seq`、每日 `close_version`、`in_progress_calls`、`has_unlinked`、`empty_reason`（no_data | out_of_availability，3.4）。
+8. `GET /metrics`（注册表：名称按 locale、name_ar_state、版本、implemented、可用维度）；`GET /dimensions/{dim}/members`；`GET /me`。
+9. 上限 10000 行 → `result_too_large`（不截断）。
+
+**身份与权限**
+10. Keycloak OIDC：验签（JWKS 缓存）、`aud`、`exp`。开发机建 realm 客户端与四个角色、几名测试用户（剧本 22 之后的一步，口令不进仓库）。
+11. 角色取令牌；部门取令牌声明，无则 `meta.user_department_map`；映射不到 → 403 `department_unmapped` + 告警日志，**不返回空**。
+12. 语义层配置（建议 `metrics/marts.yaml`，随注册表同步）：每张 mart 表声明 `row_filter: none | department | self`、维度清单、敏感列。**未声明的 mart 表查询 API 不读。**
+13. 话务落地：`legs__day_agent__handling` 为 `self`——接警员只见令牌工号对应的坐席行；`agent_name` 为敏感列，仅 supervisor / admin。无权的维度或字段 → 整请求 403 `field_not_permitted`（带字段名），不静默去列。
+14. 每次请求写 `audit.access_log`（action = query，metric_codes、sensitive_fields 记字段名不记值、row_count、duration_ms、client_kind、request_digest）；写失败 → 请求 500，不放行。
+
+**不做 / 其他**
+15. 不接缓存后端；`cache_key()` 按 LD-04 3.3 实现并单测（含「不同部门不得同键」「发布序号变则键变」两条）。
+16. OpenAPI：由应用生成 `contracts/openapi/v1.json` 提交；部署步骤核对一致，不一致失败。
+17. 错误码：`metric_unknown`、`metric_not_implemented`、`dimension_invalid`、`incompatible_grain`、`department_unmapped`、`field_not_permitted`、`result_too_large`、`timeout`。
+18. 测试至少覆盖 LD-10 的 TC-DISC-02（主管与接警员返回列不同）与 TC-DISC-03（部门映射不到的行为），在话务数据上的对应版本。
+
