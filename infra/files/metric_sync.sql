@@ -2,8 +2,8 @@
 -- Metric sync: write metrics/metrics.yaml into meta.metric_registry (DD-97 · LD-03 chapters 5, 6)
 --
 -- Called by infra/playbooks/46-metrics.yml with psql -X -q -1 -v ON_ERROR_STOP=1 -v pre_production=<true|false>,
--- the script on stdin preceded by one line that sets oss911.metrics to the JSON array from metrics_to_json.py (as
--- a dollar-quoted literal: the array is too large for a command-line argument as metrics grow).
+-- the script on stdin preceded by one line that sets oss911.metrics to the JSON object from metrics_to_json.py
+-- ({metrics, marts}; as a dollar-quoted literal: it is too large for a command-line argument as metrics grow).
 -- One transaction (-1): any failure leaves the registry exactly as it was. Runs as the owner role, like a
 -- structural change: the registry is read-only for everyone else.
 --
@@ -46,7 +46,7 @@ DECLARE
     action   text;
     n        integer;
 BEGIN
-    FOR m IN SELECT jsonb_array_elements(current_setting('oss911.metrics')::jsonb) LOOP
+    FOR m IN SELECT jsonb_array_elements(current_setting('oss911.metrics')::jsonb -> 'metrics') LOOP
         ver := (m->>'version')::integer;
         SELECT * INTO cur FROM meta.metric_registry
          WHERE metric_code = m->>'code' ORDER BY metric_version DESC LIMIT 1 FOR UPDATE;
@@ -151,8 +151,32 @@ BEGIN
     END IF;
 END $$;
 
+-- Every table metrics/marts.yaml declares must exist in schema mart with the columns its rules name (dimensions,
+-- attributes, sensitive columns, the self column): the service layer reads them by those names (DD-99)
+DO $$
+DECLARE
+    bad text;
+BEGIN
+    SELECT string_agg(format('%s: %s', t.key, x.missing), '; ' ORDER BY t.key)
+      INTO bad
+      FROM jsonb_each(current_setting('oss911.metrics')::jsonb -> 'marts') t
+      CROSS JOIN LATERAL (
+          SELECT CASE WHEN to_regclass(t.key) IS NULL
+                      THEN 'table does not exist'
+                      ELSE (SELECT 'column(s) ' || string_agg(col, ', ') || ' missing'
+                              FROM jsonb_array_elements_text(t.value -> 'columns') col
+                             WHERE NOT EXISTS (SELECT 1 FROM pg_attribute a
+                                                WHERE a.attrelid = to_regclass(t.key)
+                                                  AND a.attname = col AND a.attnum > 0 AND NOT a.attisdropped))
+                 END AS missing) x
+     WHERE x.missing IS NOT NULL;
+    IF bad IS NOT NULL THEN
+        RAISE EXCEPTION 'metrics/marts.yaml names mart tables or columns that do not exist: %', bad;
+    END IF;
+END $$;
+
 SELECT code || '|' || action || '|' || version || '|' || implemented FROM metric_sync_result ORDER BY code;
 SELECT r.metric_code || '|not_in_release|' || max(r.metric_version) || '|'
   FROM meta.metric_registry r
- WHERE r.metric_code NOT IN (SELECT jsonb_array_elements(current_setting('oss911.metrics')::jsonb)->>'code')
+ WHERE r.metric_code NOT IN (SELECT jsonb_array_elements(current_setting('oss911.metrics')::jsonb -> 'metrics')->>'code')
  GROUP BY r.metric_code ORDER BY 1;

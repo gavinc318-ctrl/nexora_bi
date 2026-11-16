@@ -71,3 +71,5 @@ SELECT metric_code, metric_version, effective_from, aggregation, name_ar_state, 
 ```
 
 59 行；版本与 metrics.yaml 一致；`effective_from` 都是 `-infinity`；目前 implemented 全为 false（mart 在第 8 步第二段的下一批）。
+
+2026-11-16 之后：话务的 12 条已指向 mart（runbook 17），46 要在 mart 表第一次发布之后跑，顺序见 runbook 17「执行」。

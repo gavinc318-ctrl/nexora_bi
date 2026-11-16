@@ -1,4 +1,4 @@
-# 46-metrics -- sync metrics/metrics.yaml into meta.metric_registry
+# 46-metrics -- sync metrics/metrics.yaml into meta.metric_registry; check metrics/marts.yaml against the database
 #
 # Basis: DD-97 (2026-11-16 nine items) · DD-05 · LD-03 chapters 5, 6
 # Prerequisites: 40-schema (structural change 0012: the registry keyed by metric and version) ·
@@ -32,26 +32,29 @@
       vars:
         rel_create: false
 
-    - name: Convert and check metrics.yaml
+    - name: Convert and check metrics.yaml and marts.yaml
       ansible.builtin.command:
         argv:
           - "{{ ingest_venv }}/bin/python"
           - -c
           - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/metrics_to_json.py') }}"
           - "{{ rel_dir }}/metrics/metrics.yaml"
+          - "{{ rel_dir }}/metrics/marts.yaml"
       register: _metrics
       changed_when: false
       failed_when: false
       check_mode: false
 
-    - name: Assert metrics.yaml is valid
+    - name: Assert metrics.yaml and marts.yaml are valid
       ansible.builtin.assert:
         that:
           - _metrics.rc == 0
         fail_msg: |-
-          metrics/metrics.yaml has problems; nothing was synced:
+          metrics/metrics.yaml or metrics/marts.yaml has problems; nothing was synced:
           {{ _metrics.stderr }}
-        success_msg: "metrics.yaml: {{ (_metrics.stdout | from_json) | length }} metrics"
+        success_msg: >-
+          metrics.yaml: {{ (_metrics.stdout | from_json).metrics | length }} metrics;
+          marts.yaml: {{ (_metrics.stdout | from_json).marts | length }} mart tables
 
     # The JSON goes in on stdin, ahead of the script, as a dollar-quoted literal: as a psql -v argument it would hit
     # the kernel's limit on one argument (128 KiB) as metrics are added. metrics_to_json.py refuses text containing

@@ -1,0 +1,64 @@
+# =====================================================================
+# OSS911 BI/DW  语义层：mart 表的读取规则  marts.yaml
+#
+# 与 metrics.yaml 同为口径侧的权威（DD-99 · LD-04 3.5 · LD-07 2.3）：metrics.yaml 说「指标读哪张表的哪几列」，
+# 本文件说「这张表谁能读、按哪些维度读、哪些列敏感」。部署时 46-metrics 一并校验：表与列在库里存在；
+# metrics.yaml 里每个 mart_table 都在这里声明。**未在此声明的 mart 表，查询 API 不读。**
+#
+# 每张表：
+#   roles               能读这张表的角色（Keycloak 的四个：call_taker · dispatcher · supervisor · admin）；
+#                       其他角色查询 → 403 table_not_permitted（DD-99 更正第七条）
+#   row_filter          none · department · self。department 按用户部门过滤；self 只给本人的行，按 self_column
+#                       与令牌里的工号匹配（覆盖该坐席的全部维度版本，DD-99 更正第二条）。supervisor、admin 不受 self 限制
+#   self_column         row_filter 为 self 时必填
+#   dimensions          维度名 → 列。查询的 dimensions / filters 只能用这里的名字
+#   required_dimensions 查询必须把它作为输出维度（该表的分母按它的每个成员重复存放，不按它分组相加会重复计数）
+#   attributes          维度成员附带显示的列（成员接口 /dimensions/{dim}/members 一并返回）
+#   sensitive_columns   列 → 可见角色。无权者把它作维度、过滤或请求它 → 整请求 403 field_not_permitted，
+#                       不静默去列（DD-99）
+# =====================================================================
+version: 1
+tables:
+  mart.calls__day__volume:
+    grain: 日 × 站点
+    roles: [supervisor, admin]
+    row_filter: none
+    dimensions:
+      date: date_key
+      site: site_sk
+
+  mart.calls__day_queue__service:
+    grain: 日 × 站点 × 首队列
+    roles: [supervisor, admin]
+    row_filter: none
+    dimensions:
+      date: date_key
+      site: site_sk
+      queue: queue_key          # 已不在配置里的队列归 unlinked（DD-95），源端编码在 queue_code
+    attributes:
+      queue: [queue_code]
+
+  mart.legs__day_agent__handling:
+    grain: 日 × 站点 × 坐席
+    roles: [call_taker, supervisor, admin]
+    row_filter: self            # 接警员只见本人（DD-99 更正第七条）
+    self_column: agent_no
+    dimensions:
+      date: date_key
+      site: site_sk
+      agent: agent_no           # 按工号，跨坐席维度版本；已不在配置里的坐席 agent_key 为 unlinked
+    attributes:
+      agent: [agent_key, agent_name_ar, agent_name_en]
+    sensitive_columns:
+      agent_name_ar: [supervisor, admin]
+      agent_name_en: [supervisor, admin]
+
+  mart.calls__day__release:
+    grain: 日 × 站点 × 挂断方
+    roles: [supervisor, admin]
+    row_filter: none
+    dimensions:
+      date: date_key
+      site: site_sk
+      released_by: released_by
+    required_dimensions: [released_by]   # day_calls 是当日合计，在每个挂断方的行上重复

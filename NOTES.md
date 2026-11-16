@@ -1965,3 +1965,38 @@ fact_call 的 `built_at` 没有索引，构建档每次顺扫 fact_call 一遍�
 4. **阿语名确认后部署不覆盖**：库中 `name_ar_state = confirmed` 时 46 保留库中名称。M-10 写这两列的授权等 M-10 开工时加。
 
 **顺序约束**：46 校验 mart 列存在，故 mart 表须先于 46 建好；第二块（四张话务 mart）会给出「50 → 首次 mart 构建 → 46」的顺序。
+
+## 2026-11-16  开发机：第 8 步第二段第二、三块——四张话务 mart、按日发布、marts.yaml 已实现
+
+runbook 17。结构：每张 mart 表背后一个计算视图 `staging.mart_calc__<表>`（从 core 现算全部日子，服务层读不到 staging）；
+mart 模型（incremental append）只发布某些日子，宏 `macros/mart.sql`：
+- **intraday**（每小时 :15）：最近 7 天内未封账的日子整日重写为 close_version 0。
+- **nightly**（每日 04:00 UTC，先跑 fact_call 使其跟上腿）：回扫已进 core 的日子按日期顺序、不跳过地封为 1，删其 0 行；
+  最近 7 个已封账日重算、逐行比（EXCEPT ALL 双向），有差整日写 +1。「回扫已进 core」从库判断：该日（利雅得）覆盖的每个源端日
+  （契约 source_timezone，ICP 为 UTC）都有成功的回扫运行且其批次全被 fact_call_leg 消费；早于第一次回扫的源端日算定稿。
+  所以真机这半个月回扫失败（假接口夜里没开）只会推迟封账，补跑后的下一晚自动补上。
+- 每次写一张表 `data_publication` 一行（按种类），每写一天 `mart_day_publication` 一行，零行也登记；测试 `mart_matches_publication`
+  核对表与登记一致、已封账日无残留临时行。mart 目录 `full_refresh: false`。
+- 临时库：intraday 两次（第二次整日替换）；回扫 10-26 至 11-15 后 nightly 封 21 天、删去其临时行、11-16 保持临时；重跑 nightly 不产生发布；
+  改 core 一通电话 → 只有受影响的两张表出 v2，再改回 → v3，v1 行保留；删一行或复制一行已封账数据 → 测试 FAIL。
+
+**`fact_call_recomputes_from_legs` 再改**：临时库一次补进 16 万条腿后，新分区尚未被 autovacuum 分析，规划器当它为空，相关子查询对每列每通
+全表扫，9 分钟未完。改为窗口函数排名 + FILTER 聚合，一次哈希连接，不依赖统计信息：7.6 万通 3 秒，仍能抓出差异。真机月初或大批补数后同样会遇到，
+故一并上线。
+
+**marts.yaml**（DD-99 更正第七条的落地）：每张表的 roles、row_filter（none · department · self）、self_column、dimensions（维度名 → 列）、
+required_dimensions、attributes（成员附带列）、sensitive_columns（列 → 可见角色）。46 一并校验：格式、表与列在库里存在、
+metrics.yaml 每个 mart_table 都在其中声明。服务层从哪里读它（发布目录还是同步进 meta）第 9 步再定，开发机倾向同步进 meta 一张只读表。
+
+**metrics.yaml**：12 条加了映射（M-C01–07、M-C09–13）；M-C08、M-C14 未发布，M-C15 未实现（见下第 5 条）。
+
+开发机自定、请 Mac 侧知悉或定的六处：
+1. **volume 表的粒度是「日 × 站点」，结果与方向展开为列**，不是 LD-03 第 5 章写的「日 × 方向 × 结果」：比率要在同一行的两列之间算
+   （DD-97 第三条），应答 / 呼入必须并排。M-C01 的「CALLTYPE 属呼入集合」体现在列上（只数 inbound），非呼入另列 `non_inbound_calls` 供对账。
+2. **M-C05 的分母取排队的通话**（`queued_calls`，含放弃），分子为等待 ≤ X 秒且应答的；定义原文只写「等待不超过 X 秒即被应答的比例」，
+   分母未写。若应取「已应答」或「呈现」，请定。X 来自 dbt 变量 `service_level_seconds: 20`，与 metrics.yaml 的 params 同值，暂未做自动核对。
+3. **`incomplete_calls` 在已封账行也有值**：即封账时仍未完整的通话数（不计入呼入），是数据质量信号，而不是只在临时行有值。
+4. **每张表一次发布一个序号**：一次 DAG 运行写四张表即四个 `publication_seq`（按种类再分），不是全 mart 共用一个。缓存键用到的「发布序号」
+   因此按表取（LD-04 3.3），请知悉。
+5. **M-C15（同一主叫失败次数）未实现**：「时间窗」未定义（同日？滑动 N 小时？），mart 无从按 caller_number 分组计数。请定窗口。
+6. **坐席姓名拆为 `agent_name_ar`、`agent_name_en` 两列**，均为敏感列；维度 `agent` 取工号 `agent_no`（跨 SCD 版本），`agent_key` 为版本或 unlinked。

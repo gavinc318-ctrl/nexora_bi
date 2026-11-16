@@ -27,6 +27,7 @@ on-run-start:
 vars:
   site_code: MKK             # DD-91 item 2; dim_site's row is written by structural change 0006
   report_timezone: Asia/Riyadh   # date_key is the day in this zone; day cut 00:00 AST (LD-02 chapter 6, AS-12)
+  service_level_seconds: 20  # M-C05's X (metrics.yaml params x_seconds); another X is a new metric version and column
 
 models:
   oss911:
@@ -38,3 +39,10 @@ models:
     meta:
       +schema: meta
       +full_refresh: false   # meta.reference_value is created by the structural changes, like core (DD-94 item eleven)
+    mart:
+      +schema: mart
+      # Closed versions are history the reports were served from (DD-81): dbt may never drop or rebuild a mart table
+      +full_refresh: false
+      calc:
+        +schema: staging       # the inputs of the mart tables, views over core; not readable by the service layer
+        +materialized: view

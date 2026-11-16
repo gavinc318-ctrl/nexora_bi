@@ -15,6 +15,9 @@
 #   date_key        发生类——当日派单量、当日出动量，封账即完整
 #   closed_date_key 结案类——当日结案数、处置时长，按 CAD 上手动关闭的日期归属
 #
+# mart 映射（DD-97）：mart_table 指向实现表（规则见 marts.yaml）；count / sum 写 mart_column，ratio / avg 写
+# mart_numerator 与 mart_denominator（服务层两列各自求和后相除）。未写 mart_table 的指标为「未实现」。
+#
 # 名称：name_en 定稿，改名不算口径变更（LD-03 第 6 章）；name_ar 的 name_ar_state 为 draft 时
 # 照常显示、M-04 标「待确认」，确认经 M-10 译名流程（DD-56），不走发布。
 # =====================================================================
@@ -38,6 +41,8 @@ metrics:
     depends_unverified: false
     retrospective: false
     published: true
+    mart_table: mart.calls__day__volume
+    mart_column: offered_calls
     rfp: "1.6.2.20"
     notes: "口径已明确：话单保留 IVR 腿，故含不含未排队呼叫可分可合，本版含。来源与对账基准见 metrics/icp_source_map.yaml"
   - code: M-C02
@@ -57,6 +62,8 @@ metrics:
     depends_unverified: false
     retrospective: false
     published: true
+    mart_table: mart.calls__day__volume
+    mart_column: answered_calls
     rfp: "1.6.2.20"
     notes: "自算规则与对账基准见 metrics/icp_source_map.yaml"
   - code: M-C03
@@ -76,6 +83,8 @@ metrics:
     depends_unverified: false
     retrospective: false
     published: true
+    mart_table: mart.calls__day__volume
+    mart_column: abandoned_calls
     rfp: "1.6.2.20"
     notes: "与未接的区别已写明：未接是呈现到坐席而未应答（M-C12），放弃是在队列上由主叫挂断。平台把主叫挂断与呼损分开计，对账时不可混用——见 metrics/icp_source_map.yaml"
   - code: M-C04
@@ -95,6 +104,9 @@ metrics:
     depends_unverified: false
     retrospective: false
     published: true
+    mart_table: mart.calls__day__volume
+    mart_numerator: answered_calls
+    mart_denominator: offered_calls
     rfp: "1.6.2.20"
     notes: "对账基准 IDX_01_02_003 与 IDX_03_05_001，见 metrics/icp_source_map.yaml"
   - code: M-C05
@@ -115,6 +127,9 @@ metrics:
     depends_unverified: false
     retrospective: false
     published: true
+    mart_table: mart.calls__day_queue__service
+    mart_numerator: answered_within_x
+    mart_denominator: queued_calls
     rfp: "1.6.2.20"
     notes: "X 的取值待 MOI 确认。平台只有 5 秒步长、5 至 50 秒的固定档位，X 若不落在档位上则失去对账基准，定档时应优先取平台档位"
   - code: M-C06
@@ -134,6 +149,9 @@ metrics:
     depends_unverified: false
     retrospective: false
     published: true
+    mart_table: mart.calls__day_queue__service
+    mart_numerator: wait_seconds_sum
+    mart_denominator: queued_calls
     rfp: "1.6.2.20"
     notes: "不取整通呼叫的首末时间差。对账时另算「仅已应答」的一份与 IDX_03_06_003 比（DD-96）。平台把已应答呼叫的等待与全部排队呼叫的等待分列，对账前须声明算的是哪一个——见 metrics/icp_source_map.yaml"
   - code: M-C07
@@ -153,6 +171,9 @@ metrics:
     depends_unverified: false
     retrospective: false
     published: true
+    mart_table: mart.legs__day_agent__handling
+    mart_numerator: talk_seconds_sum
+    mart_denominator: answered_legs
     rfp: "1.6.2.20"
     notes: "见 metrics/icp_source_map.yaml"
   - code: M-C08
@@ -191,6 +212,8 @@ metrics:
     depends_unverified: false
     retrospective: false
     published: true
+    mart_table: mart.legs__day_agent__handling
+    mart_column: presented_legs
     rfp: "1.6.2.20"
     notes: "IR-11 已答，改为可交付。自算规则见 metrics/icp_source_map.yaml"
   - code: M-C10
@@ -210,6 +233,8 @@ metrics:
     depends_unverified: false
     retrospective: false
     published: true
+    mart_table: mart.legs__day_agent__handling
+    mart_column: answered_legs
     rfp: "1.6.2.20"
     notes: "IR-11 已答，改为可交付。自算规则见 metrics/icp_source_map.yaml"
   - code: M-C11
@@ -229,6 +254,9 @@ metrics:
     depends_unverified: true            # RELEASECAUSE 归类为 mapped_unverified（DD-06 · LD-03，Mac 侧 2026-10-27）
     retrospective: false
     published: true
+    mart_table: mart.calls__day__release
+    mart_numerator: calls
+    mart_denominator: day_calls
     rfp: "1.6.2.20"
     notes: "IR-11 已答，改为可交付。释放原因码归类表须在联调时用真实数据核对一遍，不能只按文档归类——见 metrics/icp_source_map.yaml"
   - code: M-C12
@@ -248,6 +276,8 @@ metrics:
     depends_unverified: false
     retrospective: false
     published: true
+    mart_table: mart.legs__day_agent__handling
+    mart_column: missed_legs
     rfp: "1.6.2.20"
     notes: "IR-11 已答，改为可交付。自算规则见 metrics/icp_source_map.yaml"
   - code: M-C13
@@ -267,6 +297,8 @@ metrics:
     depends_unverified: true            # UCENTERREASON 为 mapped_unverified（DD-06 · LD-03，Mac 侧 2026-10-27）
     retrospective: false
     published: true
+    mart_table: mart.calls__day__volume
+    mart_column: transferred_calls
     rfp: "1.6.2.20"
     notes: "IR-11 已答，改为可交付。平台区分内部转接、转出与排队超时转移三类，对账时须加总并注意超时转移未必算坐席转接——见 metrics/icp_source_map.yaml"
   - code: M-C14

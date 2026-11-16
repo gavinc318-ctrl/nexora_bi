@@ -1,13 +1,16 @@
-"""Print metrics/metrics.yaml as one JSON array, for metric_sync.sql (DD-97 · LD-03 chapter 5).
+"""Print metrics/metrics.yaml and metrics/marts.yaml as one JSON object, for metric_sync.sql (DD-97 · DD-99 ·
+LD-03 chapter 5).
 
-Usage:  <venv-ingest>/bin/python metrics_to_json.py <metrics.yaml>
+Usage:  <venv-ingest>/bin/python metrics_to_json.py <metrics.yaml> <marts.yaml>
 
 46-metrics.yml runs this on the target, over the release directory's copy, with venv-ingest's PyYAML. It checks
 what the database cannot see from one row -- every field present and typed, codes unique, the mart mapping complete
 for its aggregation -- and computes definition_sha256 over the fields that define a metric (LD-03 chapter 6: a
 change to any of them is a change of definition). Whether the mart columns exist is checked in the database.
 
-Each element: {code, version, domain, name_zh, name_en, name_ar, name_ar_state, definition, grain, aggregation,
+Output: {"metrics": [...], "marts": {table: {...}}}. marts.yaml (who may read a mart table, through which
+dimensions, which columns are sensitive) is checked for form here and every metric's mart_table must be declared in
+it; its columns are checked in the database. Each metric: {code, version, domain, name_zh, name_en, name_ar, name_ar_state, definition, grain, aggregation,
 measure, entity_date, retrospective, params, dimensions, source_tables, depends_unverified, published,
 mart_table, mart_column, mart_numerator, mart_denominator, effective_from, definition_sha256}.
 Exit code 0 with JSON on stdout; 1 with every problem found on stderr.
@@ -107,17 +110,75 @@ def convert(doc):
     return out, problems
 
 
+ROLES = {"call_taker", "dispatcher", "supervisor", "admin"}
+ROW_FILTERS = {"none", "department", "self"}
+
+
+def convert_marts(doc):
+    """Check marts.yaml's form; return ({table: rules}, problems)."""
+    problems = []
+    tables = doc.get("tables") if isinstance(doc, dict) else None
+    if not isinstance(tables, dict) or not tables:
+        return {}, ["marts.yaml: 'tables' must be a non-empty mapping"]
+    out = {}
+    for name, t in tables.items():
+        where = f"marts.yaml {name}"
+        if not (isinstance(name, str) and MART_TABLE.match(name)) or not isinstance(t, dict):
+            problems.append(f"{where}: must be mart.<name> with a mapping of rules")
+            continue
+        roles = t.get("roles")
+        if not isinstance(roles, list) or not roles or not set(roles) <= ROLES:
+            problems.append(f"{where}: roles must be a non-empty list of {sorted(ROLES)}")
+        rf = t.get("row_filter")
+        if rf not in ROW_FILTERS:
+            problems.append(f"{where}: row_filter must be one of {sorted(ROW_FILTERS)}")
+        if (rf == "self") != ("self_column" in t):
+            problems.append(f"{where}: self_column is given exactly when row_filter is self")
+        dims = t.get("dimensions")
+        if not isinstance(dims, dict) or not dims or not all(
+                isinstance(k, str) and COLUMN.match(k) and isinstance(v, str) and COLUMN.match(v)
+                for k, v in dims.items()):
+            problems.append(f"{where}: dimensions must map names to columns")
+            dims = {}
+        if not set(t.get("required_dimensions", [])) <= set(dims):
+            problems.append(f"{where}: required_dimensions must be dimensions of the table")
+        attrs = t.get("attributes", {})
+        if not isinstance(attrs, dict) or not set(attrs) <= set(dims) or not all(
+                isinstance(v, list) and all(isinstance(c, str) and COLUMN.match(c) for c in v) for v in attrs.values()):
+            problems.append(f"{where}: attributes must map dimensions to lists of columns")
+            attrs = {}
+        sens = t.get("sensitive_columns", {})
+        if not isinstance(sens, dict) or not all(
+                isinstance(c, str) and COLUMN.match(c) and isinstance(r, list) and set(r) <= ROLES
+                for c, r in sens.items()):
+            problems.append(f"{where}: sensitive_columns must map columns to lists of roles")
+            sens = {}
+        columns = sorted(set(dims.values()) | {c for v in attrs.values() for c in v} | set(sens)
+                         | ({t["self_column"]} if isinstance(t.get("self_column"), str) else set()))
+        out[name] = {"roles": roles, "row_filter": rf, "self_column": t.get("self_column"),
+                     "dimensions": dims, "required_dimensions": t.get("required_dimensions", []),
+                     "attributes": attrs, "sensitive_columns": sens, "columns": columns}
+    return out, problems
+
+
 def main(argv):
-    if len(argv) != 2:
-        print("usage: metrics_to_json.py <metrics.yaml>", file=sys.stderr)
+    if len(argv) != 3:
+        print("usage: metrics_to_json.py <metrics.yaml> <marts.yaml>", file=sys.stderr)
         return 1
     with open(argv[1], encoding="utf-8") as fh:
         doc = yaml.safe_load(fh)
+    with open(argv[2], encoding="utf-8") as fh:
+        marts_doc = yaml.safe_load(fh)
     out, problems = convert(doc)
+    marts, mart_problems = convert_marts(marts_doc)
+    problems += mart_problems
+    for m in out or []:
+        if m["mart_table"] is not None and m["mart_table"] not in marts:
+            problems.append(f"{m['code']}: mart_table {m['mart_table']} is not declared in marts.yaml")
     if problems:
         print("\n".join(problems), file=sys.stderr)
         return 1
-    text = json.dumps(out, ensure_ascii=False)
+    text = json.dumps({"metrics": out, "marts": marts}, ensure_ascii=False)
     if "$metrics_json$" in text:      # the dollar-quote tag 46-metrics wraps the array in
         print("a metric's text contains $metrics_json$", file=sys.stderr)
         return 1

@@ -185,4 +185,4 @@
         {{ (_manifest.content | b64decode | from_json).sources | map(attribute='source_id') | map('regex_replace', '^', 'ingest_') | list
            + (_manifest.content | b64decode | from_json).sources | selectattr('resweep') | map(attribute='source_id')
              | map('regex_replace', '^', 'resweep_') | list
-           + ['maintenance_partitions', 'maintenance_checks'] }}
+           + ['maintenance_partitions', 'maintenance_checks', 'publish_marts_intraday', 'publish_marts_nightly'] }}

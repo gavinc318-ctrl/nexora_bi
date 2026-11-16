@@ -54,7 +54,9 @@
                _repo ~ '/src/dbt/*.yml', _repo ~ '/src/dbt/macros/*.sql', _repo ~ '/src/dbt/tests/*.sql',
                _repo ~ '/src/dbt/models/staging/*.sql', _repo ~ '/src/dbt/models/staging/*.yml',
                _repo ~ '/src/dbt/models/core/*.sql', _repo ~ '/src/dbt/models/core/*.yml',
-               _repo ~ '/src/dbt/models/meta/*.sql') | sort }}
+               _repo ~ '/src/dbt/models/meta/*.sql',
+               _repo ~ '/src/dbt/models/mart/*.sql', _repo ~ '/src/dbt/models/mart/*.yml',
+               _repo ~ '/src/dbt/models/mart/calc/*.sql') | sort }}
 
 # fileglob cannot be told "everything under src/dbt"; this check can. A file the list above misses fails the
 # deployment instead of silently leaving a model out of the release

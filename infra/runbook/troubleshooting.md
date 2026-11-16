@@ -640,3 +640,16 @@ dbt/dbt_core_experimental_parser-2.0.5.tar.gz
   （2026-11-16 新增 `maintenance_checks` 时）。DAG 本身没问题：赢的那一方已经把它写进去了
 - **处置** —— 重跑 50。第二遍行已存在，reserialize 只做更新
 - **预防** —— 该任务失败自动重试两次（间隔 5 秒），同一情况第一次重试就过
+
+### 现象：`resweep_icp_cdr_voice` 每天都失败，日志是 `POST /cmsgateway/resource/userauth/auth: [Errno 111] Connection refused`
+
+- **原因** —— 回扫在每天 02:00（源端时区）运行，那时假 ICP 接口没开：它在某个终端里手工启动，终端关了或机器重启就停了。
+  白天的增量不受影响（开着假接口时从上次的位置接着取），所以只有回扫一天天失败（2026-11-02 至 11-16 发现）
+- **处置** —— 假接口开着时，把失败的回扫清掉重跑，它们按日期依次排队，每次几秒：
+
+  ```bash
+  sudo -u airflow bash -c "set -a; . /etc/oss911/airflow.env; set +a; /opt/oss911/venv-airflow/bin/airflow tasks clear resweep_icp_cdr_voice -s <第一个失败的日期> -e <今天> --only-failed -y"
+  ```
+
+  mart 的封账靠回扫判断（runbook 17），回扫补齐之前封账停在第一个没回扫的日子；补跑成功后的下一次 nightly 自动补上
+- **预防** —— 开发机上假接口须常驻（例如 tmux 里开着）；生产没有这个问题，真实 ICP 一直在

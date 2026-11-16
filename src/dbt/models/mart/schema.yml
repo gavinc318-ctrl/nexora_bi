@@ -1,0 +1,19 @@
+version: 2
+
+# The mart tables (DD-97 · LD-03 chapter 5, 2026-10-30 supplement). Who may read them, through which dimensions and
+# which columns are sensitive is in metrics/marts.yaml (DD-99); which metric reads which column in metrics.yaml.
+# Every table is checked against its publication record.
+
+models:
+  - name: calls__day__volume
+    description: "Day x site: complete inbound calls by result (M-C01 to M-C04, M-C13), incomplete and non-inbound counts."
+    data_tests: [mart_matches_publication]
+  - name: calls__day_queue__service
+    description: "Day x site x first queue: queued, answered, answered within X, abandoned, wait total (M-C05, M-C06)."
+    data_tests: [mart_matches_publication]
+  - name: legs__day_agent__handling
+    description: "Day x site x agent: presented, answered and missed agent legs, talk total (M-C07, M-C09, M-C10, M-C12)."
+    data_tests: [mart_matches_publication]
+  - name: calls__day__release
+    description: "Day x site x who released the call: calls and the day's total (M-C11)."
+    data_tests: [mart_matches_publication]

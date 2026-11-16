@@ -12,6 +12,11 @@ Like the ingestion DAGs, generated from the DAG manifest /opt/oss911/release/dag
   maintenance_checks       daily: the call-level consistency tests over every call (var full_check). The builds run
                            them over the calls of the last day only (macros/fact_call.sql, calls_to_check): over all
                            calls their time grows with the data, and a build runs every few minutes
+  publish_marts_intraday   hourly: the days not closed yet, as provisional rows (close_version 0), and their tests
+  publish_marts_nightly    daily: fact_call brought up to date with the legs, then the days whose re-sweep has reached
+                           core are closed (close_version 1) and the last 7 closed days corrected where they changed
+                           (macros/mart.sql · DD-97 items six to nine). A day whose re-sweep is late is simply closed
+                           by a later night: whether a day is final is read from the database, not from the clock
 
 All of them use the pool dbt_build (one slot for the whole cluster, DD-85): dbt invocations never overlap, which the
 core models rely on (macros/fact_call_leg.sql, register_core_batches) and which keeps dbt's threads within the
@@ -89,9 +94,22 @@ with DAG(dag_id="maintenance_partitions", description="Monthly partitions for th
          default_args=DEFAULT_ARGS, tags=["maintenance"]) as maintenance_partitions:
     _task("ensure_partitions", "run-operation ensure_partitions_ahead --args '{months: 3}'")
 
-# 03:30 Asia/Riyadh: after the source's 02:00 resweep and its builds
+# Mart publication (macros/mart.sql). Nightly at 04:00 UTC: after the 02:00 re-sweep of a source in UTC (the fake
+# ICP) and 01:00 for one in Asia/Riyadh, with the builds every few minutes in between; a re-sweep not yet in core
+# only delays that day's closing to the next night
+with DAG(dag_id="publish_marts_intraday", description="Provisional mart rows of the days not closed yet (hourly)",
+         schedule="15 * * * *", start_date=datetime(2026, 10, 1, tzinfo=UTC), catchup=False, max_active_runs=1,
+         default_args=DEFAULT_ARGS, tags=["publish"]) as publish_marts_intraday:
+    _task("publish", "build --select mart --vars '{mart_kind: intraday}'")
+
+with DAG(dag_id="publish_marts_nightly", description="Close the final days of mart, correct the last 7 closed days",
+         schedule="0 4 * * *", start_date=datetime(2026, 10, 1, tzinfo=UTC), catchup=False, max_active_runs=1,
+         default_args=DEFAULT_ARGS, tags=["publish"]) as publish_marts_nightly:
+    _task("publish", "build --select fact_call mart --vars '{mart_kind: nightly}'")
+
+# After the nightly publication
 with DAG(dag_id="maintenance_checks", description="Call-level consistency tests over every call (full_check)",
-         schedule="30 0 * * *", start_date=datetime(2026, 10, 1, tzinfo=UTC), catchup=False, max_active_runs=1,
+         schedule="30 4 * * *", start_date=datetime(2026, 10, 1, tzinfo=UTC), catchup=False, max_active_runs=1,
          default_args=DEFAULT_ARGS, tags=["maintenance"]) as maintenance_checks:
     _task("full_checks", "test --select fact_call_recomputes_from_legs fact_call_for_every_call "
                          "--vars '{full_check: true}'")
