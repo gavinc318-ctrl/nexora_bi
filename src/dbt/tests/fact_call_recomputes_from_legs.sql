@@ -1,29 +1,30 @@
 -- Every derived column of core.fact_call recomputed from its legs another way -- one correlated subquery per column,
 -- not the model's aggregation -- and compared (DD-66 table comment: each column must be recomputable from the legs;
 -- DD-96 · LD-03 2.4). One row per call that differs, with both versions.
-with l as (
-    select x.*, case when x.leg_seq = -1 then 2147483647 else x.leg_seq end as leg_order
-      from {{ ref('fact_call_leg') }} x
-),
-r as (
+{%- set legs = ref('fact_call_leg') -%}
+{%- set leg_order = "case when l.leg_seq = -1 then 2147483647 else l.leg_seq end" -%}
+-- Each subquery reads the leg table itself, so it uses the index on call_sk (ix_leg_parent). A shared CTE of the legs
+-- would be materialized (it is referenced many times) and scanned in full by every subquery for every call: hours on
+-- the real machine's data (2026-11-16).
+with r as (
     select c.call_sk,
-           (select count(*) from l where l.call_sk = c.call_sk)                                          as leg_count,
-           exists (select 1 from l where l.call_sk = c.call_sk and l.leg_seq = -1)                       as is_complete,
-           (select l.leg_seq from l where l.call_sk = c.call_sk order by l.leg_order limit 1)             as first_leg_seq,
-           (select l.wait_begin from l where l.call_sk = c.call_sk order by l.leg_order limit 1)          as offered_at,
-           (select l.call_type_code from l where l.call_sk = c.call_sk order by l.leg_order limit 1)      as call_type_code,
-           (select l.direction from l where l.call_sk = c.call_sk order by l.leg_order limit 1)           as direction,
-           (select min(l.call_begin) from l where l.call_sk = c.call_sk and l.device_type_code = 2)       as answered_at,
-           (select l.agent_sk from l where l.call_sk = c.call_sk and l.device_type_code = 2 and l.call_begin is not null
-             order by l.call_begin, l.leg_order limit 1)                                                 as agent_sk,
-           (select l.queue_code from l where l.call_sk = c.call_sk and l.device_type_code = 1
-             order by l.wait_begin, l.leg_order limit 1)                                                 as first_queue_code,
-           (select coalesce(l.call_end, l.wait_end) from l where l.call_sk = c.call_sk and l.leg_seq = -1) as ended_at,
-           (select l.release_source from l where l.call_sk = c.call_sk and l.leg_seq = -1)                as released_by,
-           (select sum(l.wait_seconds) from l where l.call_sk = c.call_sk and l.device_type_code = 1)     as wait_seconds,
-           (select sum(l.talk_seconds) from l where l.call_sk = c.call_sk and l.device_type_code = 2)     as talk_seconds,
-           (select count(*) from l where l.call_sk = c.call_sk and l.device_type_code = 2)                as agent_leg_count,
-           (select count(*) from l where l.call_sk = c.call_sk and l.device_type_code = 2
+           (select count(*) from {{ legs }} l where l.call_sk = c.call_sk)                                          as leg_count,
+           exists (select 1 from {{ legs }} l where l.call_sk = c.call_sk and l.leg_seq = -1)                       as is_complete,
+           (select l.leg_seq from {{ legs }} l where l.call_sk = c.call_sk order by {{ leg_order }} limit 1)             as first_leg_seq,
+           (select l.wait_begin from {{ legs }} l where l.call_sk = c.call_sk order by {{ leg_order }} limit 1)          as offered_at,
+           (select l.call_type_code from {{ legs }} l where l.call_sk = c.call_sk order by {{ leg_order }} limit 1)      as call_type_code,
+           (select l.direction from {{ legs }} l where l.call_sk = c.call_sk order by {{ leg_order }} limit 1)           as direction,
+           (select min(l.call_begin) from {{ legs }} l where l.call_sk = c.call_sk and l.device_type_code = 2)       as answered_at,
+           (select l.agent_sk from {{ legs }} l where l.call_sk = c.call_sk and l.device_type_code = 2 and l.call_begin is not null
+             order by l.call_begin, {{ leg_order }} limit 1)                                                 as agent_sk,
+           (select l.queue_code from {{ legs }} l where l.call_sk = c.call_sk and l.device_type_code = 1
+             order by l.wait_begin, {{ leg_order }} limit 1)                                                 as first_queue_code,
+           (select coalesce(l.call_end, l.wait_end) from {{ legs }} l where l.call_sk = c.call_sk and l.leg_seq = -1) as ended_at,
+           (select l.release_source from {{ legs }} l where l.call_sk = c.call_sk and l.leg_seq = -1)                as released_by,
+           (select sum(l.wait_seconds) from {{ legs }} l where l.call_sk = c.call_sk and l.device_type_code = 1)     as wait_seconds,
+           (select sum(l.talk_seconds) from {{ legs }} l where l.call_sk = c.call_sk and l.device_type_code = 2)     as talk_seconds,
+           (select count(*) from {{ legs }} l where l.call_sk = c.call_sk and l.device_type_code = 2)                as agent_leg_count,
+           (select count(*) from {{ legs }} l where l.call_sk = c.call_sk and l.device_type_code = 2
                and l.call_begin is not null)                                                              as answered_leg_count
       from {{ ref('fact_call') }} c
 ),

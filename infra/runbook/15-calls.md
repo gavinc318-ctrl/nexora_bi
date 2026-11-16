@@ -67,6 +67,20 @@ ansible-playbook playbooks/50-dags.yml      -e ansible_connection=local -K
 0011 清空 `fact_call`（按 0010 规则建的行：缺 1 号腿的通话没有行，只有队列腿、系统释放的通话被记成 `ivr_only`），
 加 `first_leg_seq` 列。表空了，下一次构建就按新规则把全部通话重建。命令同上（40 → 45 → 50，中间不停）。
 
+**先暂停两个构建 DAG，并确认没有 dbt 会话还在跑**：TRUNCATE 要等所有读写 fact_call 的会话结束。Airflow 的任务超时（30 分钟）
+只杀 dbt 进程，库里的查询会继续跑，所以 Airflow 里看不到任务，库里也可能还有 dbt 会话。
+
+```bash
+for d in build_icp_cdr_voice build_icp_reference; do
+  sudo -u airflow bash -c "set -a; . /etc/oss911/airflow.env; set +a; /opt/oss911/venv-airflow/bin/airflow dags pause $d"
+done
+sudo -u postgres psql -d oss911 -P pager=off -c "
+SELECT pid, now() - xact_start AS xact_age, state FROM pg_stat_activity WHERE usename = 'dbt' AND state <> 'idle'"
+```
+
+有残留就 `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'dbt' AND state <> 'idle'`
+（构建都是可重跑的，回滚无害）。50 完成后把两个 DAG `unpause`。
+
 40 跑完到 50 装好新模型之间，如果调度正好触发构建，**旧模型的 fact_call 会失败**（`The source and target schemas on this
 incremental model are out of sync`）——这是有意的：新列 NOT NULL、无默认值，旧模型写不进来，不会按旧规则把表填回去。
 50 之后的下一次构建正常。

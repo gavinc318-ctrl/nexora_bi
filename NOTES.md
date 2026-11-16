@@ -1915,3 +1915,14 @@ Mac 侧下一件：第 9 步 LD-04 API 契约。
 **下一步**：第 8 步第二段——结构变更 0012（注册表主键改为（编码, 版本）、mart_table / mart_column / mart_numerator / mart_denominator /
 params / name_ar_state / effective_from、`sql_expression` 可空、`data_publication` 加 `intraday`、`meta.mart_day_publication`）、
 46-metrics、`metrics/marts.yaml`、四张话务 mart 与封账发布 DAG。第 7 步（if03b/c）排在其后。
+
+## 2026-11-16  开发机：真机上 fact_call 重算测试跑了一个半小时没完——已改；Airflow 超时留下孤儿查询
+
+执行 0011 时 TRUNCATE 被 4 个 dbt 会话挡住，事务已开 1:33、1:03、0:32、0:03——每 30 分钟一个，正是构建任务的 `execution_timeout`。
+- **慢的原因**：`fact_call_recomputes_from_legs` 把腿表写成一个 CTE，每列一个相关子查询都引用它。CTE 被引用多次即物化，物化结果没有索引，
+  每个子查询对每通电话全表扫一遍：真机约 4 万通 × 15 列 × 全部腿，几个小时。临时库只有 999 通，7 秒，没看出来。
+- **改法**：子查询直接读腿表，走 `call_sk` 索引（`ix_leg_parent`）。临时库实测仍抓得到差异（改一通的 talk_seconds → FAIL 1）。
+  另：这条查询表达式很大，JIT 编译约占 7 秒（`jit = off` 时 0.2 秒）；固定开销，不随数据量增长，先不处理。
+- **孤儿查询**：Airflow 超时只杀 dbt 进程，库里的查询照跑，下一次构建又起一个，越积越多、互相抢 CPU。建议给 `dbt` 角色设
+  `statement_timeout`（略小于任务超时，如 25 分钟），让库自己终止；属角色设置，开发机下一次改角色剧本时一并做，不另开结构变更。请 Mac 侧知悉。
+- runbook 15 的 0011 一节补了「先暂停两个构建 DAG、确认没有残留 dbt 会话」。
