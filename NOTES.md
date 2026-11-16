@@ -1869,3 +1869,28 @@ Mac 侧下一件：第 9 步 LD-04 API 契约。
 17. 错误码：`metric_unknown`、`metric_not_implemented`、`dimension_invalid`、`incompatible_grain`、`department_unmapped`、`field_not_permitted`、`result_too_large`、`timeout`。
 18. 测试至少覆盖 LD-10 的 TC-DISC-02（主管与接警员返回列不同）与 TC-DISC-03（部门映射不到的行为），在话务数据上的对应版本。
 
+## 2026-11-16  Mac 侧：第 9 步开工清单的更正（评审五条全部采纳，以本节为准）
+
+上节清单中与下列冲突的条目作废：第 2 条的单一连接、第 4 条的 `version`、第 6 条的选版方式、第 11 条的「映射不到一律 403」。
+
+1. **权限上下文一次解析，三处共用**（主查询、`/dimensions/*/members`、响应 meta）。接警员调 agent 成员接口只得本人；
+   `in_progress_calls`、`has_unlinked` 在其获准范围内算。无权字段既不能作输出维度，也**不能作过滤条件**。
+2. **本人身份**：令牌声明工号（声明名开发机定，报 NOTES）→ 按 `agent_no` 过滤（覆盖全部 SCD 版本，不按某一版 sk）。
+   工号缺失 / 对不上坐席 / 对上多个 → 403 `identity_unmapped`，不得漏加过滤继续执行。
+3. **校验按适用的过滤**：表的 `row_filter = department` 才要求部门，`self` 才要求工号，`none` 两者都不拦。
+4. **两个连接用途**：`SVC_DSN_ANALYTIC_READ`、`SVC_DSN_AUDIT_WRITE`（svc.env）。开发机两者同指 `oss911_txn`；生产读走分析副本的只读池
+   （pgBouncer 届时加 `oss911_ro`，随 LD-08 部署清单）。顺序：查询 → 结果留在内存 → 审计 INSERT 并提交 → 返回。
+5. **两个版本分开**：`data_version`（latest | as_closed | 整数）；`metrics` 元素可为 `"M-C04"` 或 `{"code": "M-C04", "metric_version": 1}`。
+   省略口径版本 → 每日用当日生效的版本；范围跨生效日：day 粒度照常、每行带版本，week 及以上 → 400 `metric_version_boundary`；
+   版本不存在 → `metric_version_unknown`。注册表每版本加 `effective_from`（第 8 步第二段的结构变更里一并加）。
+6. **选版先于过滤**：新表 `meta.mart_day_publication (mart_table, date_key, close_version, publication_seq, row_count, published_at)`，
+   每次写 mart 的每个日期一行，**零行也登记**；查询先据它定每日版本，再读行、过滤、聚合。meta 的每日状态取三值：
+   published（含零行）/ not_built / not_closed。请把它放进第 8 步第二段的结构变更，mart 模型每次写入同事务登记。
+7. **话务 mart 的可见角色**（进 `metrics/marts.yaml` 的 `roles`）：`legs__day_agent__handling`——call_taker（self）、supervisor、admin；
+   `calls__day__volume`、`calls__day_queue__service`、`calls__day__release`——仅 supervisor、admin。dispatcher 四张都不可见。
+   无权的表 → 403 `table_not_permitted`。
+8. `cache_key()` 加入本人范围；补测「同部门两名接警员键不同」。
+9. 第一版查询不经 Superset（LD-05 2.1 已注）。
+10. **前置**：fact_call 首腿规则与「队列腿系统释放 → unanswered_system」先落到模型（现仍限定 `leg_seq = 1`），服务层验数在其后。
+已记 DD-99 注、LD-04 3.5、LD-03 第 5 章、LD-05 2.1。
+

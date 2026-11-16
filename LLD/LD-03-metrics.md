@@ -122,6 +122,8 @@ ended_at 是点击关闭的时间，不是实际处置结束的时间。会有�
 
 【2026-11-16 补充，DD-97 注】落地九条。一、meta.metric_registry 主键为（metric_code, metric_version），增 mart_table、mart_column、mart_numerator、mart_denominator、params、entity_date、retrospective；同步只增不改旧版本行。二、名称：name_en 与 name_ar 进 metrics.yaml，name_ar 未经 MOI 确认者标 draft；原 sql_expression 改为可空的 measure 文字说明。三、mart 只存可加的列（计数与合计）；比率与均值类指标在服务层由分子列除以分母列得出，注册表为其登记分子分母两列——日 × 队列的均值不能再按周或按全部队列汇总，均值的均值是错的。四、部署只校验声明了 mart_table 的指标；已发布而未声明者照常同步并标「未实现」，服务层对其返回明确的未实现而非空结果。五、进入生产之前的口径修改不递增 metric_version，首次上线的版本即基线、对应不带后缀的列，此后递增才加 _v<n>。六、未封账的日子以 close_version = 0 的行存在，每小时整日替换；「不改旧行」只约束 close_version ≥ 1。七、D 日在「D 日的每日回扫完成之后的第一次夜间构建」封账，写 close_version = 1 并删去当日的 0 行；封账时未完整的通话不计入。八、夜间构建重算最近 7 个已封账日，与该日最新一版逐行比，有差即整日写 close_version + 1；7 日之外的变化不自动修正，进监控由人决定。九、meta.data_publication 的 kind 取 intraday · nightly · correction，每次写 mart 一行，mart 行带写入它的 publication_seq（DD-81）。
 
+【2026-11-16 评审补充】发布登记到日：meta.mart_day_publication 记（mart 表, 日期, close_version, 发布序号, 行数, 发布时刻），一次发布即使该日零行也登记——纠错后某日全部行改归他日时，该日的新版本为空，只靠 mart 行上的 close_version 无处表示。注册表每个口径版本带 effective_from。
+
 ## 6  口径版本
 
 metric_version 递增即意味着「同一个指标，换了算法」。什么算口径变更须定死，否则版本号会失去意义。
