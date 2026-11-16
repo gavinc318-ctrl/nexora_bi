@@ -111,6 +111,10 @@
         state: absent
       loop: "{{ _present.files | map(attribute='path') | reject('in', dag_files | map('regex_replace', '^', dags_dir ~ '/') | list) | list }}"
 
+    # Retried: the running dag-processor sees the newly copied file too, and when the file brings a new DAG id both may
+    # insert its row at once -- the loser fails with "duplicate key value violates unique constraint dag_pkey"
+    # (2026-11-16, maintenance_checks). By the retry the row exists and reserialize only updates it
+    # (troubleshooting: "Parse the DAGs ... dag_pkey").
     - name: Parse the DAGs into the metadata database now
       ansible.builtin.shell:
         cmd: |
@@ -122,6 +126,9 @@
       become_user: airflow
       register: _reser
       changed_when: false
+      retries: 2
+      delay: 5
+      until: _reser.rc == 0
 
     # The Airflow CLI prints warnings to stdout before its JSON (e.g. "Could not import graphviz" -- graphviz only
     # renders DAG images on the command line, not needed here, and not worth a new dependency). The JSON is always

@@ -632,3 +632,11 @@ dbt/dbt_core_experimental_parser-2.0.5.tar.gz
 - **预防** —— 一、**测试的连接路径必须与真实部署一致**：dbt 的测试经 pgBouncer、用部署的库名连接（CLAUDE.md 第 5 节第二条已加
   这个实例）。二、pgBouncer 以 HBA 拒绝「池 × 用户」错配，连错池在第一次连接时就 `login rejected`；40-schema 以 ingest、dbt 的
   身份各连一次事务池，断言被拒。三、服务层的 SQL 不写三段式名字；Superset 的 `allow_multi_catalog` 保持 false（DD-93 核查注）
+
+### 现象：50-dags 的 `Parse the DAGs into the metadata database now` 失败，`duplicate key value violates unique constraint "dag_pkey"`，`Key (dag_id)=(某个新 DAG) already exists`
+
+- **原因** —— 剧本把 DAG 文件拷进 `/var/lib/airflow/dags` 后立即执行 `airflow dags reserialize`；常驻的 dag-processor 也看见了新文件。
+  文件里有**新的 DAG id** 时，两边几乎同时往元数据库插这个 DAG 的行，后到的一方撞主键。只在新增 DAG 的那一次出现
+  （2026-11-16 新增 `maintenance_checks` 时）。DAG 本身没问题：赢的那一方已经把它写进去了
+- **处置** —— 重跑 50。第二遍行已存在，reserialize 只做更新
+- **预防** —— 该任务失败自动重试两次（间隔 5 秒），同一情况第一次重试就过
