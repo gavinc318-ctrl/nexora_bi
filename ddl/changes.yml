@@ -96,3 +96,9 @@
   summary: First leg of a call (DD-96 item one, 2026-11-16) -- core.fact_call emptied for a full rebuild under the corrected rules, first_leg_seq (lowest positive CALLIDNUM, else -1), unanswered_system covering queue-only calls released by the system
   files:
     - changes/0011_fact_call_first_leg.sql
+
+- id: "0012"
+  run_as: owner
+  summary: Metric registry by (metric, version) with the mart mapping, names and effective_from (DD-97); meta.data_publication and meta.mart_day_publication (DD-81, DD-97 review); index on fact_call.built_at
+  files:
+    - changes/0012_metric_registry_and_publication.sql

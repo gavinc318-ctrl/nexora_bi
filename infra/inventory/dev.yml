@@ -254,6 +254,9 @@ all:
     # orchestration calls meta.ensure_monthly_partitions to create future months in advance -- until orchestration is
     # in place the window runs out after partition_months_ahead months; then rerun the playbook to move it forward.
     # Earlier months (e.g. ICP historical backfill) are not handled by raising this; the backfill job creates its partitions first.
+    # 46-metrics: before go-live a metric's definition may change without a new version (DD-97 item five); set to
+    # false at go-live, after which such a change fails the deployment (LD-03 chapter 6)
+    metrics_pre_production: true
     partition_months_back: 1
     partition_months_ahead: 3
 

@@ -7,6 +7,7 @@
 #       contracts/  release.yml, pools.yml, resweep.yml and the released contracts
 #       dags/       the DAG files of src/dags
 #       dbt/        the dbt project of src/dbt (project file, models, macros, tests)
+#       metrics/    metrics/*.yaml: the metric definitions 46-metrics syncs into meta.metric_registry (DD-97)
 #       SOURCE      git commit and whether the working tree was clean, for tracing (not part of the hash)
 #
 # Every step of a deployment reads this one copy -- validation, the DagBag rehearsal, conversion, pools, re-sweep
@@ -38,7 +39,10 @@
                         | map('regex_replace', '^', 'dags/') | list
                         | zip(query('ansible.builtin.fileglob', _repo ~ '/src/dags/*.py'))))
          | combine(dict(_dbt_files | map('regex_replace', '^' ~ (_repo ~ '/src/') | regex_escape, '') | list
-                        | zip(_dbt_files))) }}
+                        | zip(_dbt_files)))
+         | combine(dict(query('ansible.builtin.fileglob', _repo ~ '/metrics/*.yaml') | map('basename')
+                        | map('regex_replace', '^', 'metrics/') | list
+                        | zip(query('ansible.builtin.fileglob', _repo ~ '/metrics/*.yaml')))) }}
   vars:
     # The dbt project's files, by the fixed layout of src/dbt. fileglob neither recurses nor expands a wildcard in a
     # directory name, so each model layer directory is named here: staging, core and meta now; mart and ai are added with
@@ -95,8 +99,8 @@
   ansible.builtin.shell:
     cmd: |
       printf 'commit %s\n' "$(git -C {{ _repo }} rev-parse HEAD 2>/dev/null || echo unknown)"
-      if [ -n "$(git -C {{ _repo }} status --porcelain -- contracts src/dags src/dbt 2>/dev/null)" ]; then
-        echo "working tree: modified (contracts/, src/dags/ or src/dbt/ differ from the commit)"
+      if [ -n "$(git -C {{ _repo }} status --porcelain -- contracts src/dags src/dbt metrics 2>/dev/null)" ]; then
+        echo "working tree: modified (contracts/, src/dags/, src/dbt/ or metrics/ differ from the commit)"
       else
         echo "working tree: clean"
       fi
@@ -124,6 +128,7 @@
     - "{{ rel_dir }}"
     - "{{ rel_dir }}/contracts"
     - "{{ rel_dir }}/dags"
+    - "{{ rel_dir }}/metrics"
   when: rel_create | bool
 
 - name: Create the release's dbt directories

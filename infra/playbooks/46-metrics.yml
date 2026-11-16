@@ -1,0 +1,96 @@
+# 46-metrics -- sync metrics/metrics.yaml into meta.metric_registry
+#
+# Basis: DD-97 (2026-11-16 nine items) · DD-05 · LD-03 chapters 5, 6
+# Prerequisites: 40-schema (structural change 0012: the registry keyed by metric and version) ·
+#                45-contracts (the release directory, which holds metrics/) · the mart tables the metrics point at
+#                (built by dbt: 50-dags installs the models, the first mart build creates them)
+#
+# * metrics/metrics.yaml in the repository is the authority; meta.metric_registry is a read-only copy written only
+#   here (LD-03 chapter 5). Read from the release directory 45 created, verified by hash -- never from the repository.
+# * Order, like 45: convert and check the file (infra/files/metrics_to_json.py, venv-ingest's PyYAML), then sync in
+#   one transaction as the owner role under an advisory lock (infra/files/metric_sync.sql). The rules of the sync
+#   -- versions only go forward, older versions kept, a confirmed Arabic name never overwritten, every mart mapping
+#   pointing at existing columns -- are in the header of metric_sync.sql.
+# * metrics_pre_production (inventory): true until go-live -- a definition may change without a new version
+#   (DD-97 item five); false afterwards, when such a change fails the deployment (LD-03 chapter 6).
+# * Metrics without mart_table are synced and reported as not implemented: the service layer answers
+#   metric_not_implemented for them, not an empty result (DD-97 item four).
+
+- name: Metric registry
+  hosts: all
+  gather_facts: false   # no facts used (same reasoning as 40-schema.yml)
+  become: true
+
+  vars:
+    repo_root: "{{ playbook_dir }}/../.."
+    ingest_venv: "{{ venv_root }}/venv-ingest"
+
+  tasks:
+
+    - name: Find and verify the release directory (created by 45-contracts)
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/release_dir.yml"
+      vars:
+        rel_create: false
+
+    - name: Convert and check metrics.yaml
+      ansible.builtin.command:
+        argv:
+          - "{{ ingest_venv }}/bin/python"
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/metrics_to_json.py') }}"
+          - "{{ rel_dir }}/metrics/metrics.yaml"
+      register: _metrics
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Assert metrics.yaml is valid
+      ansible.builtin.assert:
+        that:
+          - _metrics.rc == 0
+        fail_msg: |-
+          metrics/metrics.yaml has problems; nothing was synced:
+          {{ _metrics.stderr }}
+        success_msg: "metrics.yaml: {{ (_metrics.stdout | from_json) | length }} metrics"
+
+    # The JSON goes in on stdin, ahead of the script, as a dollar-quoted literal: as a psql -v argument it would hit
+    # the kernel's limit on one argument (128 KiB) as metrics are added. metrics_to_json.py refuses text containing
+    # the tag.
+    - name: Sync the metrics into the database
+      ansible.builtin.command:
+        argv:
+          - psql
+          - -X
+          - -q
+          - -1
+          - -v
+          - ON_ERROR_STOP=1
+          - -v
+          - "pre_production={{ metrics_pre_production | bool | lower }}"
+          - -d
+          - "{{ pg_database }}"
+          - -f
+          - "-"
+        stdin: |-
+          SELECT set_config('oss911.metrics', $metrics_json${{ _metrics.stdout }}$metrics_json$, true) \g /dev/null
+          {{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/metric_sync.sql') }}
+      become_user: postgres
+      register: _sync
+      changed_when: _sync.stdout_lines | select('search', '[|](inserted|updated|redefined|new_version)[|]') | list | length > 0
+
+    - name: Show what changed
+      ansible.builtin.debug:
+        msg: "{{ _sync.stdout_lines | reject('search', '[|]unchanged[|]') | list
+                 or ['every metric unchanged'] }}"
+
+    - name: Summarize
+      ansible.builtin.debug:
+        msg: >-
+          {{ _sync.stdout_lines | reject('search', '[|]not_in_release[|]') | list | length }} metrics in the registry
+          ({{ 'before go-live: definitions may change in place' if metrics_pre_production | bool
+              else 'after go-live: a definition change needs a new version' }});
+          implemented: {{ _sync.stdout_lines | select('search', '[|]implemented$') | map('regex_replace', '[|].*$', '') | join(', ') or 'none yet' }};
+          not implemented: {{ _sync.stdout_lines | select('search', '[|]not_implemented$') | list | length }}.
+          {% if _sync.stdout_lines | select('search', '[|]not_in_release[|]') | list | length > 0 %}
+          In the registry but not in metrics.yaml (kept): {{ _sync.stdout_lines | select('search', '[|]not_in_release[|]')
+          | map('regex_replace', '[|].*$', '') | join(', ') }}{% endif %}

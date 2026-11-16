@@ -1941,3 +1941,27 @@ fact_call 的 `built_at` 没有索引，构建档每次顺扫 fact_call 一遍�
 **假接口**：按真机核验时发现，原生成器每通都是 IVR → 排队 → 坐席，结果只有 answered 与 abandoned，Mac 侧这次更正的两条规则在真机上
 没有数据可测。另加三类（另一条随机流、CALLID 以 `-91` 结尾，不改原有通话的内容）：只经 IVR（单张话单、编 -1）、排队超时系统释放、
 坐席振铃未接系统释放，约 6%。临时库补取 7 小时后四种结果都出现，`ivr_only` 的 `first_leg_seq = -1`。比例是编的，不作口径依据。
+
+## 2026-11-16  开发机：第 8 步第二段第一块——结构变更 0012 与 46-metrics 已实现
+
+按 DD-97 落地九条与评审补充（runbook 16）：
+- **0012**：注册表主键（metric_code, metric_version）；`sql_expression` 改名 `measure` 可空；增 name_zh、name_ar_state、aggregation、
+  entity_date、retrospective、params、mart_table / mart_column / mart_numerator / mart_denominator、effective_from、definition_sha256；
+  CHECK：count/sum 只填 mart_column，ratio/avg 只填分子分母，其他聚合（median、p90、min、max）不能指向 mart。
+  新表 `meta.data_publication`（kind：intraday · nightly · correction）、`meta.mart_day_publication`（主键（表, 日, 发布序号），
+  close_version ≥ 1 的（表, 日, 版本）唯一；零行也登记）；dbt 只可 INSERT，不可改删。`fact_call.built_at` 索引。
+- **46-metrics**：读发布目录里的 metrics.yaml（发布目录增 `metrics/`），`metrics_to_json.py` 校验并算口径哈希，`metric_sync.sql`
+  以属主一个事务内同步、咨询锁串行。JSON 经 stdin 以 dollar-quote 传入（45 KB，作命令行参数会随指标增多撞 128 KiB 单参数上限）。
+- 临时库：首次 59 inserted、再跑 59 unchanged；改名 → updated；上线前改口径 → redefined，上线后 → 失败；升版本 → 新行、旧行保留、
+  effective_from 为当天；版本倒退 → 失败；指向不存在的表或列 → 失败并列出；已确认的阿语名不被草稿覆盖；median 指 mart → 转换即拒。
+  权限验证 157 项（新增 7 项）。
+
+开发机自定、请 Mac 侧知悉的四处：
+1. **口径哈希**覆盖 definition、grain、aggregation、measure、entity_date、params、retrospective；名称、维度、来源表、depends_unverified、
+   published、mart 映射可不升版本更新（LD-03 第 6 章「新增维度」「结果恒等的重写」不升版本）。
+2. **上线前后开关**：inventory `metrics_pre_production`（现 true），上线那天改 false。
+3. **effective_from**：某指标的第一版为 `-infinity`（覆盖全部历史，服务层「省略口径版本按当日生效版本」才有版本可取）；新版本取
+   yaml 可选字段 `effective_from`，未写则为同步当天（利雅得）。
+4. **阿语名确认后部署不覆盖**：库中 `name_ar_state = confirmed` 时 46 保留库中名称。M-10 写这两列的授权等 M-10 开工时加。
+
+**顺序约束**：46 校验 mart 列存在，故 mart 表须先于 46 建好；第二块（四张话务 mart）会给出「50 → 首次 mart 构建 → 46」的顺序。

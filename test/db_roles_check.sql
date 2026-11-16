@@ -1,5 +1,5 @@
 -- =====================================================================
--- Verification of database roles and grants (structural changes 0002 to 0009 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
+-- Verification of database roles and grants (structural changes 0002 to 0012 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
 --
 -- It verifies the five privilege roles themselves: inside a transaction the script creates one temporary
 -- login user per role, the superuser session does SET ROLE to that login user, and then runs statements
@@ -398,6 +398,19 @@ SELECT pg_temp.expect_ok    ($$UPDATE meta.label_override SET state = 'pending_r
 SELECT pg_temp.expect_denied($$UPDATE meta.label_override SET label_text = 'x' WHERE false$$);
 SELECT pg_temp.expect_denied($$INSERT INTO meta.agent_role_override (site_code, src_system, agent_no, role_code, valid_from,
                                    changed_by, reason) VALUES ('MKK', 'icp', 'zz_check', 'supervisor', now(), 'x', 'x')$$);
+-- mart publications (0012): dbt records them, nobody rewrites them; the registry is the owner's alone (46-metrics)
+SELECT pg_temp.expect_ok    ($$INSERT INTO meta.data_publication (kind, date_from, date_to, run_id)
+                               VALUES ('intraday', 20260101, 20260101, 'zz_check')$$);
+SELECT pg_temp.expect_ok    ($$INSERT INTO meta.mart_day_publication (mart_table, date_key, close_version, publication_seq, row_count)
+                               SELECT 'mart.zz_check', 20260101, 0, max(publication_seq), 0 FROM meta.data_publication$$);
+SELECT pg_temp.expect_denied($$UPDATE meta.data_publication SET kind = 'nightly' WHERE false$$);
+SELECT pg_temp.expect_denied($$DELETE FROM meta.mart_day_publication WHERE false$$);
+SELECT pg_temp.expect_denied($$UPDATE meta.metric_registry SET is_published = false WHERE false$$);
+RESET ROLE;
+SET ROLE :"query_user";
+SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.metric_registry, meta.mart_day_publication, meta.data_publication LIMIT 1$$);
+SELECT pg_temp.expect_denied($$INSERT INTO meta.data_publication (kind, date_from, date_to, run_id)
+                               VALUES ('intraday', 20260101, 20260101, 'zz_check')$$);
 RESET ROLE;
 
 -- M-10 marks supervisors over an interval, with a reason (DD-94 items six, sixteen · change 0008); clearing closes
