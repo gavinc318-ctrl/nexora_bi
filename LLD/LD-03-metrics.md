@@ -118,11 +118,13 @@ ended_at 是点击关闭的时间，不是实际处置结束的时间。会有�
 
 发布随 DD-49 的制品流程：指标定义与契约、模型、DDL、部署脚本、组件清单一同打包，带版本号与校验和，manifest 中携带变更摘要与评审记录，登记入 meta.release_registry。
 
-【2026-10-30 补充，DD-97】注册表与 mart 的对应。注册表不生成 SQL：mart 模型由人写 dbt；metrics.yaml 每条指标增加 mart_table 与 mart_column 两项，部署同步 meta.metric_registry 时校验「已发布的指标必须对应到存在的 mart 列」，否则部署失败——口径的权威在注册表，实现的权威在模型，两者的一致由部署步骤强制而不是靠约定。口径版本升一次，mart 新增带版本后缀的列（如 _v2），旧列保留，注册表按（编码, 版本）指向列，第 6 章「历史不重算」由此落地。参数型指标（如 M-C05 的 X 秒）的参数值记在注册表，默认 20 秒。话务 mart 第一组四张表：mart.calls__day__volume（日 × 方向 × 结果）、mart.calls__day_queue__service（日 × 队列：呈现、应答、X 秒内应答、平均等待）、mart.legs__day_agent__handling（日 × 坐席：呈现、接通、未接、通话时长、转接）、mart.calls__day__release（日 × 挂断方）；坐席或队列为空的行归 unlinked（DD-95）；每行带 close_version 与 publication_seq（DD-81）。
+【2026-10-30 补充，DD-97】注册表与 mart 的对应。注册表不生成 SQL：mart 模型由人写 dbt；metrics.yaml 每条指标增加 mart_table 与 mart_column 两项，部署同步 meta.metric_registry 时校验「已发布的指标必须对应到存在的 mart 列」，否则部署失败——口径的权威在注册表，实现的权威在模型，两者的一致由部署步骤强制而不是靠约定。口径版本升一次，mart 新增带版本后缀的列（如 _v2），旧列保留，注册表按（编码, 版本）指向列，第 6 章「历史不重算」由此落地。参数型指标（如 M-C05 的 X 秒）的参数值记在注册表，默认 20 秒。话务 mart 第一组四张表：mart.calls__day__volume（日 × 站点一行，方向与结果展开为列——比率须在同一行的两列之间算，2026-11-16 更正）、mart.calls__day_queue__service（日 × 队列：呈现、应答、X 秒内应答、平均等待）、mart.legs__day_agent__handling（日 × 坐席：呈现、接通、未接、通话时长、转接）、mart.calls__day__release（日 × 挂断方）；坐席或队列为空的行归 unlinked（DD-95）；每行带 close_version 与 publication_seq（DD-81）。
 
 【2026-11-16 补充，DD-97 注】落地九条。一、meta.metric_registry 主键为（metric_code, metric_version），增 mart_table、mart_column、mart_numerator、mart_denominator、params、entity_date、retrospective；同步只增不改旧版本行。二、名称：name_en 与 name_ar 进 metrics.yaml，name_ar 未经 MOI 确认者标 draft；原 sql_expression 改为可空的 measure 文字说明。三、mart 只存可加的列（计数与合计）；比率与均值类指标在服务层由分子列除以分母列得出，注册表为其登记分子分母两列——日 × 队列的均值不能再按周或按全部队列汇总，均值的均值是错的。四、部署只校验声明了 mart_table 的指标；已发布而未声明者照常同步并标「未实现」，服务层对其返回明确的未实现而非空结果。五、进入生产之前的口径修改不递增 metric_version，首次上线的版本即基线、对应不带后缀的列，此后递增才加 _v<n>。六、未封账的日子以 close_version = 0 的行存在，每小时整日替换；「不改旧行」只约束 close_version ≥ 1。七、D 日在「D 日的每日回扫完成之后的第一次夜间构建」封账，写 close_version = 1 并删去当日的 0 行；封账时未完整的通话不计入。八、夜间构建重算最近 7 个已封账日，与该日最新一版逐行比，有差即整日写 close_version + 1；7 日之外的变化不自动修正，进监控由人决定。九、meta.data_publication 的 kind 取 intraday · nightly · correction，每次写 mart 一行，mart 行带写入它的 publication_seq（DD-81）。
 
 【2026-11-16 评审补充】发布登记到日：meta.mart_day_publication 记（mart 表, 日期, close_version, 发布序号, 行数, 发布时刻），一次发布即使该日零行也登记——纠错后某日全部行改归他日时，该日的新版本为空，只靠 mart 行上的 close_version 无处表示。注册表每个口径版本带 effective_from。
+
+【2026-11-16 补充，DD-97 注】话务 mart 落地后的六条。一、M-C05 X 秒应答率的分母为排队的通话（含放弃），分子为等待不超过 X 秒且被应答者；分母只取已应答则放弃越多比率越高。X 的取值以注册表 params 为准，部署时核对 dbt 变量与之相同，不同即失败。二、未完整通话数在已封账的行同样保留，作数据质量信号，不计入呼入。三、发布序号按 mart 表各自递增，缓存键取所查表的序号。四、M-C15 同一主叫失败次数的时间窗为自然日（Asia/Riyadh，Gavin 2026-11-16 定），不取滑动窗口——滑动窗口的数不能按日加总、无法封账；「未接通」指结果为 abandoned 或 unanswered_system 的呼入通话；出两个数：当日未接通两次及以上的主叫数、这些主叫的未接通呼叫数，只出计数不出号码；跨午夜的连续重拨会被拆到两日，属已知局限。五、坐席姓名分 agent_name_ar 与 agent_name_en 两列，均为敏感列；维度 agent 取工号。六、封账判定中，被丢弃的回扫批次视同该源端日已定稿（丢弃是人的决定，不会再有数据来）；待处理的隔离批次继续阻止该日及其后封账，封账落后超过 3 日即告警。
 
 ## 6  口径版本
 

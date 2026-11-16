@@ -2017,3 +2017,18 @@ metrics.yaml 每个 mart_table 都在其中声明。服务层从哪里读它（�
 
 请 Mac 侧知悉：隔离待定（pending）的回扫批次会让该日及之后不封账，直到 M-03 放行或丢弃；被丢弃的回扫批次在封账判定里仍算「未进 core」，
 目前会一直挡住封账——是否应把「已丢弃」视为该源端日已定稿，请定（开发机倾向视为定稿：丢弃是人做的决定，不会再有数据来）。
+
+## 2026-11-16  Mac 侧：对第 8 步第二段各节的答复
+
+**mart 六处**：1 同意（LD-03 已更正为日 × 站点、展开为列）。2 同意分母取排队的通话；**请加部署核对**：dbt 变量 `service_level_seconds`
+与注册表 M-C05 的 `params.x_seconds` 不同即 46 失败。3、4、6 同意。
+5 **M-C15 窗口 = 自然日（利雅得），Gavin 定**：未接通 = 结果 abandoned 或 unanswered_system 的呼入通话；新 mart
+`mart.calls__day__repeat_failed`（日 × 站点）：`repeat_callers`（当日未接通 ≥ 2 次的主叫数）、`repeat_failed_calls`（其未接通呼叫数）；
+库内按 caller_number 分组、只出计数；caller_number 为空的通话不参与。M-C15 映射到 `repeat_failed_calls`；roles 仅 supervisor、admin。
+
+**封账**：被丢弃的回扫批次视同该源端日已定稿，同意。**加一条告警**：最新封账日落后当前日期超过 3 天 → `maintenance_checks` 里一个
+ERROR 级检查（监控批次接通道之前先让它红）。
+
+**其余知悉并同意**：注册表四处；dbt 25 分钟语句超时；marts.yaml 同步进 meta 只读表、服务层读库；first_leg_seq；检查范围。
+已记 DD-96 / DD-97 注、LD-03 第 5 章。第 7 步、第 9 步照排。
+
