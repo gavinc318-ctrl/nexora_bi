@@ -1830,3 +1830,12 @@ M-R02–M-R04 请在 metrics.yaml 标 `depends_unverified: true`。第 5 条两�
 仓库根目录的 `归档.zip` 与项目无关，Gavin 自行删除，不要提交。
 Mac 侧下一件：第 9 步 LD-04 API 契约。
 
+## 2026-11-16  Mac 侧：59 条指标的英文名与阿语草稿——`metrics/metric_names.csv`
+
+列：code、name_zh、name_en、name_ar、name_ar_state（全部 `draft`）。请开发机并入 metrics.yaml（每条加 `name_en`、`name_ar`、
+`name_ar_state`），注册表增列 `name_ar_state`，展现层对 draft 的阿语名照常显示、M-04 指标字典标出「待确认」。
+- 英文名定稿，改名不算口径变更（LD-03 第 6 章）。
+- **阿语全部是草稿**：CAD 单据的阿语术语（بلاغ / أمر إحالة / أمر مباشرة）是 Mac 侧按通用用法拟的，须与 MOI 现行术语和 CAD 界面用词对齐后
+  才能翻为 `confirmed`；确认由 M-10 的译名流程做（DD-56），不走发布。
+- 带粒度的名称保留括号里的粒度（按出警单 / 按派警单 / 按接警单），LD-03 2.3 要求报表标题写明粒度，不要为了简短删掉。
+

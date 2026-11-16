@@ -1,0 +1,60 @@
+code,name_zh,name_en,name_ar,name_ar_state
+M-C01,呼入量,Inbound calls,المكالمات الواردة,draft
+M-C02,应答量,Answered calls,المكالمات المُجابة,draft
+M-C03,放弃量,Abandoned calls,المكالمات المتروكة,draft
+M-C04,应答率,Answer rate,نسبة الرد,draft
+M-C05,X 秒应答率,Answered within X seconds (rate),نسبة الرد خلال X ثانية,draft
+M-C06,平均等待时长,Average wait time,متوسط زمن الانتظار,draft
+M-C07,平均通话时长,Average talk time (per agent leg),متوسط زمن المحادثة (لكل مرحلة موظف),draft
+M-C08,应答前振铃次数,Rings before answer,عدد الرنّات قبل الرد,draft
+M-C09,呈现给坐席的呼叫数,Calls offered to agent,المكالمات المعروضة على الموظف,draft
+M-C10,坐席实际处理数,Calls handled by agent,المكالمات التي عالجها الموظف,draft
+M-C11,挂断方,Releasing party (share),الطرف المُنهي للمكالمة (نسبة),draft
+M-C12,未接呼叫数,Calls not answered by agent,المكالمات التي لم يُجب عليها الموظف,draft
+M-C13,转接呼叫数,Transferred calls,المكالمات المحوَّلة,draft
+M-C14,骚扰呼叫数,Nuisance calls,المكالمات المزعجة,draft
+M-C15,同一主叫失败次数,Failed attempts by same caller,المحاولات غير الناجحة للمتصل نفسه,draft
+M-I01,警情量,Incidents,عدد البلاغات,draft
+M-I02,派单率,Dispatch rate,نسبة البلاغات المُحالة,draft
+M-I03,受理时长,Intake time,زمن استقبال البلاغ,draft
+M-I04,派单时长,Dispatch time,زمن الإحالة,draft
+M-I05,到场时长（按出警单）,Arrival time (per turnout),زمن الوصول (لكل أمر مباشرة),draft
+M-I20,警种到场时长（按派警单）,Agency arrival time (per dispatch order),زمن وصول الجهة (لكل أمر إحالة),draft
+M-I21,首个到场时长（按接警单）,First arrival time (per incident),زمن أول وصول (لكل بلاغ),draft
+M-I06,处置时长均值（按出警单）,"Handling time, mean (per turnout)",متوسط زمن المعالجة (لكل أمر مباشرة),draft
+M-I22,处置时长中位数（按出警单）,"Handling time, median (per turnout)",وسيط زمن المعالجة (لكل أمر مباشرة),draft
+M-I23,处置时长 P90（按出警单）,"Handling time, P90 (per turnout)",زمن المعالجة - المئين 90 (لكل أمر مباشرة),draft
+M-I07,响应时长（按出警单）,Response time (per turnout),زمن الاستجابة (لكل أمر مباشرة),draft
+M-I08,全过程时长（按接警单）,End-to-end time (per incident),الزمن الكلي (لكل بلاغ),draft
+M-I10,超时派单数,Late dispatches,الإحالات المتأخرة,draft
+M-I11,撤案数,Cancelled incidents,البلاغات الملغاة,draft
+M-I12,媒体附件数,Media attachments,المرفقات,draft
+M-I13,热点强度,Hotspot intensity,شدة البؤر الساخنة,draft
+M-I24,结案数,Closed incidents,البلاغات المغلقة,draft
+M-I25,当日发生警情的最终结案率,Final closure rate of the day's incidents,نسبة الإغلاق النهائي لبلاغات اليوم,draft
+M-R01,在岗坐席数,Agents on duty,الموظفون على رأس العمل,draft
+M-R02,在岗时长,Time on duty,مدة العمل,draft
+M-R03,状态时长,Time by agent state,المدة حسب حالة الموظف,draft
+M-R04,占用率,Occupancy,نسبة الإشغال,draft
+M-R05,警员出动次数,Officer turnouts,عدد مرات المباشرة,draft
+M-R06,资源可用率,Resource availability,نسبة توفر الموارد,draft
+M-R07,勤务级别,Duty level,مستوى الجاهزية,draft
+M-R08,未关闭出警单数,Open turnouts,أوامر المباشرة المفتوحة,draft
+M-R09,最长未关闭时长,Longest open turnout,أطول مدة لأمر مباشرة مفتوح,draft
+M-P01,个人处理量,Workload per person,حجم العمل لكل فرد,draft
+M-P02,质检得分,Quality score,درجة الجودة,draft
+M-P03,满意度得分,Satisfaction score,درجة الرضا,draft
+M-P04,反馈量,Feedback received,عدد الملاحظات الواردة,draft
+M-P05,投诉量,Complaints,عدد الشكاوى,draft
+M-S01,可用性,Availability,نسبة التوافر,draft
+M-S02,MTTR,MTTR,متوسط زمن الإصلاح,draft
+M-S03,MTBF,MTBF,متوسط الزمن بين الأعطال,draft
+M-S04,复制延迟,Replication lag,تأخر النسخ المتماثل,draft
+M-S05,查询时延分布,Query latency distribution,توزيع زمن الاستعلام,draft
+M-S06,水位延迟,Ingestion watermark lag,تأخر استقبال البيانات,draft
+M-S07,拉取成功率,Ingestion success rate,نسبة نجاح استقبال البيانات,draft
+M-S08,隔离批次数,Quarantined batches,الدفعات المعزولة,draft
+M-S09,未映射值占比,Unmapped value share,نسبة القيم غير المصنَّفة,draft
+M-S10,对账差异率,Reconciliation variance rate,نسبة فروقات المطابقة,draft
+M-S11,容量利用率,Capacity utilisation,نسبة استخدام السعة,draft
+M-S12,查询与导出次数,Queries and exports,عدد الاستعلامات وعمليات التصدير,draft
