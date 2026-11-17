@@ -16,7 +16,8 @@ Like the ingestion DAGs, generated from the DAG manifest /opt/oss911/release/dag
                            mart_closing_not_behind: a mart table whose last closed day is more than 3 days back
   publish_marts_intraday   hourly: the days not closed yet, as provisional rows (close_version 0), and their tests
   publish_marts_nightly    daily: fact_call brought up to date with the legs, then the days whose re-sweep has reached
-                           core are closed (close_version 1) and the last 7 closed days corrected where they changed
+                           core (every source day from the source's first re-sweep day on, var resweep_from) are
+                           closed (close_version 1) and the last 7 closed days corrected where they changed
                            (macros/mart.sql · DD-97 items six to nine). A day whose re-sweep is late is simply closed
                            by a later night: whether a day is final is read from the database, not from the clock
 
@@ -33,6 +34,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 from datetime import datetime, timedelta
 
 import pendulum
@@ -107,7 +109,11 @@ with DAG(dag_id="publish_marts_intraday", description="Provisional mart rows of 
 with DAG(dag_id="publish_marts_nightly", description="Close the final days of mart, correct the last 7 closed days",
          schedule="0 4 * * *", start_date=datetime(2026, 10, 1, tzinfo=UTC), catchup=False, max_active_runs=1,
          default_args=DEFAULT_ARGS, tags=["publish"]) as publish_marts_nightly:
-    _task("publish", "build --select fact_call mart --vars '{mart_kind: nightly}'")
+    # Closing needs each source's first re-sweep day (contracts/resweep.yml, carried by the manifest): source days
+    # before it are history, from it on each must have been re-swept (macros/mart.sql, mart_final_days)
+    _nightly_vars = {"mart_kind": "nightly",
+                     "resweep_from": {s["source_id"]: s["resweep_from"] for s in _sources if s.get("resweep_from")}}
+    _task("publish", f"build --select fact_call mart --vars {shlex.quote(json.dumps(_nightly_vars))}")
 
 # After the nightly publication
 with DAG(dag_id="maintenance_checks", description="Call-level consistency tests over every call (full_check)",

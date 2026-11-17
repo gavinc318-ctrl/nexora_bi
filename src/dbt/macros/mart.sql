@@ -11,8 +11,12 @@
         close_version 1 and their provisional rows deleted. Final = the day's re-sweep has reached core: every
         source day (in the source's time zone) the report day overlaps was re-swept by a successful run whose
         batches were all consumed by fact_call_leg -- or discarded in quarantine: a person decided, no data will
-        come (Mac side 2026-11-16); a batch still pending holds the day. Source days before the first re-sweep ever
-        made count as final -- no re-sweep will come for them (item seven). A day is never closed past an open one: the first
+        come (Mac side 2026-11-16); a batch still pending holds the day. Source days before the source's first
+        re-sweep day (contracts/resweep.yml, var resweep_from, passed by publish_marts_nightly from the DAG manifest)
+        count as final -- no re-sweep will come for them (item seven); from that day on, every source day must have
+        been re-swept so. The boundary is that configured day, never derived from the re-sweeps that succeeded: with
+        the 15th pending and the 16th swept, the 15th would otherwise pass for history (Mac side review 2026-11-17,
+        DD-97 note). A day is never closed past an open one: the first
         open day is "the day after the last closed one", so a gap would be skipped for good. Calls still
         incomplete then are not counted (they show in incomplete_calls)
         correction: each of the last 7 closed days is recomputed and compared with its latest version, row by
@@ -27,8 +31,14 @@
 
 
 {#- The days of days_relation (a CTE with date_key) whose source data is final; see the header. source_id: the
-    source whose re-sweep decides it; its contract gives the time zone. -#}
+    source whose re-sweep decides it; its contract gives the time zone, var resweep_from its first re-sweep day. -#}
 {% macro mart_final_days(source_id, days_relation) -%}
+{%- set first_day = (var('resweep_from', {}) or {}).get(source_id) -%}
+{%- if execute and not (first_day is string and modules.re.fullmatch('[0-9]{4}-[0-9]{2}-[0-9]{2}', first_day)) -%}
+    {{ exceptions.raise_compiler_error("closing needs var resweep_from." ~ source_id ~ ": the source's first re-sweep day "
+       ~ "(YYYY-MM-DD, contracts/resweep.yml; publish_marts_nightly passes it from the DAG manifest), got "
+       ~ first_day) }}
+{%- endif -%}
     with tz as (
         select definition #>> '{window,source_timezone}' as src_tz
           from meta.source_contract where source_id = '{{ source_id }}'
@@ -52,8 +62,7 @@
     )
     select o.date_key
       from {{ days_relation }} o, tz
-     where exists (select 1 from swept)
-       and not exists (
+     where not exists (
          select 1
            from generate_series(
                     ((to_date(o.date_key::text, 'YYYYMMDD')::timestamp
@@ -62,7 +71,7 @@
                       at time zone '{{ var("report_timezone") }}' - interval '1 microsecond')
                       at time zone tz.src_tz)::date,
                     interval '1 day') sd
-          where sd::date >= (select min(source_day) from swept)
+          where sd::date >= date '{{ first_day }}'
             and sd::date not in (select source_day from swept))
 {%- endmacro %}
 
