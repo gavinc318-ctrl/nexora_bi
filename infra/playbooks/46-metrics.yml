@@ -1,8 +1,8 @@
-# 46-metrics -- sync metrics/metrics.yaml into meta.metric_registry; check metrics/marts.yaml against the database
+# 46-metrics -- sync metrics/metrics.yaml into meta.metric_registry and metrics/marts.yaml into meta.mart_rule
 #
 # Basis: DD-97 (2026-11-16 nine items) · DD-05 · LD-03 chapters 5, 6
 # Prerequisites: 40-schema (structural change 0012: the registry keyed by metric and version) ·
-#                45-contracts (the release directory, which holds metrics/) · the mart tables the metrics point at
+#                (0013: meta.mart_rule) · 45-contracts (the release directory, which holds metrics/) · the mart tables the metrics point at
 #                (built by dbt: 50-dags installs the models, the first mart build creates them)
 #
 # * metrics/metrics.yaml in the repository is the authority; meta.metric_registry is a read-only copy written only
@@ -80,21 +80,22 @@
           {{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/metric_sync.sql') }}
       become_user: postgres
       register: _sync
-      changed_when: _sync.stdout_lines | select('search', '[|](inserted|updated|redefined|new_version)[|]') | list | length > 0
+      changed_when: _sync.stdout_lines | select('search', '[|](inserted|updated|redefined|new_version)[|]|[|]rule_(inserted|updated|removed)$') | list | length > 0
 
     - name: Show what changed
       ansible.builtin.debug:
-        msg: "{{ _sync.stdout_lines | reject('search', '[|]unchanged[|]') | list
-                 or ['every metric unchanged'] }}"
+        msg: "{{ _sync.stdout_lines | reject('search', '[|]unchanged[|]|[|]rule_unchanged$') | list
+                 or ['every metric and mart rule unchanged'] }}"
 
     - name: Summarize
       ansible.builtin.debug:
         msg: >-
-          {{ _sync.stdout_lines | reject('search', '[|]not_in_release[|]') | list | length }} metrics in the registry
+          {{ _sync.stdout_lines | reject('search', '[|]not_in_release[|]|[|]rule_') | list | length }} metrics in the registry
           ({{ 'before go-live: definitions may change in place' if metrics_pre_production | bool
               else 'after go-live: a definition change needs a new version' }});
           implemented: {{ _sync.stdout_lines | select('search', '[|]implemented$') | map('regex_replace', '[|].*$', '') | join(', ') or 'none yet' }};
-          not implemented: {{ _sync.stdout_lines | select('search', '[|]not_implemented$') | list | length }}.
+          not implemented: {{ _sync.stdout_lines | select('search', '[|]not_implemented$') | list | length }};
+          mart tables the query API may read: {{ _sync.stdout_lines | select('search', '[|]rule_(inserted|updated|unchanged)$') | list | length }}.
           {% if _sync.stdout_lines | select('search', '[|]not_in_release[|]') | list | length > 0 %}
           In the registry but not in metrics.yaml (kept): {{ _sync.stdout_lines | select('search', '[|]not_in_release[|]')
           | map('regex_replace', '[|].*$', '') | join(', ') }}{% endif %}

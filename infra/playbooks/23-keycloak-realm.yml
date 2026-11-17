@@ -1,0 +1,125 @@
+# 23-keycloak-realm -- the oss911 realm the service layer's logins come from (DD-99 · LD-07 chapters 2, 6 · LD-04 3.5)
+#
+# Prerequisite: 22-containers (Keycloak running). Before the service layer (step 9) is installed.
+#
+# * What the realm holds, and why each piece, is in the header of infra/files/keycloak_realm.py; the playbook only
+#   hands it the inventory's settings and the passwords. The script reads before it writes and changes only what
+#   differs, so a second run reports changed=0; at the end it logs in as every test user and checks the token
+#   carries what the service layer reads (aud, role, agent_no, agency_type_code).
+# * Passwords never go on a command line or into the repository. The administrator's: the bootstrap admin in
+#   keycloak.env while it still exists (22-containers); once it has been replaced by a permanent administrator
+#   (runbook 91), this playbook asks for that one's name and password (not echoed). The test users': generated on the
+#   first run, kept in /etc/oss911/keycloak-test-users.env (root, 0600), one line per user, KC_TEST_<user>=<password>.
+#   Everything is passed to the script on stdin.
+
+- name: Keycloak realm
+  hosts: all
+  gather_facts: false   # no facts used (same reasoning as 40-schema.yml)
+  become: true
+
+  vars:
+    oss911_etc: /etc/oss911
+    test_users_file: "{{ oss911_etc }}/keycloak-test-users.env"
+
+  tasks:
+
+    - name: Read the Keycloak env file (bootstrap administrator, if still there)
+      ansible.builtin.slurp:
+        src: "{{ oss911_etc }}/keycloak.env"
+      register: _kcenv
+      failed_when: false
+      no_log: true
+
+    - name: Take the bootstrap administrator if it is still configured
+      ansible.builtin.set_fact:
+        _kc_admin_user: "{{ (_kcenv.content | b64decode) | regex_search('(?m)^KC_BOOTSTRAP_ADMIN_USERNAME=(.+)$', '\\1') | first }}"
+        _kc_admin_password: "{{ (_kcenv.content | b64decode) | regex_search('(?m)^KC_BOOTSTRAP_ADMIN_PASSWORD=(.+)$', '\\1') | first }}"
+      when: _kcenv.content is defined and (_kcenv.content | b64decode) is search('(?m)^KC_BOOTSTRAP_ADMIN_PASSWORD=')
+      no_log: true
+
+    - name: Ask for the Keycloak administrator's name (the bootstrap administrator has been replaced)
+      ansible.builtin.pause:
+        prompt: "Keycloak administrator (master realm) user name"
+      register: _ask_user
+      when: _kc_admin_password is not defined
+
+    - name: Ask for the Keycloak administrator's password (not echoed)
+      ansible.builtin.pause:
+        prompt: "Password of that administrator"
+        echo: false
+      register: _ask_pw
+      when: _kc_admin_password is not defined
+      no_log: true
+
+    - name: Use the administrator entered
+      ansible.builtin.set_fact:
+        _kc_admin_user: "{{ _ask_user.user_input }}"
+        _kc_admin_password: "{{ _ask_pw.user_input }}"
+      when: _kc_admin_password is not defined
+      no_log: true
+
+    - name: Read the test users' passwords
+      ansible.builtin.slurp:
+        src: "{{ test_users_file }}"
+      register: _tuf
+      failed_when: false
+      no_log: true
+
+    - name: Keep each test user's password, or generate one
+      ansible.builtin.set_fact:
+        _test_users: >-
+          {{ _test_users | default([]) + [item | combine({'password':
+               ((_tuf.content | b64decode) | regex_search('(?m)^KC_TEST_' ~ item.username ~ '=(.+)$', '\1') | first)
+               if _tuf.content is defined and (_tuf.content | b64decode) is search('(?m)^KC_TEST_' ~ item.username ~ '=')
+               else lookup('ansible.builtin.password', '/dev/null', length=24, chars=['ascii_letters', 'digits'])})] }}
+      loop: "{{ keycloak_test_users }}"
+      loop_control:
+        label: "{{ item.username }}"
+      no_log: true
+
+    - name: Write the test users' passwords
+      ansible.builtin.copy:
+        dest: "{{ test_users_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          # Managed by infra/playbooks/23-keycloak-realm.yml, do not edit by hand. Development test users of the
+          # realm {{ keycloak_realm }}; delete a line and rerun to give that user a new password.
+          {% for u in _test_users | default([]) %}
+          KC_TEST_{{ u.username }}={{ u.password }}
+          {% endfor %}
+      no_log: true
+
+    - name: Bring the realm to the described state and verify the logins
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/keycloak_realm.py') }}"
+        stdin: >-
+          {{ {'base_url': 'http://127.0.0.1:' ~ keycloak_http_port, 'admin_user': _kc_admin_user,
+              'admin_password': _kc_admin_password, 'realm': keycloak_realm,
+              'roles': ['call_taker', 'dispatcher', 'supervisor', 'admin'],
+              'user_attributes': ['agent_no', 'agency_type_code'],
+              'svc_client': keycloak_svc_client, 'portal_client': keycloak_portal_client,
+              'portal_redirect_uris': keycloak_portal_redirect_uris, 'password_grant': keycloak_password_grant | bool,
+              'users': _test_users | default([])} | to_json }}
+      register: _realm
+      changed_when: "_realm.stdout_lines | select('match', '^changed: ') | list | length > 0"
+      failed_when: false
+      no_log: true
+
+    - name: Assert the realm was set up
+      ansible.builtin.assert:
+        that:
+          - _realm.rc == 0
+        fail_msg: |-
+          Setting up the realm failed: {{ _realm.stderr | default('') }}
+          "could not log in to the master realm": the administrator's name or password is wrong (or the bootstrap
+          administrator was deleted while keycloak.env still has its lines -- remove them, runbook 91).
+        success_msg: "Realm {{ keycloak_realm }} as described"
+
+    - name: Show what changed and what was verified
+      ansible.builtin.debug:
+        msg: "{{ _realm.stdout_lines }}"

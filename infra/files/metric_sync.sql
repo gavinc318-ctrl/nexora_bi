@@ -22,10 +22,13 @@
 -- Then, over the whole registry: every row that names a mart table must find the table in schema mart and its
 -- columns in it -- older versions included, so a release that drops an old version's column fails (DD-97 item two:
 -- old columns are kept). Metrics without mart_table are synced and reported as not implemented (DD-97 item four).
+-- metrics/marts.yaml, checked against the database the same way, then replaces meta.mart_rule (change 0013): one
+-- row per declared table; a table no longer declared is removed -- the query API stops reading it (DD-99).
 -- Concurrent deployments are serialized by a transaction-level advisory lock.
 --
 -- Output: "<code>|<inserted|updated|unchanged|redefined|new_version>|<version>|<implemented|not_implemented>" per
--- metric, then "<code>|not_in_release|<version>|" for registry metrics this release does not list (kept).
+-- metric, then "<code>|not_in_release|<version>|" for registry metrics this release does not list (kept), then
+-- "<mart table>|rule_inserted|rule_updated|rule_unchanged|rule_removed" per mart table.
 -- =====================================================================
 \set QUIET on
 \pset tuples_only on
@@ -36,6 +39,7 @@ SELECT pg_advisory_xact_lock(hashtext('oss911.metric_sync')) \g /dev/null
 SET LOCAL ROLE oss911_owner;
 
 CREATE TEMP TABLE metric_sync_result (code text, action text, version integer, implemented text) ON COMMIT DROP;
+CREATE TEMP TABLE mart_rule_result (mart_table text, action text) ON COMMIT DROP;
 
 DO $$
 DECLARE
@@ -175,8 +179,40 @@ BEGIN
     END IF;
 END $$;
 
+-- The read rules of the declared tables into meta.mart_rule (change 0013); undeclared tables are removed
+WITH m AS (
+    SELECT t.key AS mart_table, t.value AS r
+      FROM jsonb_each(current_setting('oss911.metrics')::jsonb -> 'marts') t
+),
+removed AS (
+    DELETE FROM meta.mart_rule x WHERE x.mart_table NOT IN (SELECT mart_table FROM m)
+    RETURNING x.mart_table
+),
+upserted AS (
+    INSERT INTO meta.mart_rule AS x (mart_table, grain, roles, row_filter, self_column, dimensions, required_dimensions,
+                                     attributes, sensitive_columns, rules_sha256)
+    SELECT m.mart_table, m.r->>'grain', ARRAY(SELECT jsonb_array_elements_text(m.r->'roles')), m.r->>'row_filter',
+           m.r->>'self_column', m.r->'dimensions', ARRAY(SELECT jsonb_array_elements_text(m.r->'required_dimensions')),
+           m.r->'attributes', m.r->'sensitive_columns', m.r->>'rules_sha256'
+      FROM m
+    ON CONFLICT (mart_table) DO UPDATE
+       SET grain = excluded.grain, roles = excluded.roles, row_filter = excluded.row_filter,
+           self_column = excluded.self_column, dimensions = excluded.dimensions,
+           required_dimensions = excluded.required_dimensions, attributes = excluded.attributes,
+           sensitive_columns = excluded.sensitive_columns, rules_sha256 = excluded.rules_sha256, synced_at = now()
+     WHERE x.rules_sha256 IS DISTINCT FROM excluded.rules_sha256
+    RETURNING x.mart_table, (xmax = 0) AS inserted
+)
+INSERT INTO mart_rule_result
+SELECT mart_table, 'rule_removed' FROM removed
+UNION ALL
+SELECT mart_table, CASE WHEN inserted THEN 'rule_inserted' ELSE 'rule_updated' END FROM upserted
+UNION ALL
+SELECT m.mart_table, 'rule_unchanged' FROM m WHERE m.mart_table NOT IN (SELECT mart_table FROM upserted);
+
 SELECT code || '|' || action || '|' || version || '|' || implemented FROM metric_sync_result ORDER BY code;
 SELECT r.metric_code || '|not_in_release|' || max(r.metric_version) || '|'
   FROM meta.metric_registry r
  WHERE r.metric_code NOT IN (SELECT jsonb_array_elements(current_setting('oss911.metrics')::jsonb -> 'metrics')->>'code')
  GROUP BY r.metric_code ORDER BY 1;
+SELECT mart_table || '|' || action FROM mart_rule_result ORDER BY mart_table;

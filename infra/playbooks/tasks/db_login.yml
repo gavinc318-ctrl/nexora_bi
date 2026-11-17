@@ -9,6 +9,16 @@
 #   env file missing, user missing -> generate a password, create the user, write the file
 #   env file missing, user present -> the password can no longer be found; generate a new one and ALTER ROLE (= a rotation)
 
+# The service layer's login (oss911_query_svc) is consumed by its own service account, which 30-python does not create
+# (it creates airflow): create it here, before the env file is given to it. No shell, no home to log in to.
+- name: "{{ login.name }}: create the consumer's system account {{ login.file_owner }}"
+  ansible.builtin.user:
+    name: "{{ login.file_owner }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+  when: login.file_owner != 'airflow'
+
 - name: "{{ login.name }}: read back the existing env file"
   ansible.builtin.slurp:
     src: "{{ oss911_etc }}/{{ login.env_file }}"
@@ -105,7 +115,14 @@
     != (_st.stdout_lines | select('match', '^after ') | first) | regex_replace('^after ', '')
   when: login.statement_timeout is defined
 
-# The real consumer (the airflow account) reads its own env file and logs in through pgBouncer.
+# The pool a login uses (DD-67 · DD-93): dbt and ingestion the session pool (database oss911), the service layer the
+# transaction pool (oss911_txn); each is rejected on the other one.
+- name: "{{ login.name }}: which pool it uses"
+  ansible.builtin.set_fact:
+    _own_db: "{{ pg_database ~ '_txn' if login.role in ['oss911_query_svc', 'oss911_admin_svc'] else pg_database }}"
+    _other_db: "{{ pg_database if login.role in ['oss911_query_svc', 'oss911_admin_svc'] else pg_database ~ '_txn' }}"
+
+# The real consumer (the airflow account, or the service layer's) reads its own env file and logs in through pgBouncer.
 # Do not verify as postgres instead: postgres uses peer authentication on the local socket, which verifies
 # neither the password nor auth_query (CLAUDE.md section 5, item two).
 # Three result columns: current user | inherits the privilege role's rights | can SET ROLE to it (needed by dbt's role:)
@@ -116,7 +133,7 @@
     cmd: |
       set -a; . {{ oss911_etc }}/{{ login.env_file }}; set +a
       PGPASSWORD="${{ login.env_prefix }}_PASSWORD" psql -X -tA \
-        -h 127.0.0.1 -p {{ pgb_listen_port }} -U "${{ login.env_prefix }}_USER" -d {{ pg_database }} \
+        -h 127.0.0.1 -p {{ pgb_listen_port }} -U "${{ login.env_prefix }}_USER" -d {{ _own_db }} \
         -c "SELECT current_user || '|' || pg_has_role(current_user, '{{ login.role }}', 'USAGE')
                                 || '|' || pg_has_role(current_user, '{{ login.role }}', 'SET')" 2>&1
   args:
@@ -132,7 +149,7 @@
     that:
       - _login_check.stdout | trim == login.name ~ '|true|true'
     fail_msg: |-
-      {{ login.file_owner }} logging in as {{ login.name }} through pgBouncer gave the wrong result:
+      {{ login.file_owner }} logging in as {{ login.name }} through pgBouncer ({{ _own_db }}) gave the wrong result:
         expected: {{ login.name }}|true|true
         actual:   {{ _login_check.stdout | trim }}
 
@@ -144,31 +161,29 @@
            sudo -u postgres psql -d {{ pg_database }} -c '\drg {{ login.name }}'
     success_msg: "{{ login.name }}: logged in through pgBouncer, inherits {{ login.role }}, can SET ROLE"
 
-# The guard of DD-93, verified as the consumer: a session-pool login must be turned away by the transaction pool.
+# The guard of DD-93, verified as the consumer: a login must be turned away by the pool it does not use.
 # Expected to FAIL with "login rejected" -- succeeding would mean the HBA does not cover this login (it is generated
 # from db_logins by 21-connection; rerun 21 after adding a login)
-- name: "{{ login.name }}: verify pgBouncer refuses it on the transaction pool"
+- name: "{{ login.name }}: verify pgBouncer refuses it on {{ _other_db }}"
   ansible.builtin.shell:
     cmd: |
       set -a; . {{ oss911_etc }}/{{ login.env_file }}; set +a
       PGPASSWORD="${{ login.env_prefix }}_PASSWORD" psql -X -tA \
-        -h 127.0.0.1 -p {{ pgb_listen_port }} -U "${{ login.env_prefix }}_USER" -d {{ pg_database }}_txn \
+        -h 127.0.0.1 -p {{ pgb_listen_port }} -U "${{ login.env_prefix }}_USER" -d {{ _other_db }} \
         -c "SELECT 'connected'" 2>&1
   args:
     executable: /bin/bash
   become_user: "{{ login.file_owner }}"
-  register: _txn_check
+  register: _other_check
   changed_when: false
   failed_when: false
   check_mode: false
-  when: login.role in ['oss911_ingest', 'oss911_transform']
 
-- name: "{{ login.name }}: assert the transaction pool rejected it"
+- name: "{{ login.name }}: assert {{ _other_db }} rejected it"
   ansible.builtin.assert:
     that:
-      - "'login rejected' in _txn_check.stdout"
+      - "'login rejected' in _other_check.stdout"
     fail_msg: |-
-      {{ login.name }} was not rejected on {{ pg_database }}_txn: {{ _txn_check.stdout | trim }}
+      {{ login.name }} was not rejected on {{ _other_db }}: {{ _other_check.stdout | trim }}
       The pool / login HBA (/etc/pgbouncer/pgbouncer_hba.conf) does not cover it. Rerun 21-connection.yml (DD-93)
-    success_msg: "{{ login.name }}: rejected on the transaction pool, as it should be (DD-93)"
-  when: login.role in ['oss911_ingest', 'oss911_transform']
+    success_msg: "{{ login.name }}: rejected on {{ _other_db }}, as it should be (DD-93)"

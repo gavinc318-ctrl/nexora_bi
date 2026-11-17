@@ -239,9 +239,10 @@ all:
     ddl_dir: /opt/oss911/ddl
     # Database login users. All of their privileges come from the privilege roles they are members of
     # (DD-74 · LD-02 chapter 13); the users themselves hold no grants -- changing people or rotating passwords never touches grants.
-    # Only the two with an existing consumer are created now: ingestion and dbt are both started by Airflow (owner airflow).
-    # The service layer's query_svc / admin_svc users are created together with the service layer -- created now,
-    # no program would use them, and they would only be two more passwords nobody rotates.
+    # Created when they have a consumer: ingestion and dbt are started by Airflow (owner airflow); svc is the service
+    # layer's (step 9, DD-99), read by its own system account oss911svc (created by db_login.yml) -- it uses the
+    # transaction pool, the others the session pool, each rejected on the other (21-connection's HBA). admin_svc
+    # (the M-* consoles, LD-06) comes with them.
     #   env_prefix decides the variable names in the env file: DBT_USER / DBT_PASSWORD are the names the dbt profile reads
     #   statement_timeout (optional) is set on the user (ALTER ROLE ... SET). dbt's is below the build task's
     #   execution_timeout (30 minutes, src/dags/oss911_build.py): Airflow's timeout kills the dbt process only, and the
@@ -250,6 +251,10 @@ all:
       - { name: ingest, role: oss911_ingest,    env_file: ingest.env, env_prefix: INGEST_DB, file_owner: airflow }
       - { name: dbt,    role: oss911_transform, env_file: dbt.env,    env_prefix: DBT,       file_owner: airflow,
           statement_timeout: 25min }
+      # The query API's own limit is 10 s per query (DD-99, SET LOCAL in the service); this is the backstop for a
+      # statement that escapes it
+      - { name: svc,    role: oss911_query_svc, env_file: svc.env,    env_prefix: SVC_DB,    file_owner: oss911svc,
+          statement_timeout: 30s }
     # Initial partition window, monthly (DD-77): previous month, this month, three months ahead. From then on
     # orchestration calls meta.ensure_monthly_partitions to create future months in advance -- until orchestration is
     # in place the window runs out after partition_months_ahead months; then rerun the playbook to move it forward.
@@ -290,6 +295,29 @@ all:
     keycloak_db: keycloak
     keycloak_http_port: 8080            # bound to 127.0.0.1 only; not exposed on the development machine
     keycloak_mgmt_port: 9000            # since KC 25 health checks and metrics use a separate management port
+
+    # ---- Keycloak realm for the service layer (23-keycloak-realm.yml, step 9, DD-99) ----
+    # The service layer checks aud = keycloak_svc_client and takes from the access token: the role
+    # (realm_access.roles, one of the four), agent_no (the "only my own rows" filter) and agency_type_code (the
+    # department, LD-07 2.3). Both attributes are editable by administrators only.
+    keycloak_realm: oss911
+    keycloak_svc_client: oss911-svc
+    keycloak_portal_client: oss911-portal
+    keycloak_portal_redirect_uris: ["http://127.0.0.1/*"]
+    # The password grant lets the development tests log in from the command line. Never in production: people log
+    # in through the portal's browser flow only (OAuth 2.0 security BCP).
+    keycloak_password_grant: true
+    # Development test users (TC-DISC-02 / -03 on the call data): passwords generated on the first run, kept only in
+    # /etc/oss911/keycloak-test-users.env (root, 0600). agent_no 101, 102 are agents of the fake ICP; 999 is none.
+    # None in production: people come from the directory (LD-07 chapter 6).
+    keycloak_test_users:
+      - { username: ct101,      roles: [call_taker], attributes: { agent_no: "101" } }
+      - { username: ct102,      roles: [call_taker], attributes: { agent_no: "102" } }
+      - { username: ct_noagent, roles: [call_taker], attributes: {} }
+      - { username: ct_unknown, roles: [call_taker], attributes: { agent_no: "999" } }
+      - { username: disp1,      roles: [dispatcher], attributes: {} }
+      - { username: sup1,       roles: [supervisor], attributes: {} }
+      - { username: adm1,       roles: [admin],      attributes: {} }
     seaweedfs_dir: /var/lib/seaweedfs
     seaweedfs_s3_port: 8333
     seaweedfs_filer_port: 8888

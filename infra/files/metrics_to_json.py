@@ -14,7 +14,8 @@ says (Mac side 2026-11-16). param_vars is how the value reaches the model, not p
 
 Output: {"metrics": [...], "marts": {table: {...}}}. marts.yaml (who may read a mart table, through which
 dimensions, which columns are sensitive) is checked for form here and every metric's mart_table must be declared in
-it; its columns are checked in the database. Each metric: {code, version, domain, name_zh, name_en, name_ar, name_ar_state, definition, grain, aggregation,
+it; its columns are checked in the database, and its rules are synced into meta.mart_rule (change 0013), which the
+service layer reads. Each metric: {code, version, domain, name_zh, name_en, name_ar, name_ar_state, definition, grain, aggregation,
 measure, entity_date, retrospective, params, dimensions, source_tables, depends_unverified, published,
 mart_table, mart_column, mart_numerator, mart_denominator, effective_from, definition_sha256}.
 Exit code 0 with JSON on stdout; 1 with every problem found on stderr.
@@ -173,9 +174,15 @@ def convert_marts(doc):
             sens = {}
         columns = sorted(set(dims.values()) | {c for v in attrs.values() for c in v} | set(sens)
                          | ({t["self_column"]} if isinstance(t.get("self_column"), str) else set()))
-        out[name] = {"roles": roles, "row_filter": rf, "self_column": t.get("self_column"),
-                     "dimensions": dims, "required_dimensions": t.get("required_dimensions", []),
-                     "attributes": attrs, "sensitive_columns": sens, "columns": columns}
+        grain = t.get("grain")
+        if not isinstance(grain, str) or not grain.strip():
+            problems.append(f"{where}: grain must be given (what one row is)")
+        rules = {"grain": grain, "roles": roles, "row_filter": rf, "self_column": t.get("self_column"),
+                 "dimensions": dims, "required_dimensions": t.get("required_dimensions", []),
+                 "attributes": attrs, "sensitive_columns": sens}
+        out[name] = {**rules, "columns": columns,
+                     "rules_sha256": hashlib.sha256(
+                         json.dumps(rules, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()}
     return out, problems
 
 

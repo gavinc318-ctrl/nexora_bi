@@ -1,5 +1,5 @@
 -- =====================================================================
--- Verification of database roles and grants (structural changes 0002 to 0012 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
+-- Verification of database roles and grants (structural changes 0002 to 0013 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
 --
 -- It verifies the five privilege roles themselves: inside a transaction the script creates one temporary
 -- login user per role, the superuser session does SET ROLE to that login user, and then runs statements
@@ -406,12 +406,23 @@ SELECT pg_temp.expect_ok    ($$INSERT INTO meta.mart_day_publication (mart_table
 SELECT pg_temp.expect_denied($$UPDATE meta.data_publication SET kind = 'nightly' WHERE false$$);
 SELECT pg_temp.expect_denied($$DELETE FROM meta.mart_day_publication WHERE false$$);
 SELECT pg_temp.expect_denied($$UPDATE meta.metric_registry SET is_published = false WHERE false$$);
+SELECT pg_temp.expect_denied($$UPDATE meta.mart_rule SET roles = '{admin}' WHERE false$$);
 RESET ROLE;
 SET ROLE :"query_user";
 SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.metric_registry, meta.mart_day_publication, meta.data_publication LIMIT 1$$);
 SELECT pg_temp.expect_denied($$INSERT INTO meta.data_publication (kind, date_from, date_to, run_id)
                                VALUES ('intraday', 20260101, 20260101, 'zz_check')$$);
+-- mart read rules (0013): the service layer reads them, only 46-metrics (the owner) writes them
+SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.mart_rule LIMIT 1$$);
+SELECT pg_temp.expect_denied($$DELETE FROM meta.mart_rule WHERE false$$);
 RESET ROLE;
+-- the rules' own checks
+SELECT pg_temp.expect_error ($$INSERT INTO meta.mart_rule (mart_table, grain, roles, row_filter, dimensions, rules_sha256)
+                               VALUES ('mart.zz_check', 'x', '{admin}', 'self', '{"date": "date_key"}', 'x')$$,
+                             '%ck_mart_rule_self%');
+SELECT pg_temp.expect_error ($$INSERT INTO meta.mart_rule (mart_table, grain, roles, row_filter, dimensions, rules_sha256)
+                               VALUES ('mart.zz_check', 'x', '{auditor}', 'none', '{"date": "date_key"}', 'x')$$,
+                             '%ck_mart_rule_roles%');
 
 -- M-10 marks supervisors over an interval, with a reason (DD-94 items six, sixteen · change 0008); clearing closes
 -- valid_to, nothing is deleted or rewritten; two marks of one agent never overlap

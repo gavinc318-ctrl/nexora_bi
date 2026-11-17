@@ -2050,3 +2050,34 @@ ERROR 级检查（监控批次接通道之前先让它红）。
   丢弃 → 封；造一张落后的表 → 告警 FAIL，删去 → PASS；46 同步 M-C15 `redefined | implemented`；dbt 变量改成 25 → 46 报错。
 
 另：一个源端日回扫多次时（补跑、手工重跑），**任一次**完整进了 core 即算定稿；之后的回扫带来的差异由封账后 7 天的修正吸收。
+
+## 2026-11-17  开发机：第 9 步第一块——读取规则进 meta、服务登录用户、Keycloak realm
+
+**报名字（登记组件清单之前，Mac 侧开工清单第 1 条）**：验 JWT 选 **PyJWT**（MIT），它验 RS256 依赖 **cryptography**
+（Apache-2.0 或 BSD-3-Clause 二选一）及其依赖 cffi（MIT）、pycparser（BSD-3-Clause）。其余照清单：FastAPI（MIT）、Starlette（BSD-3）、
+uvicorn（BSD-3，不带 [standard]，即不引入 uvloop、httptools）、pydantic 与 pydantic-core（MIT）、psycopg 3（LGPL-3.0，入库已在用）。
+锁文件 `infra/svc-requirements.lock` 随第二块提交；如对 PyJWT 有异议请在那之前说。
+
+**令牌声明名（开发机定，第 9 步更正第 2 条）**：工号 `agent_no`、部门 `agency_type_code`，均为 access token 顶层字符串声明；
+角色取 `realm_access.roles` 中四个之一（call_taker · dispatcher · supervisor · admin）；服务层核对 `aud` 含 `oss911-svc`。
+
+**已实现**
+- 结构变更 **0013** `meta.mart_rule`：marts.yaml 的只读副本，一表一行（roles、row_filter、self_column、dimensions、required_dimensions、
+  attributes、sensitive_columns、规则哈希）。46 同步：新增、改动、不变、**移除**（yaml 里删掉的表从规则表删除，查询 API 随即不读）。
+  marts.yaml 每张表须写 `grain`。权限验证 157 → 162 项（query_svc 能读不能改；owner 以外无人能写；两条约束）。
+- 服务登录用户 **svc**（属 `oss911_query_svc`），口令在 `/etc/oss911/svc.env`（0600，属新系统账户 `oss911svc`，由 db_login 建）。
+  db_login 的验证按池分：服务层用户经 `oss911_txn` 登录、会话池拒绝；dbt 与入库反之（原只验后者）。svc 的 `statement_timeout` 30s
+  作兜底，查询 API 自己每条 `SET LOCAL statement_timeout = '10s'`（DD-99）。
+  与清单的一处差别：`SVC_DSN_ANALYTIC_READ` / `SVC_DSN_AUDIT_WRITE` 两个连接串（只含主机、端口、库名）放第三块部署时写的
+  `/etc/oss911/svc.conf`（0644，非机密，同 ingest.conf 的做法），用户名与口令只在 svc.env——连接串里不带口令，两个用途也可各配各的用户。
+- 剧本 **23-keycloak-realm**（`infra/files/keycloak_realm.py`，只用标准库，读后再写、只改不同处）：realm `oss911`、四个 realm 角色、
+  客户端 `oss911-svc`（只作 aud，不登录任何人）与 `oss911-portal`（公共客户端；其令牌带 aud 与两条属性声明）、七个开发测试用户
+  （ct101、ct102 对应假接口坐席 101、102；ct_noagent 无工号；ct_unknown 工号 999 对不上坐席；disp1、sup1、adm1）。
+  **两条属性在用户配置里声明为仅管理员可改**：否则用户可在个人账户页把工号改成别人的，「只见本人」形同虚设——已实测用户自改返回
+  `error-user-attribute-read-only`。开发机为命令行测试开了 password grant（inventory `keycloak_password_grant`），**生产不开**
+  （只走门户的浏览器流程）。管理员口令：keycloak.env 里还有引导管理员就用它，已按 runbook 91 换掉的，剧本提示输入（不回显）。
+- 临时验证：0013 与同步在临时库上（插入、不变、改一张、改回）；Keycloak 26.0 起一个临时容器跑剧本 23 两遍（第二遍 changed=0），
+  七个用户登录，令牌的 aud、角色、工号逐个核对。
+- runbook 18（真机顺序：21 → 40 → 45 → 50 → intraday → 46 → 23，连同第 8 步第二段收尾的改动）。
+
+**下一块**：`src/svc/` 服务代码（四个接口、权限上下文、选版先于过滤、审计、`cache_key()`、OpenAPI 生成）与测试。

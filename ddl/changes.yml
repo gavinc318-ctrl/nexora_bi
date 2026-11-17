@@ -102,3 +102,9 @@
   summary: Metric registry by (metric, version) with the mart mapping, names and effective_from (DD-97); meta.data_publication and meta.mart_day_publication (DD-81, DD-97 review); index on fact_call.built_at
   files:
     - changes/0012_metric_registry_and_publication.sql
+
+- id: "0013"
+  run_as: owner
+  summary: Mart read rules (DD-99 review item seven) -- meta.mart_rule, the read-only copy of metrics/marts.yaml written by 46-metrics; the query API reads only the mart tables listed in it
+  files:
+    - changes/0013_mart_rule.sql
