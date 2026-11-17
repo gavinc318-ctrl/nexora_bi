@@ -10,13 +10,25 @@
 #   env file missing, user present -> the password can no longer be found; generate a new one and ALTER ROLE (= a rotation)
 
 # The service layer's login (oss911_query_svc) is consumed by its own service account, which 30-python does not create
-# (it creates airflow): create it here, before the env file is given to it. No shell, no home to log in to.
+# (it creates airflow): create it here, before the env file is given to it. No login shell. Its home exists (0750,
+# under /var/lib like airflow's): the verification below runs as this account, and ansible puts its temporary files
+# in the home -- a home that does not exist gives "Unable to use /home/<account>/.ansible/tmp" on every run.
 - name: "{{ login.name }}: create the consumer's system account {{ login.file_owner }}"
   ansible.builtin.user:
     name: "{{ login.file_owner }}"
     system: true
     shell: /usr/sbin/nologin
-    create_home: false
+    home: "/var/lib/{{ login.file_owner }}"
+    create_home: true
+  when: login.file_owner != 'airflow'
+
+- name: "{{ login.name }}: its home is private"
+  ansible.builtin.file:
+    path: "/var/lib/{{ login.file_owner }}"
+    state: directory
+    owner: "{{ login.file_owner }}"
+    group: "{{ login.file_owner }}"
+    mode: "0750"
   when: login.file_owner != 'airflow'
 
 - name: "{{ login.name }}: read back the existing env file"

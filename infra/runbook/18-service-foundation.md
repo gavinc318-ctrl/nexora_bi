@@ -7,7 +7,7 @@
 | 东西 | 在哪 | 给服务层做什么 |
 | --- | --- | --- |
 | mart 读取规则 | `meta.mart_rule`（结构变更 0013），由 46 从 `metrics/marts.yaml` 同步 | 哪些角色能读哪张表、按什么维度、哪些列敏感、接警员只见本人；**表里没有的 mart 表，查询 API 不读** |
-| 服务的库登录用户 `svc` | `/etc/oss911/svc.env`（0600，属系统账户 `oss911svc`） | 属 `oss911_query_svc`：读 core · mart · meta，对审计表只能 INSERT；**只走事务池 `oss911_txn`** |
+| 服务的库登录用户 `svc` | `/etc/oss911/svc.env`（0600，属系统账户 `oss911svc`，家目录 `/var/lib/oss911svc`） | 属 `oss911_query_svc`：读 core · mart · meta，对审计表只能 INSERT；**只走事务池 `oss911_txn`** |
 | Keycloak realm `oss911` | 剧本 23 | 四个角色、两个客户端、两个用户属性（工号 `agent_no`、部门 `agency_type_code`）、七个开发测试用户 |
 
 同时部署第 8 步第二段收尾的改动（Mac 侧答复）：第五张 mart `calls__day__repeat_failed`（M-C15）、46 核对参数与 dbt 变量、
