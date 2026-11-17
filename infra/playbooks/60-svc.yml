@@ -189,6 +189,16 @@
                    or _inst_svcdeps.changed else 'started' }}"
 
     # ========== Verification, as a caller ==========
+    # uvicorn opens the port only once the application has started, so waiting on the port keeps the call below
+    # from printing a "FAILED - RETRYING" line during a normal start. If the port never opens, the assert below
+    # says so and points at the journal.
+    - name: Wait for the service to listen
+      ansible.builtin.wait_for:
+        host: "{{ svc_listen }}"
+        port: "{{ svc_port }}"
+        timeout: 30
+      failed_when: false
+
     - name: Call without a token
       ansible.builtin.uri:
         url: "{{ svc_base }}/v1/me"
