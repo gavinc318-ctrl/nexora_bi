@@ -186,6 +186,23 @@ all:
       - "PyYAML"
       - "setuptools"
     ingest_relock: false
+
+    # The service layer (DD-99 · step 9): its own venv-svc, dependencies frozen in infra/svc-requirements.lock, same
+    # approach as ingestion (DD-83). Installed and run by 60-svc.yml. Licences: NOTES 2026-11-17 (block one, two).
+    svc_requirements:
+      - "fastapi"
+      - "uvicorn"
+      - "psycopg[binary]"
+      - "PyJWT[crypto]"
+      - "setuptools"
+    svc_relock: false
+    svc_port: 8090                          # 8080 Keycloak, 8081 Airflow
+    # Bound to loopback on the development machine, like Keycloak and Airflow (no reverse proxy here)
+    svc_listen: 127.0.0.1
+    # The two connection uses (DD-99 review item three). Development: both pgBouncer's transaction pool; production:
+    # the analytic replica's read-only pool for reads (oss911_ro, LD-08), the primary for the audit
+    svc_dsn_analytic_read: "host=127.0.0.1 port={{ pgb_listen_port }} dbname={{ pg_database }}_txn"
+    svc_dsn_audit_write: "host=127.0.0.1 port={{ pgb_listen_port }} dbname={{ pg_database }}_txn"
     # Runtime configuration of the ingestion program (LD-01 2.5), written by 30-python.yml into /etc/oss911.
     # The database is reached through pgBouncer's session pool (DD-85: the advisory lock lives in the session).
     ingest_db_host: 127.0.0.1

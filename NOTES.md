@@ -2114,3 +2114,19 @@ uvicorn（BSD-3，不带 [standard]，即不引入 uvloop、httptools）、pydan
 10. 一次请求的口径版本跨生效日：按日且输出日期维度时照常，每行带 `metric_versions`；其余（周及以上、或不按日期输出）`metric_version_boundary`。
 
 **下一块**：部署——30-python 装 venv-svc 与服务（离线 wheel，同 venv-ingest），`svc.conf`，systemd 单元（8090），部署时核对 OpenAPI，runbook 19 与真机验证。
+
+## 2026-11-17  开发机：第 9 步第三块——服务层部署（60-svc）
+
+- 剧本 **60-svc**：取 wheel（按 `infra/svc-requirements.lock`，wheelhouse 的 svc 子目录为空或 `-e svc_relock=true` / `wheelhouse_refresh=true`
+  时才联网）→ 离线装 venv-svc 与程序 → **以服务账户运行装好的程序生成 OpenAPI，与仓库里的 contracts/openapi/v1.json 比，不同即停**
+  （不重启）→ 写 `/etc/oss911/svc.conf`（两个连接串、realm 的 issuer 与 aud，均非机密）→ systemd 单元 `oss911-svc`（uvicorn，
+  127.0.0.1:8090，`User=oss911svc`，`ProtectSystem=strict` 等收紧项）→ 验证：无令牌 401；开发机上以 ct101、sup1、disp1 从 realm 取令牌
+  调查询，ct101 只得 101（self:101）、sup1 得全部坐席、disp1 被拒（table_not_permitted）。
+- 验证调用写成 `infra/files/svc_probe.py`（标准库），口令经 stdin 传入。
+- 依赖登记：MANIFEST 一行（21 个包及各自许可）、components.csv 六行（FastAPI 含 Starlette、uvicorn、pydantic、PyJWT、cryptography、
+  opentelemetry-api）。
+- 临时验证：用临时 svc.conf / svc.env 让 uvicorn 以 `--factory oss911_svc.app:serve` 起服务（读配置的真实路径），对临时 Keycloak 取令牌，
+  svc_probe 输出与剧本断言逐行吻合；`--check` 对一致与不一致的文件分别 0 与 1。剧本本身要 root，未在开发机代跑。
+- runbook 19。
+
+第 9 步至此三块齐。服务层没有经过 Superset（DD-99 第八条），前端（LD-05）可以按 contracts/openapi/v1.json 开工。

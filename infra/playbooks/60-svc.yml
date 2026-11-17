@@ -1,0 +1,253 @@
+# 60-svc -- the service layer: the query API (DD-99 · LD-04 3.5 · step 9)
+#
+# Prerequisites: 40-schema (0013 meta.mart_rule; the login user svc in svc.env, owned by the system account
+# oss911svc) · 46-metrics (the registry and the read rules) · 23-keycloak-realm (the realm whose tokens it checks).
+#
+# * Same two stages as 30-python: fetch wheels by the repository lock (network, only when the wheelhouse has none
+#   for svc or with -e wheelhouse_refresh=true / -e svc_relock=true), then install offline with --no-index.
+#   infra/svc-requirements.lock is the single authority (DD-83).
+# * The program's source is copied to {{ venv_root }}/svc-src and built there (not in the repository, as root).
+# * The OpenAPI document the installed program generates must equal the committed contracts/openapi/v1.json, or the
+#   deployment stops before the service is (re)started: the front end builds on the committed one (DD-99).
+# * svc.conf (0644) holds what is not secret: the two connection strings (no user, no password) and the realm's
+#   issuer and audience. The login user and password stay in svc.env (40-schema).
+# * Verification as a caller would: without a token -> 401 unauthenticated; then, on the development machine (test
+#   users present), log in as ct101 and sup1 through the realm and query: ct101 gets only agent 101's rows, sup1
+#   every agent's; dispatcher disp1 is refused the agent table. Each of these is also a row in audit.access_log.
+
+- name: Service layer
+  hosts: all
+  gather_facts: false   # no facts used (same reasoning as 40-schema.yml)
+  become: true
+
+  vars:
+    oss911_etc: /etc/oss911
+    svc_venv: "{{ venv_root }}/venv-svc"
+    svc_lock: "{{ playbook_dir | dirname }}/svc-requirements.lock"
+    svc_src_repo: "{{ playbook_dir | dirname | dirname }}/src/svc"
+    svc_src_dir: "{{ venv_root }}/svc-src"
+    openapi_committed: "{{ playbook_dir | dirname | dirname }}/contracts/openapi/v1.json"
+    svc_base: "http://{{ svc_listen }}:{{ svc_port }}"
+    kc_base: "http://127.0.0.1:{{ keycloak_http_port }}/realms/{{ keycloak_realm }}"
+
+  tasks:
+
+    - name: Assert the login user's env file exists (40-schema)
+      ansible.builtin.stat:
+        path: "{{ oss911_etc }}/svc.env"
+      register: _svcenv
+
+    - name: Assert the prerequisites
+      ansible.builtin.assert:
+        that:
+          - _svcenv.stat.exists
+          - _svcenv.stat.pw_name == 'oss911svc'
+        fail_msg: "{{ oss911_etc }}/svc.env is missing or not owned by oss911svc: run 40-schema.yml first (runbook 18)"
+        success_msg: "svc.env present, owned by oss911svc"
+
+    # ========== Fetch (network), only when needed ==========
+    - name: Re-resolve the service dependencies and write the repository lock (network, only with -e svc_relock=true)
+      ansible.builtin.shell:
+        cmd: |
+          set -e
+          d=$(mktemp -d)
+          {{ python_bin }} -m venv "$d"
+          "$d"/bin/pip install --quiet --upgrade pip
+          "$d"/bin/pip install --quiet {{ svc_requirements | map('quote') | join(' ') }}
+          "$d"/bin/pip freeze --all | grep -v '^pip==' > {{ svc_lock }}
+          rm -rf "$d"
+      become: false
+      when: svc_relock | bool
+
+    - name: Create the wheelhouse directory for the service
+      ansible.builtin.file:
+        path: "{{ wheelhouse }}/svc"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Check whether the service's wheels are there
+      ansible.builtin.find:
+        paths: "{{ wheelhouse }}/svc"
+        patterns: "*.whl"
+      register: _whsvc
+
+    - name: Fetch the service's wheels (by the lock)
+      ansible.builtin.command:
+        cmd: "{{ python_bin }} -m pip wheel --requirement {{ svc_lock }} --wheel-dir {{ wheelhouse }}/svc"
+      register: _dl_svc
+      changed_when: "'Saved' in _dl_svc.stdout or 'Created wheel' in _dl_svc.stdout"
+      when: (_whsvc.matched | int) == 0 or (wheelhouse_refresh | bool) or (svc_relock | bool)
+
+    - name: Look for source packages in the service's wheelhouse
+      ansible.builtin.find:
+        paths: "{{ wheelhouse }}/svc"
+        patterns: "*.tar.gz,*.zip"
+      register: _sdist_svc
+
+    - name: Assert the service's wheelhouse holds wheels only (no compiler inside the wall)
+      ansible.builtin.assert:
+        that:
+          - (_sdist_svc.matched | int) == 0
+        fail_msg: "Source packages in {{ wheelhouse }}/svc: {{ _sdist_svc.files | map(attribute='path') | map('basename') | join(', ') }}"
+        success_msg: "Service wheelhouse: wheels only"
+
+    # ========== Install (no network) ==========
+    - name: Create the service venv
+      ansible.builtin.command:
+        cmd: "{{ python_bin }} -m venv {{ svc_venv }}"
+        creates: "{{ svc_venv }}/bin/python"
+
+    - name: Install the service's dependencies offline
+      ansible.builtin.command:
+        cmd: "{{ svc_venv }}/bin/pip install --no-index --find-links {{ wheelhouse }}/svc --requirement {{ svc_lock }}"
+      register: _inst_svcdeps
+      changed_when: "'Successfully installed' in _inst_svcdeps.stdout"
+
+    - name: Copy the service source to the build directory
+      ansible.builtin.copy:
+        src: "{{ svc_src_repo }}/"
+        dest: "{{ svc_src_dir }}/"
+        owner: root
+        group: root
+        mode: "0644"
+        directory_mode: "0755"
+      register: _svcsrc
+
+    - name: Query whether the service program is installed
+      ansible.builtin.command:
+        cmd: "{{ svc_venv }}/bin/pip show oss911-svc"
+      register: _svcshow
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Install the service program offline
+      ansible.builtin.command:
+        cmd: >-
+          {{ svc_venv }}/bin/pip install --no-index --no-build-isolation --no-deps --force-reinstall {{ svc_src_dir }}
+      when: _svcsrc.changed or _svcshow.rc != 0
+      register: _svcinst
+
+    # Generated by the installed program, as the service account, compared with the committed contract
+    - name: Check the committed OpenAPI against the installed program
+      ansible.builtin.command:
+        cmd: "{{ svc_venv }}/bin/oss911-svc-openapi --check /dev/stdin"
+        stdin: "{{ lookup('ansible.builtin.file', openapi_committed) }}\n"
+      become_user: oss911svc
+      register: _openapi
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Assert the OpenAPI matches
+      ansible.builtin.assert:
+        that:
+          - _openapi.rc == 0
+        fail_msg: |-
+          contracts/openapi/v1.json differs from what the code generates ({{ _openapi.stderr | trim }}).
+          The code and the contract must change together: regenerate it with oss911-svc-openapi and commit. Nothing was restarted.
+        success_msg: "contracts/openapi/v1.json matches the installed program"
+
+    # ========== Configuration and the unit ==========
+    - name: Write the service's settings (non-secret)
+      ansible.builtin.copy:
+        dest: "{{ oss911_etc }}/svc.conf"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Managed by infra/playbooks/60-svc.yml, do not edit by hand. Non-secret settings of the query API
+          # (src/svc/src/oss911_svc/config.py); the login user and password are in svc.env (40-schema.yml).
+          SVC_DSN_ANALYTIC_READ={{ svc_dsn_analytic_read }}
+          SVC_DSN_AUDIT_WRITE={{ svc_dsn_audit_write }}
+          SVC_OIDC_ISSUER={{ kc_base }}
+          SVC_OIDC_AUDIENCE={{ keycloak_svc_client }}
+      register: _svcconf
+
+    - name: Deploy the systemd unit
+      ansible.builtin.template:
+        src: ../files/systemd/oss911-svc.service.j2
+        dest: /etc/systemd/system/oss911-svc.service
+        owner: root
+        group: root
+        mode: "0644"
+      register: _svcunit
+
+    - name: Reload systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: _svcunit.changed
+
+    - name: Enable and (re)start the service
+      ansible.builtin.systemd_service:
+        name: oss911-svc
+        enabled: true
+        state: "{{ 'restarted' if (_svcinst.changed | default(false)) or _svcconf.changed or _svcunit.changed
+                   or _inst_svcdeps.changed else 'started' }}"
+
+    # ========== Verification, as a caller ==========
+    - name: Call without a token
+      ansible.builtin.uri:
+        url: "{{ svc_base }}/v1/me"
+        status_code: [401]
+        return_content: true
+      register: _anon
+      retries: 15
+      delay: 2
+      until: _anon.status | default(0) == 401
+      failed_when: false
+
+    - name: Assert it answers and refuses without a token
+      ansible.builtin.assert:
+        that:
+          - _anon.status | default(0) == 401
+          - (_anon.json | default({})).error | default('') == 'unauthenticated'
+        fail_msg: >-
+          {{ svc_base }}/v1/me answered {{ _anon.status | default('nothing') }}, expected 401 unauthenticated.
+          Look at: journalctl -u oss911-svc -n 60
+        success_msg: "The query API answers on {{ svc_base }} and refuses a call without a token (401)"
+
+    - name: Read the test users' passwords (development only)
+      ansible.builtin.slurp:
+        src: "{{ oss911_etc }}/keycloak-test-users.env"
+      register: _tuf
+      failed_when: false
+      no_log: true
+
+    - name: Log in as ct101, sup1 and disp1 and query the agent table
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/svc_probe.py') }}"
+        stdin: >-
+          {{ {'token_url': kc_base ~ '/protocol/openid-connect/token', 'client': keycloak_portal_client,
+              'svc_base': svc_base, 'probe': ['ct101', 'sup1', 'disp1'],
+              'users': dict((_tuf.content | b64decode).splitlines() | select('match', '^KC_TEST_[^=]+=')
+                            | map('regex_replace', '^KC_TEST_', '') | map('split', '=', 1))} | to_json }}
+      register: _calls
+      changed_when: false
+      failed_when: false
+      when: _tuf.content is defined and keycloak_password_grant | bool
+      no_log: true
+
+    - name: Show what each user got
+      ansible.builtin.debug:
+        msg: "{{ _calls.stdout_lines | default([]) + ([_calls.stderr] if (_calls.stderr | default('')) else []) }}"
+      when: _calls is not skipped
+
+    - name: Assert the row and table permissions held
+      ansible.builtin.assert:
+        that:
+          - _calls.rc == 0
+          - _calls.stdout_lines | select('match', '^ct101[|]200[|]1[|]101[|]self:101$') | list | length == 1
+          - _calls.stdout_lines | select('match', '^sup1[|]200[|][0-9]+[|].*[|]all$') | list | length == 1
+          - _calls.stdout_lines | select('match', '^disp1[|]403[|]table_not_permitted$') | list | length == 1
+        fail_msg: >-
+          Expected: ct101 only agent 101 (self:101), sup1 every agent (all), disp1 refused (table_not_permitted).
+          Got: {{ _calls.stdout_lines | default([]) }} {{ _calls.stderr | default('') }}.
+          If ct101 got identity_unmapped: agent 101 is not in core.dim_agent (the reference data build).
+        success_msg: "ct101 sees only agent 101, sup1 every agent, disp1 is refused the agent table"
+      when: _calls is not skipped

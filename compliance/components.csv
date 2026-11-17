@@ -23,3 +23,9 @@ unixODBC,ODBC 驱动管理器（迁移期 · 若采用 pyodbc 路线）,L1,LGPL 
 pyodbc,Python ODBC 客户端（迁移期 · 与 unixODBC 配套）,L1,MIT,是,社区,2004,Python 库 · 直接 import,宽松许可可 import,低风险 · 迁移期组件,待冻结,DD-52
 pymssql,Python SQL Server 客户端（迁移期 · 直连 FreeTDS 的备选路线）,L1,LGPL 2.1,是,社区,2003,Python 库 · 动态链接,LGPL 动态链接不传染,低风险 · 迁移期组件 · 与 pyodbc 二选一,待冻结,DD-52
 psycopg 3（含 psycopg-binary）,接入程序的 PostgreSQL 驱动（venv-ingest）,L1,LGPL-3.0,是,社区（psycopg 项目）,2021,Python 库 · 直接 import · 动态链接,LGPL 附条件可 import：不修改、不静态链接、不打成单文件可执行（LD-09 4.2）；psycopg-binary 轮子自带 libpq（PostgreSQL License）与 OpenSSL（Apache 2.0）,低风险,3.3.6,DD-84 · DD-86
+FastAPI（含 Starlette）,服务层查询 API 的 Web 框架（venv-svc）,L1,MIT（Starlette 为 BSD-3-Clause）,是,社区,2018,Python 库 · 直接 import,宽松许可可 import,低风险,0.163.1（Starlette 1.10.0）,DD-99
+uvicorn,服务层的 ASGI 服务进程（venv-svc，不带 [standard]）,L1,BSD-3-Clause,是,社区（Encode）,2017,Python 库 · 独立进程运行本方应用,宽松许可,低风险,0.54.0,DD-99
+pydantic（含 pydantic-core）,服务层请求与响应的校验及 OpenAPI 生成（venv-svc）,L1,MIT,是,社区,2017,Python 库 · 直接 import,宽松许可可 import,低风险,2.14.3（core 2.50.4）,DD-99
+PyJWT,服务层校验 Keycloak 签发的访问令牌（venv-svc）,L1,MIT,是,社区,2011,Python 库 · 直接 import,宽松许可可 import,低风险,2.15.1,DD-99
+cryptography（含 cffi、pycparser）,PyJWT 校验 RS256 签名所需（venv-svc）,L1,Apache-2.0 或 BSD-3-Clause（cffi MIT · pycparser BSD-3-Clause）,是,社区（PyCA）,2013,Python 库 · 直接 import · 轮子自带 OpenSSL（Apache 2.0）,宽松许可可 import,低风险,50.0.2,DD-99
+opentelemetry-api,FastAPI 新版引入的依赖（venv-svc，本方不调用）,L1,Apache-2.0,是,CNCF（OpenTelemetry）,2019,Python 库 · 间接依赖,宽松许可,低风险,1.45.2,DD-99
