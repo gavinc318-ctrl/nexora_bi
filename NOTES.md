@@ -2081,3 +2081,36 @@ uvicorn（BSD-3，不带 [standard]，即不引入 uvloop、httptools）、pydan
 - runbook 18（真机顺序：21 → 40 → 45 → 50 → intraday → 46 → 23，连同第 8 步第二段收尾的改动）。
 
 **下一块**：`src/svc/` 服务代码（四个接口、权限上下文、选版先于过滤、审计、`cache_key()`、OpenAPI 生成）与测试。
+
+## 2026-11-17  开发机：第 9 步第二块——服务代码 src/svc/（查询 API）
+
+`src/svc/`（包 `oss911_svc`，结构同 src/ingest）、锁文件 `infra/svc-requirements.lock`、契约 `contracts/openapi/v1.json`（由代码生成；
+测试与部署都核对一致）。四个接口按 DD-99 与其评审更正实现；测试 48 项（单元 21 项不依赖库；其余连临时库，以属 `oss911_query_svc`
+的登录用户运行，即与生产同权限）。另用临时 Keycloak 签发的真实令牌走 JWKS 验签端到端跑通。
+
+**依赖补报**：锁定时新版 FastAPI 带进两个此前没报的包：`opentelemetry-api`（Apache-2.0）、`annotated-doc`（MIT）。其余同第一块所报。
+测试用的 pytest、httpx 只装在开发环境，不进锁文件、不进 venv-svc。
+
+**实现上开发机自定、请 Mac 侧知悉或定**
+1. **成员接口按指标定表**：`GET /v1/dimensions/{dim}/members?metric=M-C09&from&to&attributes=...`。维度名是按表的（agent 只在坐席处理表），
+   按指标取表与「按指标查、不按表查」一致。属性要显式点名（`attributes=agent_name_en`），无权的属性整请求 403——默认不返回任何属性，
+   于是不存在「对主管多给、对接警员静默少给」。日期范围缺省为最近 31 天。
+2. **多角色取最宽的一个**（admin > supervisor > dispatcher > call_taker）：四个角色的可读范围是嵌套的，取最宽不会超出用户本有的任何一个角色。
+3. **部门过滤**（话务上无表用到，只在单元测试里验了机制）：作用于 admin 以外的全部角色；过滤列取该表维度 `department` 对应的列。
+   **请定**：主管是否也受部门过滤（LD-07 2.3 未写），以及将来调度类 mart 的部门列是否就叫 department 维度。
+4. **每日状态多一个值**：除 published · not_built · not_closed 外，指定 `data_version` 为某个整数而那天没有该版本时为 `version_not_found`
+   （那天已封账、只是没有这一版修正——与「未封账」不同）。
+5. **审计**：拒绝的请求也写（role、metric_codes 照记，row_count 为空）；令牌无效（401）无从知道是谁，不写库、只写服务日志。四个接口的
+   `action` 都记 `query`，`object_ref` 记 mart 表或接口路径；`client_kind` 由令牌的 azp 定（oss911-portal → portal，其他 → api）。
+6. **错误码**（Mac 清单之外新增的都是更正与评审带来的）：`unauthenticated` 401、`role_missing` 403、`table_not_permitted` 403、
+   `field_not_permitted` 403、`department_unmapped` 403、`identity_unmapped` 403、`metric_unknown` 404、`metric_version_unknown` 404、
+   `metric_not_implemented` 404、`dimension_invalid` 400、`incompatible_grain` 400、`metric_version_boundary` 400、`result_too_large` 400、
+   `request_invalid` 400（请求体不合格式）、`timeout` 504、`audit_unavailable` 500、`internal_error` 500。
+7. **一次查询的范围上限三年**（超出 `request_invalid`）；结果上限 1 万行；`SET LOCAL statement_timeout = '10s'`。
+8. **连接**：每个请求两次连接（分析读一次、审计写一次），服务内不另设连接池——pgBouncer 事务池就是池；关掉 psycopg 的自动预备语句
+   （事务池下预备语句不跟连接走）。分析读的事务设为只读。
+9. **元字段**：`in_progress_calls` 只对有 `incomplete_calls` 列的表给（量表），为所读临时日的未完整通话；`has_unlinked` 只对有
+   `queue_key` / `agent_key` 的表给；两者都在请求者获准的行内算。另返回 `cache_key`（LD-04 3.3 的算法，无缓存后端）、`row_scope`（self:101 之类）。
+10. 一次请求的口径版本跨生效日：按日且输出日期维度时照常，每行带 `metric_versions`；其余（周及以上、或不按日期输出）`metric_version_boundary`。
+
+**下一块**：部署——30-python 装 venv-svc 与服务（离线 wheel，同 venv-ingest），`svc.conf`，systemd 单元（8090），部署时核对 OpenAPI，runbook 19 与真机验证。

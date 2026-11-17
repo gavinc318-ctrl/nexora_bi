@@ -1,0 +1,35 @@
+# Service layer: the query API (DD-99 · LD-04 3.5 · LD-07 chapter 2)
+#
+# Installed into its own /opt/oss911/venv-svc, offline, by infra/playbooks/30-python.yml: dependencies follow
+# infra/svc-requirements.lock in the repository (DD-69 · DD-83), the build uses the setuptools from that lock.
+#
+# Licensing (DD-86 · LD-09 4.2): only permissively licensed or LGPL libraries; LGPL libraries (psycopg) are not
+# modified, not statically linked, and the program is never frozen into a single-file executable. A new dependency
+# needs its licence confirmed first, plus infra/artifacts/MANIFEST.md and compliance/components.csv.
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oss911-svc"
+version = "0.1.0"
+description = "OSS911 BI service layer: the query API over the mart tables"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",           # MIT; with Starlette (BSD-3) and pydantic (MIT)
+    "uvicorn",           # BSD-3, without [standard]
+    "psycopg[binary]",   # PostgreSQL driver, LGPL-3 (DD-86)
+    "PyJWT[crypto]",     # access token verification, MIT; cryptography Apache-2.0 / BSD-3
+]
+
+[project.scripts]
+oss911-svc-openapi = "oss911_svc.openapi:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+# Starlette's test client still uses httpx and says so on every run; it is the test client only (not installed in
+# venv-svc), so the notice is silenced by its text
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
