@@ -197,6 +197,10 @@ def main():
             aud = c.get("aud") if isinstance(c.get("aud"), list) else [c.get("aud")]
             got_roles = sorted(set(c.get("realm_access", {}).get("roles", [])) & set(spec["roles"]))
             problems = []
+            # the service and its audit key users by sub (DD-99 note 2026-11-17): it must be the user's stable id
+            _, found = call("GET", f"{api}/users?exact=true&username={urllib.parse.quote(u['username'])}", admin)
+            if not c.get("sub") or [x["id"] for x in found] != [c.get("sub")]:
+                problems.append(f"sub {c.get('sub')!r} is not the user's id")
             if spec["svc_client"] not in aud:
                 problems.append(f"aud {aud} lacks {spec['svc_client']}")
             if got_roles != sorted(u["roles"]):
@@ -207,7 +211,7 @@ def main():
             if problems:
                 raise Failed(f"verification: {u['username']}: " + "; ".join(problems))
             out.append(f"verified: {u['username']} roles={','.join(got_roles)} "
-                       + " ".join(f"{k}={c.get(k)}" for k in spec["user_attributes"]) + f" iss={c.get('iss')}")
+                       + " ".join(f"{k}={c.get(k)}" for k in spec["user_attributes"]) + f" iss={c.get('iss')} sub ok")
     print("\n".join(out))
 
 

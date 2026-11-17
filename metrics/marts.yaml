@@ -8,8 +8,10 @@
 # 每张表：
 #   roles               能读这张表的角色（Keycloak 的四个：call_taker · dispatcher · supervisor · admin）；
 #                       其他角色查询 → 403 table_not_permitted（DD-99 更正第七条）
-#   row_filter          none · department · self。department 按用户部门过滤；self 只给本人的行，按 self_column
-#                       与令牌里的工号匹配（覆盖该坐席的全部维度版本，DD-99 更正第二条）。supervisor、admin 不受 self 限制
+#   row_filter          none · department · self。department 按用户部门过滤，过滤列取 agency_type 维度对应的列（声明
+#                       department 的表必须有 agency_type 维度），只对 dispatcher、supervisor 生效（LD-07 2.1，
+#                       DD-99 注 2026-11-17）；self 只给本人的行，按 self_column 与令牌里的工号匹配（覆盖该坐席的全部
+#                       维度版本，DD-99 更正第二条）。supervisor、admin 不受 self 限制
 #   self_column         row_filter 为 self 时必填
 #   dimensions          维度名 → 列。查询的 dimensions / filters 只能用这里的名字
 #   required_dimensions 查询必须把它作为输出维度（该表的分母按它的每个成员重复存放，不按它分组相加会重复计数）

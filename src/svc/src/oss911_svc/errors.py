@@ -25,6 +25,7 @@ def _error(name: str, status: int, code: str) -> type[ApiError]:
 RequestInvalid = _error("RequestInvalid", 400, "request_invalid")
 Unauthenticated = _error("Unauthenticated", 401, "unauthenticated")
 RoleMissing = _error("RoleMissing", 403, "role_missing")
+RoleAmbiguous = _error("RoleAmbiguous", 403, "role_ambiguous")
 TableNotPermitted = _error("TableNotPermitted", 403, "table_not_permitted")
 FieldNotPermitted = _error("FieldNotPermitted", 403, "field_not_permitted")
 DepartmentUnmapped = _error("DepartmentUnmapped", 403, "department_unmapped")
@@ -39,6 +40,6 @@ ResultTooLarge = _error("ResultTooLarge", 400, "result_too_large")
 Timeout = _error("Timeout", 504, "timeout")
 AuditUnavailable = _error("AuditUnavailable", 500, "audit_unavailable")
 
-ALL = [RequestInvalid, Unauthenticated, RoleMissing, TableNotPermitted, FieldNotPermitted, DepartmentUnmapped,
-       IdentityUnmapped, MetricUnknown, MetricVersionUnknown, MetricNotImplemented, DimensionInvalid,
+ALL = [RequestInvalid, Unauthenticated, RoleMissing, RoleAmbiguous, TableNotPermitted, FieldNotPermitted,
+       DepartmentUnmapped, IdentityUnmapped, MetricUnknown, MetricVersionUnknown, MetricNotImplemented, DimensionInvalid,
        IncompatibleGrain, MetricVersionBoundary, ResultTooLarge, Timeout, AuditUnavailable]

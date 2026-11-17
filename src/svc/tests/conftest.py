@@ -37,10 +37,14 @@ def verifier(key):
 
 @pytest.fixture(scope="session")
 def token(key):
-    def make(user="sup1", roles=("supervisor",), aud=AUDIENCE, iss=ISSUER, ttl=300, signing_key=None, **claims):
+    def make(user="sup1", roles=("supervisor",), aud=AUDIENCE, iss=ISSUER, ttl=300, signing_key=None, sub="",
+             **claims):
+        """sub: default "id-<user>"; None leaves it out."""
         now = int(time.time())
-        payload = {"iss": iss, "aud": aud, "sub": f"id-{user}", "preferred_username": user, "azp": "oss911-portal",
+        payload = {"iss": iss, "aud": aud, "preferred_username": user, "azp": "oss911-portal",
                    "iat": now, "exp": now + ttl, "realm_access": {"roles": list(roles)}, **claims}
+        if sub is not None:
+            payload["sub"] = sub or f"id-{user}"
         return "Bearer " + jwt.encode(payload, signing_key or key, algorithm="RS256")
     return make
 

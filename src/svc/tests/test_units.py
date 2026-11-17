@@ -12,17 +12,24 @@ from oss911_svc.cache_key import cache_key
 from oss911_svc.catalog import Catalog, MartRule, MetricVersion
 from oss911_svc.context import PermissionContext
 from oss911_svc.errors import (DepartmentUnmapped, FieldNotPermitted, IdentityUnmapped, MetricNotImplemented,
-                               MetricVersionBoundary, MetricVersionUnknown, RoleMissing, TableNotPermitted,
-                               Unauthenticated)
+                               MetricVersionBoundary, MetricVersionUnknown, RoleAmbiguous, RoleMissing,
+                               TableNotPermitted, Unauthenticated)
 from oss911_svc.query import MetricRef, QueryRequest, check_request, plan_metrics
 
 
 # ---------------------------------------------------------------- tokens
-def test_token_gives_the_broadest_role_and_the_claims(verifier, token):
-    p = verifier.principal(token(user="u", roles=("call_taker", "supervisor"), agent_no="101",
+def test_token_gives_the_subject_the_role_and_the_claims(verifier, token):
+    p = verifier.principal(token(user="u", roles=("supervisor", "offline_access"), agent_no="101",
                                  agency_type_code="POL"))
-    assert (p.user, p.role, p.agent_no, p.department_claim, p.client) == ("u", "supervisor", "101", "POL",
-                                                                           "oss911-portal")
+    assert (p.subject, p.display, p.role, p.agent_no, p.department_claim, p.client) == (
+        "id-u", "u", "supervisor", "101", "POL", "oss911-portal")
+
+
+def test_subject_is_the_key_not_the_user_name(verifier, token):          # DD-99 note 2026-11-17
+    renamed = verifier.principal(token(user="new-name", sub="id-u"))
+    assert (renamed.subject, renamed.display) == ("id-u", "new-name")
+    with pytest.raises(Unauthenticated):
+        verifier.principal(token(sub=None))
 
 
 @pytest.mark.parametrize("change", [
@@ -39,11 +46,14 @@ def test_token_signed_by_another_key_refused(verifier, token):
         verifier.principal(token(signing_key=other))
 
 
-def test_no_token_and_no_role(verifier, token):
+def test_no_token_no_role_and_two_roles(verifier, token):
     with pytest.raises(Unauthenticated):
-        verifier.principal(None)
+        verifier.identify(None)
+    identity = verifier.identify(token(roles=("offline_access",)))      # identified: the refusal is audited
     with pytest.raises(RoleMissing):
-        verifier.principal(token(roles=("offline_access",)))
+        identity.principal()
+    with pytest.raises(RoleAmbiguous):                                    # scopes are not nested: no "broadest"
+        verifier.identify(token(roles=("call_taker", "dispatcher"))).principal()
 
 
 # ---------------------------------------------------------------- cache key (LD-04 3.3)
@@ -74,9 +84,10 @@ def test_cache_key_stable():
 
 
 # ---------------------------------------------------------------- permission context
-DEPT_RULE = MartRule(table="mart.dispatch__day__orders", grain="day x department", roles=frozenset({"dispatcher", "admin"}),
+DEPT_RULE = MartRule(table="mart.dispatch__day__orders", grain="day x department",
+                     roles=frozenset({"dispatcher", "supervisor", "call_taker", "admin"}),
                      row_filter="department", self_column=None,
-                     dimensions={"date": "date_key", "department": "agency_type_code"},
+                     dimensions={"date": "date_key", "agency_type": "agency_type_code"},
                      required_dimensions=frozenset(), attributes={})
 SELF_RULE = MartRule(table="mart.legs__day_agent__handling", grain="day x agent",
                      roles=frozenset({"call_taker", "supervisor", "admin"}), row_filter="self", self_column="agent_no",
@@ -108,7 +119,7 @@ class FakeConn:
 
 
 def ctx(role="dispatcher", dept=None, agent=None, **conn):
-    return PermissionContext.resolve(FakeConn(**conn), Principal("u", role, agent, dept, None))
+    return PermissionContext.resolve(FakeConn(**conn), Principal("id-u", "u", role, agent, dept, None))
 
 
 def test_department_unmapped_is_refused_not_empty():          # TC-DISC-03 on the mechanism
@@ -119,7 +130,7 @@ def test_department_unmapped_is_refused_not_empty():          # TC-DISC-03 on th
 
 
 def test_department_from_the_map_when_not_in_the_token():
-    c = ctx(mapped={"u": "POL"}, valid={"POL"})
+    c = ctx(mapped={"id-u": "POL"}, valid={"POL"})                    # the map is keyed by subject
     pred, params = c.row_filter(DEPT_RULE)
     assert params == ["POL"] and c.scope(DEPT_RULE) == "department:POL"
 
@@ -127,7 +138,23 @@ def test_department_from_the_map_when_not_in_the_token():
 def test_department_missing_does_not_block_a_table_without_that_filter():   # review item three
     pred, params = ctx(role="call_taker", agent="101", agents={"101": 1}).row_filter(SELF_RULE)
     assert params == ["101"]
-    assert ctx(role="admin").row_filter(DEPT_RULE)[1] == []
+
+
+@pytest.mark.parametrize("role,filtered", [("dispatcher", True), ("supervisor", True), ("call_taker", False),
+                                           ("admin", False)])
+def test_department_filter_only_for_dispatchers_and_supervisors(role, filtered):   # LD-07 2.1
+    c = ctx(role=role, dept="POL", valid={"POL"})
+    pred, params = c.row_filter(DEPT_RULE)
+    assert params == (["POL"] if filtered else [])
+    assert c.scope(DEPT_RULE) == ("department:POL" if filtered else "all")
+    if not filtered:
+        ctx(role=role).row_filter(DEPT_RULE)                              # no department needed
+        assert not [p for p in ctx(role=role).problems() if "department" in p]
+
+
+def test_department_filter_reads_the_agency_type_dimension():
+    pred, _ = ctx(dept="POL", valid={"POL"}).row_filter(DEPT_RULE)
+    assert "agency_type_code" in pred.as_string(None)
 
 
 @pytest.mark.parametrize("agent,agents", [(None, {}), ("999", {}), ("101", {"101": 2})])

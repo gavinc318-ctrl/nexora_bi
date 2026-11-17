@@ -2,7 +2,8 @@
 
 Expected values are read from the mart tables directly in each test, so the tests hold on any data the fake ICP
 produced. Covers DD-99's rules on the call data: TC-DISC-02 (a supervisor and a call taker get different rows and
-fields), the refusals (each with its own code), version selection before filtering, and the audit.
+fields), the refusals (each with its own code), version selection before filtering, one snapshot per request, and
+the audit (who is recorded by sub).
 """
 
 from __future__ import annotations
@@ -173,25 +174,116 @@ def test_service_role_cannot_read_the_audit_log(db):
 def test_every_request_is_audited(client, token, audit_db):
     db = audit_db
     def count():
-        return db.execute("SELECT count(*) FROM audit.access_log WHERE user_principal = 'audit_probe'").fetchone()[0]
+        return db.execute("SELECT count(*) FROM audit.access_log WHERE user_principal = 'id-audit_probe'").fetchone()[0]
     before = count()
     ok = q(client, token, dict(user="audit_probe", roles=("supervisor",)), metrics=["M-C01"])
     refused = q(client, token, dict(user="audit_probe", roles=("call_taker",), agent_no="101"), metrics=["M-C01"])
     assert ok.status_code == 200 and refused.status_code == 403
     assert count() == before + 2
-    row = db.execute("""SELECT role_code, metric_codes, row_count, client_kind, request_digest IS NOT NULL
-                          FROM audit.access_log WHERE user_principal = 'audit_probe' AND role_code = 'supervisor'
+    row = db.execute("""SELECT user_display, role_code, metric_codes, row_count, client_kind, request_digest IS NOT NULL
+                          FROM audit.access_log WHERE user_principal = 'id-audit_probe' AND role_code = 'supervisor'
                          ORDER BY access_id DESC LIMIT 1""").fetchone()
-    assert row == ("supervisor", ["M-C01"], len(ok.json()["rows"]), "portal", True)
+    assert row == ("audit_probe", "supervisor", ["M-C01"], len(ok.json()["rows"]), "portal", True)
 
 
 def test_sensitive_fields_recorded_by_name(client, token, audit_db):
     db = audit_db
     client.get("/v1/dimensions/agent/members?metric=M-C09&attributes=agent_name_en",
                headers={"Authorization": token(user="audit_probe2", roles=("supervisor",))})
-    row = db.execute("""SELECT sensitive_fields FROM audit.access_log WHERE user_principal = 'audit_probe2'
+    row = db.execute("""SELECT sensitive_fields FROM audit.access_log WHERE user_principal = 'id-audit_probe2'
                          ORDER BY access_id DESC LIMIT 1""").fetchone()
     assert row == (["agent_name_en"],)
+
+
+def last_audit(db, subject):
+    return db.execute("""SELECT user_display, role_code, object_ref, metric_codes, row_count, request_digest
+                           FROM audit.access_log WHERE user_principal = %s ORDER BY access_id DESC LIMIT 1""",
+                      (subject,)).fetchone()
+
+
+@pytest.mark.parametrize("roles,code", [(("offline_access",), "role_missing"),
+                                        (("call_taker", "dispatcher"), "role_ambiguous")])
+def test_role_refusals_are_audited_with_role_none(client, token, audit_db, roles, code):     # review item four
+    r = q(client, token, dict(user="audit_role", roles=roles), metrics=["M-C01"])
+    assert (r.status_code, r.json()["error"]) == (403, code)
+    assert last_audit(audit_db, "id-audit_role")[:4] == ("audit_role", "none", "/v1/query", ["M-C01"])
+
+
+def test_malformed_request_is_audited_without_its_values(client, token, audit_db):
+    r = client.post("/v1/query", json={"metrics": ["M-C01"], "filters": {"agent": "secret-value"}},
+                    headers={"Authorization": token(user="audit_bad", roles=("supervisor",))})
+    assert (r.status_code, r.json()["error"]) == (400, "request_invalid")
+    assert "secret-value" not in r.text
+    assert last_audit(audit_db, "id-audit_bad") == ("audit_bad", "supervisor", "/v1/query", None, None, None)
+
+
+def test_invalid_token_is_not_audited(client, token, audit_db):
+    before = audit_db.execute("SELECT count(*) FROM audit.access_log WHERE user_principal = 'id-audit_forged'").fetchone()
+    r = q(client, token, dict(user="audit_forged", roles=("supervisor",), aud="another-client"), metrics=["M-C01"])
+    assert r.status_code == 401
+    after = audit_db.execute("SELECT count(*) FROM audit.access_log WHERE user_principal = 'id-audit_forged'").fetchone()
+    assert after == before
+
+
+def test_department_map_is_matched_by_subject(client, token, audit_db):              # DD-99 note 2026-11-17
+    """A row keyed by the user's subject applies; a row whose user name matches but whose subject is someone
+    else's does not (a re-used user name inherits nothing). No current agency type exists in the test data, so a
+    matched department shows as "not a current agency type code" -- which proves it was found."""
+    audit_db.execute("""INSERT INTO meta.user_department_map (subject, username, agency_type_code, changed_by)
+                        VALUES ('id-dept_probe', 'dept_probe', 'POL', 'test'),
+                               ('id-former-holder', 'renamed_probe', 'POL', 'test')""")
+    audit_db.commit()
+    try:
+        def dept_problems(user):
+            me = client.get("/v1/me", headers={"Authorization": token(user=user, roles=("dispatcher",))}).json()
+            return [p for p in me["problems"] if "department" in p]
+        assert dept_problems("dept_probe") == ["department POL is not a current agency type code"]
+        assert dept_problems("renamed_probe") == ["no department in the token and none mapped in "
+                                                  "meta.user_department_map"]
+    finally:
+        audit_db.execute("DELETE FROM meta.user_department_map WHERE changed_by = 'test'")
+        audit_db.commit()
+
+
+# ---------------------------------------------------------------- one snapshot per request (review item one)
+def test_one_snapshot_across_an_intraday_rewrite(client, token, audit_db, monkeypatch):
+    """Between choosing the publications and reading the rows, the hourly publication rewrites the provisional
+    day (delete, insert under a new publication_seq). The request still answers from the one it chose: never
+    "published" and empty. Leaves the day as an hourly run would."""
+    db = audit_db
+    row = db.execute("""SELECT p.date_key FROM meta.mart_day_publication p
+                         WHERE p.mart_table = 'mart.calls__day__volume' AND p.close_version = 0 AND p.row_count > 0
+                           AND NOT EXISTS (SELECT 1 FROM meta.mart_day_publication c WHERE c.mart_table = p.mart_table
+                                             AND c.date_key = p.date_key AND c.close_version >= 1)
+                         ORDER BY 1 DESC LIMIT 1""").fetchone()
+    if row is None:
+        pytest.skip("no provisional day with rows")
+    k = row[0]
+    day = f"{k // 10000:04d}-{k // 100 % 100:02d}-{k % 100:02d}"
+
+    from oss911_svc import query
+    original = query.choose_publications
+
+    def rewrite_after_choosing(conn, rule, req):
+        out = original(conn, rule, req)
+        seq = db.execute("""INSERT INTO meta.data_publication (kind, date_from, date_to, run_id)
+                            VALUES ('intraday', %s, %s, 'snapshot-test') RETURNING publication_seq""",
+                         (k, k)).fetchone()[0]
+        db.execute("""CREATE TEMP TABLE rewrite ON COMMIT DROP AS
+                      SELECT * FROM mart.calls__day__volume WHERE date_key = %s AND close_version = 0""", (k,))
+        db.execute("DELETE FROM mart.calls__day__volume WHERE date_key = %s AND close_version = 0", (k,))
+        db.execute("UPDATE rewrite SET publication_seq = %s", (seq,))
+        db.execute("INSERT INTO mart.calls__day__volume SELECT * FROM rewrite")
+        db.execute("""INSERT INTO meta.mart_day_publication (mart_table, date_key, close_version, publication_seq,
+                                                             row_count)
+                      SELECT 'mart.calls__day__volume', %s, 0, %s, count(*) FROM rewrite""", (k, seq))
+        db.commit()
+        return out
+    monkeypatch.setattr(query, "choose_publications", rewrite_after_choosing)
+    r = q(client, token, SUP, metrics=["M-C01"], dimensions=["date"], range={"from": day, "to": next_day(day)})
+    assert r.status_code == 200, r.text
+    assert r.json()["meta"]["days"][0]["status"] == "published"
+    assert r.json()["rows"] and r.json()["rows"][0]["M-C01"] is not None
 
 
 def test_audit_failure_returns_nothing(dsn, verifier, token):
@@ -215,7 +307,7 @@ def test_metrics_and_me(client, token):
     assert by["M-C09"]["readable"] and not by["M-C01"]["readable"] and not by["M-C08"]["readable"]
     assert by["M-C15"]["versions"][-1]["implemented"]
     me = client.get("/v1/me", headers={"Authorization": token(**CT)}).json()
-    assert (me["role"], me["agent_no"]) == ("call_taker", "101")
+    assert (me["user"], me["subject"], me["role"], me["agent_no"]) == ("ct101", "id-ct101", "call_taker", "101")
     legs = next(t for t in me["tables"] if t["table"] == "mart.legs__day_agent__handling")
     assert legs["readable"] and legs["row_scope"] == "self:101" and legs["visible_sensitive_fields"] == []
     me2 = client.get("/v1/me", headers={"Authorization": token(user="ct_noagent", roles=("call_taker",))}).json()

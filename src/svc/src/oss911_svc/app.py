@@ -5,9 +5,18 @@
     GET  /v1/dimensions/{dimension}/members the members of a dimension of a metric's table, in my scope
     GET  /v1/me                             what the service made of my token: role, department, agent, scopes
 
-Every request: verify the token -> open the analytic connection (read only, one transaction) -> read the
-registry and the read rules -> resolve the permission context once -> do the work, the result kept in memory ->
-write audit.access_log over the audit connection and commit -> only then respond. A refusal is audited too.
+Every request: verify the token (who) -> settle the one business role -> open the analytic connection: one short
+REPEATABLE READ READ ONLY transaction -> read the registry and the read rules -> resolve the permission context once
+-> do the work, the result kept in memory -> write audit.access_log over the audit connection and commit -> only
+then respond.
+
+One snapshot for the whole read (DD-99 note 2026-11-17, review item one): the hourly provisional publication deletes
+and rewrites the close_version 0 rows, so statements each reading their own snapshot could choose a publication and
+then find its rows gone -- "published" and empty. The catalog, the permission context, the choice of publications,
+the rows and the meta fields are all read in the one transaction. The audit is written apart and committed.
+
+Audited: every request whose token verified, refusals included -- no business role or several (role_code none), a
+malformed request (its values are not recorded). A token that does not verify is only logged (review item four).
 
 Run by systemd as: uvicorn --factory oss911_svc.app:serve (settings from /etc/oss911, config.py).
 """
@@ -22,12 +31,13 @@ from zoneinfo import ZoneInfo
 
 import psycopg
 from fastapi import FastAPI, Header, Path, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import __version__, audit
-from .auth import Principal, TokenVerifier
+from .auth import Identity, Principal, TokenVerifier
 from .cache_key import cache_key
 from .catalog import Catalog
 from .config import REPORT_TIMEZONE, Settings
@@ -153,7 +163,8 @@ class TableAccess(BaseModel):
 
 
 class MeResponse(BaseModel):
-    user: str
+    user: str = Field(description="The user name, for display")
+    subject: str = Field(description="The token's sub: who the service and the audit take you to be")
     role: str
     agent_no: str | None
     department: str | None
@@ -188,16 +199,48 @@ def create_app(settings: Settings | None = None, verifier: TokenVerifier | None 
         connect_analytic = connect_analytic or _connect(settings.analytic_dsn)
         connect_audit = connect_audit or _connect(settings.audit_dsn)
 
+    def identify(authorization: str | None) -> tuple[Identity | None, ApiError | None]:
+        try:
+            return verifier.identify(authorization), None
+        except ApiError as exc:
+            log.warning("unauthenticated request refused: %s", exc.message)
+            return None, exc
+
+    def audited(identity: Identity, principal: Principal | None, started: float, error: ApiError | None,
+                result: dict | None, object_ref: str | None, metric_codes: list[str] | None, digest: str | None,
+                ctx: PermissionContext | None = None) -> JSONResponse | dict:
+        """Write the audit row, then answer: the result, or the refusal. Nothing goes out unaudited."""
+        rec = audit.AccessRecord(
+            subject=identity.subject, display=identity.display, role=principal.role if principal else "none",
+            department=ctx.department if ctx else None,
+            object_ref=(result or {}).get("_table") or object_ref, metric_codes=metric_codes,
+            sensitive_fields=(result or {}).get("_sensitive") or None,
+            row_count=len(result.get("rows", result.get("members", result.get("metrics", [])))) if result else None,
+            duration_ms=int((time.monotonic() - started) * 1000), client=identity.client, request_digest=digest)
+        try:
+            audit.write(connect_audit, rec)
+        except Exception:   # noqa: BLE001
+            log.exception("audit write failed")
+            error, result = AuditUnavailable("the access could not be audited, so nothing is returned"), None
+        if error is not None:
+            return JSONResponse(status_code=error.status, content=error.body())
+        return {k: v for k, v in result.items() if not k.startswith("_")}
+
     def handle(authorization: str | None, work: Callable, object_ref: str | None,
                metric_codes: list[str] | None, digest: str | None):
         started = time.monotonic()
+        identity, error = identify(authorization)
+        if identity is None:
+            return JSONResponse(status_code=error.status, content=error.body())
         principal: Principal | None = None
         ctx: PermissionContext | None = None
-        result, error = None, None
+        result = None
         try:
-            principal = verifier.principal(authorization)
+            principal = identity.principal()
             with connect_analytic() as conn:
-                conn.execute("SET TRANSACTION READ ONLY")
+                # One snapshot for everything read below; the transaction begins with the first statement
+                conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+                conn.read_only = True
                 catalog = Catalog.load(conn)
                 ctx = PermissionContext.resolve(conn, principal)
                 result = work(conn, catalog, ctx)
@@ -208,31 +251,25 @@ def create_app(settings: Settings | None = None, verifier: TokenVerifier | None 
             log.exception("request failed")
             error = ApiError("internal error")
             error.status, error.code = 500, "internal_error"
-
-        if principal is not None:
-            rec = audit.AccessRecord(
-                user=principal.user, role=principal.role, department=ctx.department if ctx else None,
-                object_ref=(result or {}).get("_table") or object_ref, metric_codes=metric_codes,
-                sensitive_fields=(result or {}).get("_sensitive") or None,
-                row_count=len(result.get("rows", result.get("members", result.get("metrics", [])))) if result else None,
-                duration_ms=int((time.monotonic() - started) * 1000), client=principal.client, request_digest=digest)
-            try:
-                audit.write(connect_audit, rec)
-            except Exception:   # noqa: BLE001
-                log.exception("audit write failed")
-                error, result = AuditUnavailable("the access could not be audited, so nothing is returned"), None
-        else:
-            log.warning("unauthenticated request refused: %s", error.message if error else "")
-
-        if error is not None:
-            return JSONResponse(status_code=error.status, content=error.body())
-        return {k: v for k, v in result.items() if not k.startswith("_")}
+        return audited(identity, principal, started, error, result if error is None else None, object_ref,
+                       metric_codes, digest, ctx)
 
     @app.exception_handler(RequestValidationError)
     async def _invalid(request: Request, exc: RequestValidationError):
+        """A malformed request never reaches a route, so it is audited here -- when its token verifies. The
+        problems name the fields, never the values sent."""
+        started = time.monotonic()
         problems = [{"field": ".".join(str(p) for p in e.get("loc", [])), "problem": e.get("msg")} for e in exc.errors()]
-        return JSONResponse(status_code=400, content=RequestInvalid("the request is malformed",
-                                                                    problems=problems).body())
+        error = RequestInvalid("the request is malformed", problems=problems)
+        identity, auth_error = identify(request.headers.get("authorization"))
+        if identity is None:
+            return JSONResponse(status_code=auth_error.status, content=auth_error.body())
+        try:
+            principal = identity.principal()
+        except ApiError:
+            principal = None
+        return await run_in_threadpool(audited, identity, principal, started, error, None, request.url.path,
+                                       None, None)
 
     @app.post("/v1/query", response_model=QueryResponse, responses=ERROR_RESPONSES, tags=["query"])
     def query(body: QueryBody, authorization: str | None = Header(None)):
@@ -300,9 +337,9 @@ def create_app(settings: Settings | None = None, verifier: TokenVerifier | None 
                 tables.append({"table": name, "readable": ctx.role in rule.roles, "row_filter": rule.row_filter,
                                "row_scope": scope if ctx.role in rule.roles else None,
                                "visible_sensitive_fields": ctx.visible_sensitive(rule)})
-            problems = [p for p in (ctx.identity_problem, ctx.department_problem) if p]
-            return {"user": ctx.principal.user, "role": ctx.role, "agent_no": ctx.agent_no,
-                    "department": ctx.department, "problems": problems, "tables": tables}
+            return {"user": ctx.principal.display, "subject": ctx.principal.subject, "role": ctx.role,
+                    "agent_no": ctx.agent_no, "department": ctx.department, "problems": ctx.problems(),
+                    "tables": tables}
         return handle(authorization, work, "/v1/me", None, None)
 
     return app

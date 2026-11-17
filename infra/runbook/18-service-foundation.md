@@ -57,7 +57,7 @@ ansible-playbook playbooks/23-keycloak-realm.yml -e ansible_connection=local -K
 | 50 | DAG 与 dbt 项目更新 | `changed=0` |
 | intraday | 成功；日志里 `mart.calls__day__repeat_failed` 是 `OK created` | — |
 | 46 | `M-C15|redefined|2|implemented`（上线前原地改口径）；五张表 `rule_inserted`；`mart tables the query API may read: 5` | `every metric and mart rule unchanged` |
-| 23 | realm、角色、客户端、映射、七个用户建出；末尾七行 `verified: …`，ct101 的 `agent_no=101` | `changed=0`，仍七行 `verified` |
+| 23 | realm、角色、客户端、映射、七个用户建出；末尾七行 `verified: … sub ok`，ct101 的 `agent_no=101`（`sub ok`：令牌的 sub 就是该用户在 Keycloak 里的 id，服务按它认人） | `changed=0`，仍七行 `verified` |
 
 之后下一次 nightly（或手动触发一次）把 `calls__day__repeat_failed` 的历史日子封账。
 

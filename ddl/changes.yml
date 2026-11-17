@@ -108,3 +108,9 @@
   summary: Mart read rules (DD-99 review item seven) -- meta.mart_rule, the read-only copy of metrics/marts.yaml written by 46-metrics; the query API reads only the mart tables listed in it
   files:
     - changes/0013_mart_rule.sql
+
+- id: "0014"
+  run_as: owner
+  summary: Users identified by sub (DD-99 note 2026-11-17) -- meta.user_department_map keyed by subject (old rows kept with their user name, matching no one), audit.access_log.user_display
+  files:
+    - changes/0014_subject_keys.sql

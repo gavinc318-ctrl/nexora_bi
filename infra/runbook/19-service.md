@@ -17,19 +17,27 @@
 
 ### 一、每个请求怎么走
 
-验令牌（签名、aud、iss、过期）→ 读注册表与读取规则 → 解析一次权限上下文 → 按发布登记定每天读哪一版 → 读行、过滤、汇总、
-算比率 → **写审计并提交** → 才返回。审计写不进去，请求就失败（`audit_unavailable`），结果不发出去（DD-99：审计不可降级）。
-被拒绝的请求也记审计。
+验令牌（签名、aud、iss、过期）→ 定唯一的业务角色 → 读注册表与读取规则 → 解析一次权限上下文 → 按发布登记定每天读哪一版 →
+读行、过滤、汇总、算比率 → **写审计并提交** → 才返回。审计写不进去，请求就失败（`audit_unavailable`），结果不发出去
+（DD-99：审计不可降级）。
+
+从读注册表到读元字段，都在**一个** REPEATABLE READ READ ONLY 事务里，读的是同一份快照：每小时的临时数发布会删掉再重写
+未封账日的行，分开读会出现「已发布却没有数据」（DD-99 注 2026-11-17）。
+
+谁：令牌的 `sub`（Keycloak 里用户的固定 id）。部门映射表和审计都按它记，用户名只作显示——改名不换人，旧用户名给了别人也
+继承不到旧映射。令牌验过了（知道是谁）的请求，被拒绝也记审计，包括没有业务角色、角色不止一个（`role_code` 记 `none`）和
+请求格式不对（不记请求里的取值）；令牌本身无效的只进服务日志。
 
 ### 二、拒绝都有自己的错误码，从不拿空结果代替
 
 | 码 | 含义 |
 | --- | --- |
-| `unauthenticated` 401 | 没有令牌、令牌过期、签名或 aud 不对 |
+| `unauthenticated` 401 | 没有令牌、令牌过期、签名或 aud 不对、没有 sub |
+| `role_missing` · `role_ambiguous` 403 | 令牌里没有四个业务角色中的任何一个 · 有不止一个（一个用户只许一个业务角色：各角色能看的范围不嵌套） |
 | `table_not_permitted` 403 | 我的角色不能读这张表（如调度员读坐席处理表，接警员读中心级的表） |
 | `identity_unmapped` 403 | 要「只看本人」，但令牌里没有工号、或工号对不上坐席、或对上多个 |
 | `field_not_permitted` 403 | 请求了无权看的字段（如接警员请求坐席姓名） |
-| `department_unmapped` 403 | 要按部门过滤，但部门缺失或不是有效编码 |
+| `department_unmapped` 403 | 要按部门过滤（只对调度员与主管），但令牌里没有部门、映射表里也没有（按 sub 查），或不是有效编码 |
 | `metric_unknown` · `metric_not_implemented` · `metric_version_unknown` 404 | 没有这个指标 · 登记了但没有 mart · 没有这个口径版本 |
 | `dimension_invalid` · `incompatible_grain` · `metric_version_boundary` · `result_too_large` · `request_invalid` 400 | 请求本身的问题 |
 | `timeout` 504 · `audit_unavailable` 500 | 单次查询超过 10 秒 · 审计写不进 |
@@ -78,12 +86,14 @@ curl -s http://127.0.0.1:8090/v1/me -H "Authorization: Bearer $(tok ct101)" | py
 
 # 审计：刚才的请求都在
 sudo -u postgres psql -d oss911 -P pager=off -c "
-SELECT occurred_at, user_principal, role_code, object_ref, metric_codes, row_count, duration_ms
+SELECT occurred_at, user_principal, user_display, role_code, object_ref, metric_codes, row_count, duration_ms
   FROM audit.access_log ORDER BY access_id DESC LIMIT 8"
 ```
 
-预期：ct101 只有一行 `"agent": "101"`，`meta.row_scope` 为 `self:101`；`/v1/me` 里 `agent_no` 为 101，坐席处理表 `readable: true`、
-中心级四张 `readable: false`（`problems` 里提示没有部门属正常：测试用户 ct101 没设 agency_type_code，坐席处理表只按本人过滤，不受影响）；审计表里能看到 ct101、sup1、disp1 的请求（disp1 那条 `row_count` 为空——被拒绝的）。
+预期：ct101 只有一行 `"agent": "101"`，`meta.row_scope` 为 `self:101`；`/v1/me` 里 `user` 为 ct101、`subject` 是一串 id，`agent_no`
+为 101，`problems` 为空，坐席处理表 `readable: true`、中心级四张 `readable: false`；审计表里 `user_principal` 是那串 id、
+`user_display` 是用户名，能看到 ct101、sup1、disp1 的请求（disp1 那条 `row_count` 为空——被拒绝的）。0014 之前写的行
+`user_principal` 是用户名、`user_display` 为空，审计只增不改，不回写。
 
 口令经 `sudo bash -c` 在 root 的子进程里读取并传给 curl，不出现在你的终端历史里；curl 的参数在进程列表里短暂可见，这只在开发机的
 password grant 上发生，生产不开它。

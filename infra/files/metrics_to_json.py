@@ -158,6 +158,9 @@ def convert_marts(doc):
                 isinstance(k, str) and COLUMN.match(k) and isinstance(v, str) and COLUMN.match(v)
                 for k, v in dims.items()):
             problems.append(f"{where}: dimensions must map names to columns")
+        elif rf == "department" and "agency_type" not in dims:
+            # the query API filters on the column of this dimension (DD-99 note 2026-11-17)
+            problems.append(f"{where}: row_filter department needs the dimension agency_type (the department column)")
             dims = {}
         if not set(t.get("required_dimensions", [])) <= set(dims):
             problems.append(f"{where}: required_dimensions must be dimensions of the table")
