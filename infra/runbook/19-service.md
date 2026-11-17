@@ -83,7 +83,7 @@ SELECT occurred_at, user_principal, role_code, object_ref, metric_codes, row_cou
 ```
 
 预期：ct101 只有一行 `"agent": "101"`，`meta.row_scope` 为 `self:101`；`/v1/me` 里 `agent_no` 为 101，坐席处理表 `readable: true`、
-中心级三张 `readable: false`；审计表里能看到 ct101、sup1、disp1 的请求（disp1 那条 `row_count` 为空——被拒绝的）。
+中心级四张 `readable: false`（`problems` 里提示没有部门属正常：测试用户 ct101 没设 agency_type_code，坐席处理表只按本人过滤，不受影响）；审计表里能看到 ct101、sup1、disp1 的请求（disp1 那条 `row_count` 为空——被拒绝的）。
 
 口令经 `sudo bash -c` 在 root 的子进程里读取并传给 curl，不出现在你的终端历史里；curl 的参数在进程列表里短暂可见，这只在开发机的
 password grant 上发生，生产不开它。
