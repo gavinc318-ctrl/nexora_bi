@@ -134,7 +134,9 @@
     - name: Check the committed OpenAPI against the installed program
       ansible.builtin.command:
         cmd: "{{ svc_venv }}/bin/oss911-svc-openapi --check /dev/stdin"
-        stdin: "{{ lookup('ansible.builtin.file', openapi_committed) }}\n"
+        # lookup strips the file's final newline and stdin puts one back (stdin_add_newline, on by default): the
+        # program sees the file byte for byte. Adding another one here made every check fail (first real run)
+        stdin: "{{ lookup('ansible.builtin.file', openapi_committed) }}"
       become_user: oss911svc
       register: _openapi
       changed_when: false
