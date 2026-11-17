@@ -2130,3 +2130,28 @@ uvicorn（BSD-3，不带 [standard]，即不引入 uvloop、httptools）、pydan
 - runbook 19。
 
 第 9 步至此三块齐。服务层没有经过 Superset（DD-99 第八条），前端（LD-05）可以按 contracts/openapi/v1.json 开工。
+
+## 2026-11-17  Mac 侧：服务层评审四条采纳、两处更正开发机的自定；下一步排期
+
+**评审四条（请实现）**
+1. 分析读：一个 `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY` 事务覆盖目录、权限、选版、取数、元字段；审计仍独立提交。
+   补测：选版后、取数前插入一次 intraday 发布，响应不得为「published + 空」。
+2. 封账边界（`macros/mart.sql`）：边界 = `contracts/resweep.yml` 的回扫起始日，不取 `min(source_day) from swept`。起始日之前算历史；
+   起始日及之后逐日须回扫成功且批次全进 core（或已丢弃），遇第一个不满足的日子停。补测：15 日有 pending、16 日成功 → 15 日不封。
+   真机上已封的日子请核一遍有没有被这条缺陷提前封的（列出来，Mac 侧定是否出修正版本）。
+3. 主体键 = `sub`（配可信 issuer），`preferred_username` 只作显示。`meta.user_department_map` 改按 sub（结构变更，含已有数据迁移）；
+   `audit.access_log.user_principal` 记 sub，另加 `user_display`。
+4. 身份确认与权限判断分开：`role_missing`、`request_invalid` 等身份已确认的拒绝都写审计（role_code 记 `none`；不记请求里的敏感取值）；
+   令牌无效仍只写服务日志。
+
+**更正开发机自定的两处**
+- 第 2 条「多角色取最宽」：不成立（接警员可见本人坐席数据、调度员不可见，范围不嵌套）。改为**一个用户只许一个业务角色**，
+  令牌里多个 → 403 `role_ambiguous`（写审计）。
+- 第 3 条部门过滤：只对 **dispatcher、supervisor**（LD-07 2.1）；call_taker 与 admin 不受。维度名 **`agency_type`**，不叫 department；
+  marts.yaml 的 `row_filter: department` 保留为过滤种类名，过滤列取 `agency_type` 维度对应的列。
+
+**其余八处知悉并同意**；PyJWT 及新增依赖无异议。已记 DD-99 注、LD-04 3.5、LD-03 第 5 章。
+
+**排期**：① 上述六项 → ② 第 7 步 if03b / if03c（DD-98）→ ③ 监控告警通道（封账落后、STALE、待澄清数、dbt WARN、未关联工号现在只进日志；
+开工前请列方案与需定，Prometheus 已在机上）。Mac 侧同时做第 10 步设计（门户外壳、四张话务报表、Superset 去留）。
+
