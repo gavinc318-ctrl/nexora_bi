@@ -50,7 +50,7 @@ Airflow 新建的 DAG 默认暂停，50-dags **重复部署不改变暂停状态
 手工触发一次回扫要带逻辑日期，否则没有「哪一天」可扫：
 
 ```bash
-af dags trigger resweep_icp_cdr_voice -l 2026-10-26T02:00:00+00:00     # 扫 2026-10-25
+af dags trigger resweep_icp_cdr_voice -l 2026-10-27T02:00:00+00:00     # 扫 2026-10-26
 ```
 
 **源的启停**是 `meta.source_contract.enabled`（M-01），DAG 的暂停是运维用的，不是第二个开关。
