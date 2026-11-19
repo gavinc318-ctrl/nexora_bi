@@ -35,6 +35,15 @@ from .contract import effective_stale_days
 from .icp import IcpClient, IcpError
 
 SYNC_OK = 2              # WAS synchronization status: 0 initial, 1 in progress, 2 succeeded, 3 failed (p.1031)
+# A snapshot batch b that can be trusted (DD-94 item nineteen): not quarantined, or released in M-03 and applied (a dbt
+# model registered it). The one definition, used for the empty-snapshot check below and for the agent IDs the agent
+# metrics ask for (agent.py)
+TRUSTED_BATCH = """(NOT EXISTS (SELECT 1 FROM meta.quarantine_batch q
+                                 WHERE q.run_id = b.run_id AND q.batch_seq = b.batch_seq)
+                    OR (EXISTS (SELECT 1 FROM meta.quarantine_batch q
+                                 WHERE q.run_id = b.run_id AND q.batch_seq = b.batch_seq AND q.state = 'released')
+                        AND EXISTS (SELECT 1 FROM meta.staging_batch_state s
+                                     WHERE s.run_id = b.run_id AND s.batch_seq = b.batch_seq)))"""
 
 
 @dataclass
@@ -197,15 +206,9 @@ class SnapshotIngest:
         quarantined one never becomes the baseline, so empty snapshot after empty snapshot is quarantined, each
         against the same last good one -- emptying the whole configuration takes an explicit release."""
         row = self.conn.execute(
-            """SELECT b.row_count FROM meta.ingest_batch b
-                WHERE b.source_id = %s AND b.mode = 'snapshot' AND b.snapshot_scope = %s
-                  AND (NOT EXISTS (SELECT 1 FROM meta.quarantine_batch q
-                                    WHERE q.run_id = b.run_id AND q.batch_seq = b.batch_seq)
-                       OR (EXISTS (SELECT 1 FROM meta.quarantine_batch q
-                                    WHERE q.run_id = b.run_id AND q.batch_seq = b.batch_seq AND q.state = 'released')
-                           AND EXISTS (SELECT 1 FROM meta.staging_batch_state s
-                                        WHERE s.run_id = b.run_id AND s.batch_seq = b.batch_seq)))
-                ORDER BY b.snapshot_version DESC, b.committed_at DESC LIMIT 1""",
+            f"""SELECT b.row_count FROM meta.ingest_batch b
+                 WHERE b.source_id = %s AND b.mode = 'snapshot' AND b.snapshot_scope = %s AND {TRUSTED_BATCH}
+                 ORDER BY b.snapshot_version DESC, b.committed_at DESC LIMIT 1""",
             (self.r.source_id, scope)).fetchone()
         return row[0] if row else None
 

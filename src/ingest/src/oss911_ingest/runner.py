@@ -45,7 +45,8 @@ from .config import ConfigError, db_settings, read_env_file, require
 from .contract import effective_lookback_minutes, validate_contract, validate_overrides
 from .icp import IcpClient, IcpError
 from .parse import content_hash, parse_csv
-from .snapshot import SnapshotIngest, check_mode
+from . import agent, snapshot
+from .snapshot import SnapshotIngest
 
 SOURCE_TIME = "%Y-%m-%d %H:%M:%S"       # how windows and watermarks are written: the source's own notation
 
@@ -56,6 +57,8 @@ CHECKS = {"icp_cdr_voice": check_cdr}
 OBSERVE_AFTER_RESWEEP = {"icp_cdr_voice": open_calls}
 # Sources ingested by version-gated snapshots instead of time windows (snapshot.py, DD-94)
 SNAPSHOT_SOURCES = {"icp_reference"}
+# Sources ingested by observation of "today so far", an interface without a date parameter (agent.py, DD-98)
+OBSERVATION_SOURCES = {"icp_agent_session", "icp_agent_day"}
 
 EXIT_OK, EXIT_FAILED = 0, 1
 
@@ -175,7 +178,7 @@ class Runner:
 
     # ------------------------------------------------------------------------------------------------------------
     def _locked(self, conn, definition: dict, version: int, overrides: dict) -> int:
-        if self.source_id not in CHECKS and self.source_id not in SNAPSHOT_SOURCES:
+        if self.source_id not in set(CHECKS) | SNAPSHOT_SOURCES | OBSERVATION_SOURCES:
             raise ConfigError(f"this program has no ingestion for source {self.source_id}")
         doc = dict(definition, enabled=True)
         problems = validate_contract(doc) + validate_overrides(doc, overrides)
@@ -183,7 +186,13 @@ class Runner:
             raise ConfigError(f"contract {self.source_id} v{version} in the database fails validation: "
                               + "; ".join(problems))
         if self.source_id in SNAPSHOT_SOURCES:
-            return self._snapshot(conn, definition, version, overrides)
+            snapshot.check_mode(self.mode, self.source_id)
+            self.say(f"run {self.run_id}: {self.source_id} v{version} snapshot (version-gated)")
+            return self._without_window(conn, SnapshotIngest, definition, version, overrides, "record(s)")
+        if self.source_id in OBSERVATION_SOURCES:
+            agent.check_mode(self.mode, self.source_id)
+            self.say(f"run {self.run_id}: {self.source_id} v{version} observation of today so far")
+            return self._without_window(conn, agent.AgentObservation, definition, version, overrides, "row(s)")
         lookback = effective_lookback_minutes(doc, overrides)
         params = {"lookback_minutes": lookback}
 
@@ -254,12 +263,13 @@ class Runner:
         self.say(f"run {self.run_id}: success, {self.committed} batch(es), {self.rows_received} rows received")
         return EXIT_OK
 
-    def _snapshot(self, conn, definition: dict, version: int, overrides: dict) -> int:
-        check_mode(self.mode, self.source_id)
-        self.say(f"run {self.run_id}: {self.source_id} v{version} snapshot (version-gated)")
+    def _without_window(self, conn, ingest_class, definition: dict, version: int, overrides: dict,
+                        unit: str) -> int:
+        """A run that is not cut into time windows: version-gated snapshots, or observations of today so far. The
+        class does the batches; failures end the run as everywhere else."""
         client = self._icp_client(definition)
         try:
-            message = SnapshotIngest(self, conn, client, definition, version, overrides).run()
+            message = ingest_class(self, conn, client, definition, version, overrides).run()
         except (IcpError, RunFailed, ConfigError, Terminated) as exc:
             outcome = "partial" if self.committed else "failed"
             self._record_failure(conn, version, outcome, f"after {self.committed} batch(es): {exc}")
@@ -271,7 +281,7 @@ class Runner:
         if message:
             self.say(f"  {message}")
         self._run_log(conn, version, "success", message)
-        self.say(f"run {self.run_id}: success, {self.committed} batch(es), {self.rows_received} record(s)")
+        self.say(f"run {self.run_id}: success, {self.committed} batch(es), {self.rows_received} {unit}")
         return EXIT_OK
 
     def _record_failure(self, conn, version: int, outcome: str, message: str) -> None:

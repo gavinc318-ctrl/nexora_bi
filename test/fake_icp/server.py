@@ -8,6 +8,7 @@
   POST /cmsgateway/resource/userauth/auth                 鉴权，第 905 页
   POST /cmsgateway/resource/reports/vdnvoicecalldetail    话单下载，第 1019–1020 页
   GET  /cmsgateway/resource/synwas/...                    配置同步一组九个，第 907–933 页（reference.py）
+  POST /cmsgateway/resource/hindex/agent                  坐席历史指标，第 935–936、1035 页（agent_index.py）
 
 另有两个**只供测试用**的端点，真实接口没有，接入程序永远不调：
   POST /_fake/control    调整「此刻」、token 有效期，注入故障与边界数据
@@ -31,6 +32,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import agent_index
 import generator as gen
 import reference as ref_api
 
@@ -54,7 +56,8 @@ class State:
         self.delay_seconds = 0.0                  # 每次下载人为延时，用来制造并发冲突
         self.fail_next: list[str] = []            # 下面几次下载直接返回这些 retcode
         self.inject: list[str] = []               # 下一次下载要混入的边界数据，用一次即清
-        self.calls = {"auth": 0, "cdr": 0, "cdr_rejected_concurrent": 0, "synwas": 0}
+        self.calls = {"auth": 0, "cdr": 0, "cdr_rejected_concurrent": 0, "synwas": 0, "hindex": 0}
+        self.agent_inject: list[str] = []         # 下一次 hindex/agent 要混入的边界数据，用一次即清
         self.ref = ref_api.initial(seed, self.now())   # 网关的配置副本（synwas）
 
     def now(self) -> datetime:
@@ -106,7 +109,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = {"seed": st.seed, "emit_mode": st.emit_mode, "token_ttl": st.token_ttl,
                         "now": st.now().strftime(gen.TS_FMT), "now_overridden": st.now_override is not None,
                         "delay_seconds": st.delay_seconds, "fail_next": list(st.fail_next),
-                        "inject": list(st.inject), "calls": dict(st.calls),
+                        "inject": list(st.inject), "agent_inject": list(st.agent_inject), "calls": dict(st.calls),
                         "ref": {"cti": dict(st.ref["cti"]), "vdn": dict(st.ref["vdn"]),
                                 "agents": len(st.ref["agents"])}}
             return self._json(200, body)
@@ -135,6 +138,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._auth()
         if self.path == CDR_PATH:
             return self._cdr()
+        if self.path == agent_index.INDEX_PATH:
+            return self._hindex()
         if self.path == "/_fake/control":
             return self._control()
         self._json(404, {"message": "not found", "retcode": "000-002"})
@@ -154,6 +159,23 @@ class Handler(BaseHTTPRequestHandler):
             st.tokens[token] = st.now() + timedelta(seconds=st.token_ttl)
             # 重复鉴权不使旧 token 失效（猜 11）
         self._json(200, {"message": "", "retcode": "0", "result": {"token": token}})
+
+    # ---------- 坐席历史指标（hindex/agent，JSON 进 JSON 出）----------
+    def _hindex(self):
+        st = self.state
+        with st.lock:
+            st.calls["hindex"] += 1
+            exp = st.tokens.get(self.headers.get("cmsgateway-token") or "")
+            if exp is None or exp <= st.now():
+                return self._fail("300-008", "The token specified by cmsgateway-token in the HTTP request does not exist.")
+            if st.fail_next:
+                return self._fail(st.fail_next.pop(0), "injected failure")
+            now, seed = st.now(), st.seed
+            inject, st.agent_inject = st.agent_inject, []
+        code, message, result = agent_index.respond(seed, self._read_json(), now, inject)
+        if code != "0":
+            return self._fail(code, message)
+        self._json(200, {"message": message, "retcode": "0", "result": result})
 
     # ---------- 话单下载 ----------
     def _cdr(self):
@@ -239,6 +261,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(400, {"error": f"unknown injection: {sorted(bad)}",
                                             "known": sorted(INJECTIONS)})
                 st.inject = list(body["inject"])
+            if "agent_inject" in body:
+                bad = set(body["agent_inject"]) - set(agent_index.INJECTIONS)
+                if bad:
+                    return self._json(400, {"error": f"unknown agent injection: {sorted(bad)}",
+                                            "known": sorted(agent_index.INJECTIONS)})
+                st.agent_inject = list(body["agent_inject"])
             if "ref" in body:
                 err = ref_api.control(st.ref, body, st.now())
                 if err:

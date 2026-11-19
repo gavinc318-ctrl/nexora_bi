@@ -114,3 +114,9 @@
   summary: Users identified by sub (DD-99 note 2026-11-17) -- meta.user_department_map keyed by subject (old rows kept with their user name, matching no one), audit.access_log.user_display
   files:
     - changes/0014_subject_keys.sql
+
+- id: "0015"
+  run_as: owner
+  summary: ICP agent metrics (DD-98) -- raw.icp_agent_session and raw.icp_agent_day, ingest_batch mode observation, hot-tuned midnight_skip_minutes; fact_agent_session / fact_agent_day keep agents missing from the configuration (agent_sk nullable, agent_no, src_observed_at)
+  files:
+    - changes/0015_icp_agent_metrics.sql

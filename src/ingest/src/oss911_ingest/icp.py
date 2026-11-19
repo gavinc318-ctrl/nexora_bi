@@ -115,26 +115,36 @@ class IcpClient:
             return Download(body=body, content_type=ctype, filename=fname.group(1) if fname else None)
         raise IcpError(f"POST {path}: token rejected twice ({TOKEN_INVALID})")
 
-    # ---- JSON read (configuration sync, synwas) ----
+    # ---- JSON read (configuration sync, synwas; historical indexes, hindex) ----
     def get_json(self, path: str) -> tuple[object, bytes]:
         """GET a JSON resource and return (its "result", the response body as received). Same token handling as
         download(): one retry with a new token if the token is rejected."""
+        return self._json("GET", path, None)
+
+    def post_json(self, path: str, payload: dict) -> tuple[object, bytes]:
+        """POST a JSON request and return (its "result", the response body as received), e.g. hindex/agent."""
+        return self._json("POST", path, json.dumps(payload).encode("utf-8"))
+
+    def _json(self, method: str, path: str, data: bytes | None) -> tuple[object, bytes]:
         for attempt in (1, 2):
             if self._token is None:
                 self.authenticate()
-            status, headers, body = self._send("GET", path, None, {self._token_header: self._token})
+            headers = {self._token_header: self._token}
+            if data is not None:
+                headers["Content-Type"] = "application/json; charset=UTF-8"
+            status, headers, body = self._send(method, path, data, headers)
             try:
                 doc = json.loads(body.decode("utf-8"))
             except (ValueError, UnicodeDecodeError):
-                raise IcpError(f"GET {path}: HTTP {status}, response is not JSON") from None
+                raise IcpError(f"{method} {path}: HTTP {status}, response is not JSON") from None
             code = str(doc.get("retcode")) if isinstance(doc, dict) else None
             if code == TOKEN_INVALID and attempt == 1:
                 self._token = None
                 continue
             if code != "0":
                 message = doc.get("message", "") if isinstance(doc, dict) else ""
-                raise IcpError(f"GET {path}: retcode {code} {message}".strip())
+                raise IcpError(f"{method} {path}: retcode {code} {message}".strip())
             if "result" not in doc:
-                raise IcpError(f"GET {path}: retcode 0 but no result in the response")
+                raise IcpError(f"{method} {path}: retcode 0 but no result in the response")
             return doc["result"], body
-        raise IcpError(f"GET {path}: token rejected twice ({TOKEN_INVALID})")
+        raise IcpError(f"{method} {path}: token rejected twice ({TOKEN_INVALID})")

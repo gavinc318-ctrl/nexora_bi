@@ -66,6 +66,23 @@ curl -s -X POST localhost:18080/_fake/control -d '{"ref": {"status": 1}}'       
 curl -s -X POST localhost:18080/_fake/control -d '{"ref": {"end_time": "2026-10-01 00:00:00"}}'   # 副本多日未刷新
 ```
 
+### 坐席历史指标（hindex/agent，if03b / if03c · DD-98）
+
+`POST /cmsgateway/resource/hindex/agent` 照接口文档 p.935–936、p.1035（`agent_index.py`）。接口没有日期参数，假接口答
+「当日至今」，平台的日按 UTC+3 切（Q36 未答，这是假设）：
+
+- `IDX_04_03_001`：当日 inTime 的签入区间，到「此刻」为止；仍在线的 outTime 为空串、duration 算到此刻（Q37 未答）。
+  话单把呼叫分给任意时刻的任意坐席，故每名坐席几乎全天在线（两段，中间休息）；少数坐席第二段跨过午夜（Q38）
+- `IDX_04_02_*`：当日至今的累计。呼入数与呼入时长取自同一天的假话单，与话单的坐席腿对得上；其余状态是编的。
+  值一律为字符串，空闲时长写成「n.0」（照文档样例）
+- 工号不在 101–160：全部指标为 null（照文档样例）
+
+```bash
+curl -s -X POST localhost:18080/_fake/control -d '{"agent_inject": ["day_bad_value"]}'     # 一个日累计值为 "12.5"
+curl -s -X POST localhost:18080/_fake/control -d '{"agent_inject": ["session_inverted"]}'  # 一段区间签出早于签入
+curl -s -X POST localhost:18080/_fake/control -d '{"agent_inject": ["extra_agent"]}'       # 多返回一个没请求的工号
+```
+
 ## 覆盖的边界情况（NOTES.md 草稿第二节）
 
 | # | 情况 | 怎么造出来 |

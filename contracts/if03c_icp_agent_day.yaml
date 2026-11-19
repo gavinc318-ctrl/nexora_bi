@@ -1,50 +1,72 @@
 # =====================================================================
-# IF-03c  坐席状态时长日累计（平台历史指标）
+# IF-03c  坐席状态时长日累计（平台历史指标接口 hindex/agent，接口文档 p.935–936、p.1035 表 1）
 #
 # 状态变化流水在任何接口里都不存在：平台只给到各状态的日累计（DD-65）。
 # 因此这是本系统中极少数「指标即来源」的接入——相应报表须标注来源、不可下钻、
 # 也不可按班次切分。
+#
+# 接口没有日期参数（DD-98 第一条），每个指标只返回一个值。答复（Q36）前按「当日至今」实现：
+#   - 一次观测属于哪一天 = 观测时刻按 window.day_timezone 取日期（DD-98 第二条）
+#   - 午夜后 window.midnight_skip_minutes 分钟内的观测可能仍是前一日的值（报表批延迟），整次不用
+#   - 回补不可能，原设计的 restate_days 作废；某天的终值只能靠当天最后一次观测，受报表批延迟所限可能拿不全，
+#     与话单对账有系统差。M-R02–M-R04 因此标 depends_unverified，不承诺日终定稿
 # =====================================================================
 source_id: icp_agent_day
 connector: rest_api
 target_raw: raw.icp_agent_day
-contract_version: 1
+contract_version: 1                  # 2026-11-19 按 DD-98 重写（尚未发布过，不递增）
 enabled: true
 
 endpoint:
   method: POST
   path: /cmsgateway/resource/hindex/agent
   host_ref: icp_cms_gateway
-  request_body:
-    ccId: 1
-    vdnId: 1
-    objectIds: "{{ agent_ids }}"
-    indexIds: [IDX_04_02_001, IDX_04_02_002, IDX_04_02_003, IDX_04_02_004,
-               IDX_04_02_006, IDX_04_02_007, IDX_04_02_010, IDX_04_02_013,
-               IDX_04_02_016, IDX_04_02_019, IDX_04_02_021, IDX_04_02_022,
-               IDX_04_02_023, IDX_04_02_024]
+  response: json                       # {message, retcode, result: [{id, idxs: [{id, val}]}]}
+  site_vdn:                            # 同 if03b
+    cc_id: "1"
+    vdn_id: "1"
+  index_ids: [IDX_04_02_001, IDX_04_02_002, IDX_04_02_003, IDX_04_02_004,
+              IDX_04_02_006, IDX_04_02_007, IDX_04_02_010, IDX_04_02_013,
+              IDX_04_02_016, IDX_04_02_019, IDX_04_02_021, IDX_04_02_022,
+              IDX_04_02_023, IDX_04_02_024]
+  objects:                             # 同 if03b（DD-98 第三条）
+    from: icp_reference
+    dataset: agents
+    batch_size: 2000
   prerequisite: {inherits: icp_agent_session}
 
 auth: {inherits: icp_cdr_voice}
 
 window:
-  grain: day
-  schedule: "0 * * * *"
-  restate_days: 3
+  grain: observation
+  schedule: "*/10 * * * *"             # 每 10 分钟（DAG 按 UTC 读）：当日最后一次可用观测在当地 23:50 左右，
+                                       # 最后 10 分钟的变化拿不到——这是「当日至今」的固有缺口（DD-98 第一条 ②）
+  day_timezone: Asia/Riyadh            # 归日时区（LD-02 第 6 章，日切 00:00 AST）。平台自己按哪个时区切日待 Q36：
+                                       # 若平台按 UTC 切，当地 00:00–03:00 的观测会被记到错的一天，30 分钟挡不住
+  midnight_skip_minutes: 30            # 可热调，只能调大（调小可能把前一日的值记进当日）
+  note: >-
+    不写 watermark_state。一次观测在午夜后 midnight_skip_minutes 内：本次运行不请求、不写批次，run_log 记 success 并说明
 
-watermark: {type: timestamptz, column: date_key}
-idempotent_key: [agentId, date_key]
+watermark:
+  type: timestamptz
+  column: observed_at
+  note: "观测时刻（请求发出前取 now()），即 core_version。不推进 watermark_state"
+
+idempotent_key: [id, date_key]
 
 # 写入语义（DD-82 · DD-76 · DD-02）：raw 只追加，不覆盖
 raw_write:
-  mode: append_if_changed          # 写入前查同一（幂等键, content_hash）是否已存在，已存在不写
-  content_hash: all_source_columns # 全部源列；接入元数据（run_id · batch_seq · 落地时间）不计入
+  mode: append_if_changed          # 与该键上一次（未在待处理或已丢弃批次中的）观测比 content_hash，不同才写
+  content_hash: all_source_fields  # 工号、归属日与 idxs 全部；接入元数据（run_id · batch_seq · 观测与落地时间）不计入
   dedup_ignores_batches: [pending, discarded]   # 被扣下或丢弃批次中的行不挡后续观测
   bad_data: raw_then_quarantine    # 未通过校验的批次照常写入 raw，并登记 meta.quarantine_batch
 core_version:
-  from: observed_at                # 源端无行级变更时间（平台重算改写既有日的值），取观测时间
+  from: observed_at                # 源端无行级变更时间（平台重算改写既有日的值），取观测时刻
 
+# raw 每坐席每次观测一行：工号、归属日、idxs 原样（jsonb）；各指标在 staging 转整数
 columns:
+  - {src: id,            type: text,    target: fact_agent_day.agent_sk,           state: verified,          note: "坐席工号，经 dim_agent 解析为 agent_sk，另原样写进 agent_no（结构变更 0015）；关联该日结束时有效的版本，当日中途被删者取当日最后一个有效版本（DD-98 第六条）"}
+  - {src: date_key,      type: date,    target: fact_agent_day.date_key,           state: mapped_unverified, origin: observation, note: "不在响应里：接入程序按观测时刻与 day_timezone 写入（DD-98 第二条），待 Q36 核实"}
   - {src: IDX_04_02_001, type: integer, target: fact_agent_day.signin_count,       state: verified, note: "签入次数。与 if03b 的区间段数对账"}
   - {src: IDX_04_02_002, type: integer, target: fact_agent_day.signin_seconds,     state: verified, note: "签入时长。M-R02 以 if03b 的区间合计为准，本列作对账"}
   - {src: IDX_04_02_003, type: integer, target: fact_agent_day.inbound_calls,      state: verified, note: "呼入数。与话单按坐席腿计数对账"}
@@ -56,12 +78,29 @@ columns:
   - {src: IDX_04_02_016, type: integer, target: fact_agent_day.hold_seconds,       state: verified}
   - {src: IDX_04_02_019, type: integer, target: fact_agent_day.busy_seconds,       state: verified, note: "示忙时长"}
   - {src: IDX_04_02_021, type: integer, target: fact_agent_day.talk_seconds,       state: verified, note: "应答时长。M-R04 占用率的分子之一"}
-  - {src: IDX_04_02_022, type: integer, target: fact_agent_day.idle_seconds,       state: verified}
+  - {src: IDX_04_02_022, type: integer, target: fact_agent_day.idle_seconds,       state: verified, note: "文档样例为「10759.0」：「n.0」视为整数（DD-98 第四条）"}
   - {src: IDX_04_02_023, type: integer, target: fact_agent_day.internal_xfer_count, state: verified}
   - {src: IDX_04_02_024, type: integer, target: fact_agent_day.transfer_out_count, state: verified}
 
 quality:
   batch_checks:
-    - "各状态时长之和不得超过签入时长；超出即入对账差异并告警，不自动调平"
+    - "响应不是 {id, idxs} 记录的数组：整批隔离"
+    - "返回了请求里没有的工号、或某条记录缺了请求的指标：整批隔离"
+    - "值是字符串整数（「n.0」算整数）或 null；非整数小数、非数字、其他类型：整批隔离（DD-98 第四条）"
     - "平台对不存在的对象返回 null，不得写成 0——null 是「没有这一天」，0 是「这一天为零」"
+    - "各状态时长之和不得超过签入时长；超出即入对账差异并告警，不自动调平（core 测试，WARN）"
   recon: "呼入数与呼入时长同时与话单的坐席腿比对。两者都对得上，才说明话单与平台指标的归日口径一致"
+
+integration_checks:
+  - id: day_semantics
+    question: "返回的是哪一天的累计（当日至今？最近一个报表批完成的那天？），按网关哪个时区切日，能否查指定日期？（Q36）"
+    why: "归日按观测时刻与 day_timezone（DD-98 第二条）。切日时区不对，每天前几个小时的观测记到错的一天，不报错"
+    status: open
+  - id: report_batch_delay
+    question: "报表批多久跑一次、延迟多久？午夜后多久的值才是新一天的？（契约 prerequisite）"
+    why: "决定 midnight_skip_minutes 与「日终值」能拿全到什么程度"
+    status: open
+  - id: response_types
+    question: "id 与各指标值的实际类型（文档全为 string，样例有「10759.0」）"
+    why: "接入程序两种都能读、raw 原样存；核实后收紧"
+    status: open

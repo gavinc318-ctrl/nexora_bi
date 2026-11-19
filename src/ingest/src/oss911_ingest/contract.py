@@ -24,6 +24,13 @@ RAW_TABLE = re.compile(r"^raw\.[a-z][a-z0-9_]*$")
 SECRET_KEY = re.compile(r"passw|secret|private_key", re.IGNORECASE)
 LOOKBACK_MAX = 1440          # minutes; same bounds as the database CHECK (0004)
 STALE_DAYS_MAX = 365         # days; same bounds as the database CHECK (0007)
+MIDNIGHT_SKIP_MAX = 720      # minutes; same bounds as the database CHECK (0015)
+OBJECTS_MAX = 20000          # hindex/agent: at most this many agent IDs per request (interface reference p.935)
+INDEX_ID = re.compile(r"^IDX_[0-9]{2}_[0-9]{2}_[0-9]{3}$")
+# The agent metrics of hindex/agent (DD-98): which indexes each source's code reads. The sign-in intervals are one
+# index whose value is an array; the day totals are one integer per index and must match the contract's columns
+SESSION_INDEX = "IDX_04_03_001"
+COLUMN_ORIGINS = {"observation"}   # a column not in the response, written by the ingestion program (if03c date_key)
 # The synwas datasets (interface reference p.907-933) and the CHECK on raw.icp_reference.dataset (0007)
 SNAPSHOT_DATASETS = {"vdns", "agents", "groups", "skills", "skillgroups", "calledconfigs", "restreasons", "servertypes"}
 
@@ -49,6 +56,19 @@ REQUIRED = {
         "endpoint.host_ref", "endpoint.version_probe.path", "endpoint.datasets",
         "endpoint.site_vdn.cc_id", "endpoint.site_vdn.vdn_id",   # the one VDN the dimensions are built from
         "auth.inherits", "window.schedule", "window.version_stale_days", "idempotent_key",
+    ],
+    # Agent metrics by observation of "today so far" (agent.py, DD-98). Log in with the CDR contract's account
+    ("rest_api", "icp_agent_session"): [
+        "endpoint.path", "endpoint.host_ref", "endpoint.site_vdn.cc_id", "endpoint.site_vdn.vdn_id",
+        "endpoint.index_ids", "endpoint.objects.from", "endpoint.objects.dataset", "endpoint.objects.batch_size",
+        "auth.inherits", "window.schedule", "window.day_timezone", "window.source_timezone",
+        "idempotent_key", "columns",
+    ],
+    ("rest_api", "icp_agent_day"): [
+        "endpoint.path", "endpoint.host_ref", "endpoint.site_vdn.cc_id", "endpoint.site_vdn.vdn_id",
+        "endpoint.index_ids", "endpoint.objects.from", "endpoint.objects.dataset", "endpoint.objects.batch_size",
+        "auth.inherits", "window.schedule", "window.day_timezone", "window.midnight_skip_minutes",
+        "idempotent_key", "columns",
     ],
 }
 _MISSING = object()
@@ -194,6 +214,8 @@ def validate_contract(doc: dict) -> list[str]:
                 continue
             if col.get("state") not in ("verified", "mapped_unverified", "unknown"):
                 p.append(f"columns[{i}] ({col['src']}): state must be verified, mapped_unverified or unknown")
+            if "origin" in col and col["origin"] not in COLUMN_ORIGINS:
+                p.append(f"columns[{i}] ({col['src']}): origin must be one of {sorted(COLUMN_ORIGINS)}")
             src_names.append(col["src"])
         dups = sorted({n for n in src_names if src_names.count(n) > 1})
         if dups:
@@ -238,6 +260,14 @@ def validate_contract(doc: dict) -> list[str]:
             p.append("window.schedule must be a cron expression of five fields, e.g. '*/5 * * * *'")
         if "version_stale_days" in win and not _int_in(win["version_stale_days"], 1, STALE_DAYS_MAX):
             p.append(f"window.version_stale_days must be an integer from 1 to {STALE_DAYS_MAX}")
+        if "midnight_skip_minutes" in win and not _int_in(win["midnight_skip_minutes"], 1, MIDNIGHT_SKIP_MAX):
+            p.append(f"window.midnight_skip_minutes must be an integer from 1 to {MIDNIGHT_SKIP_MAX}")
+        if "day_timezone" in win:
+            # The zone "today" is cut in for an observation of today so far (DD-98 item two)
+            try:
+                ZoneInfo(win["day_timezone"]) if isinstance(win["day_timezone"], str) else ZoneInfo("")
+            except (ZoneInfoNotFoundError, ValueError):
+                p.append("window.day_timezone must be an IANA time zone name, e.g. Asia/Riyadh")
         if "source_timezone" in win:
             # The zone the source's naive times are in: decides what "now" is for an incremental window
             try:
@@ -285,6 +315,33 @@ def validate_contract(doc: dict) -> list[str]:
             for leaf in ("cc_id", "vdn_id"):
                 if leaf in site_vdn and not (isinstance(site_vdn[leaf], str) and re.fullmatch(r"[0-9]+", site_vdn[leaf])):
                     p.append(f"endpoint.site_vdn.{leaf} must be a quoted string of digits, e.g. \"1\"")
+
+    # Agent metrics (hindex/agent, DD-98): which indexes are asked for, and where the agent IDs come from
+    index_ids = (endpoint or {}).get("index_ids") if isinstance(endpoint, dict) else None
+    if index_ids is not None:
+        if not (isinstance(index_ids, list) and index_ids and all(isinstance(x, str) and INDEX_ID.match(x)
+                                                                  for x in index_ids)
+                and len(set(index_ids)) == len(index_ids)):
+            p.append("endpoint.index_ids must be a non-empty list of distinct index IDs like IDX_04_02_001")
+        elif doc.get("source_id") == "icp_agent_session" and index_ids != [SESSION_INDEX]:
+            p.append(f"endpoint.index_ids must be [{SESSION_INDEX}] for icp_agent_session (the sign-in intervals)")
+        elif doc.get("source_id") == "icp_agent_day":
+            idx_cols = [n for n in src_names if n.startswith("IDX_")]
+            if sorted(idx_cols) != sorted(index_ids):
+                p.append("endpoint.index_ids and the IDX_ columns must be the same set: every index asked for has its "
+                         f"column and every column is asked for (only in index_ids: "
+                         f"{sorted(set(index_ids) - set(idx_cols))}, only in columns: {sorted(set(idx_cols) - set(index_ids))})")
+    objects = (endpoint or {}).get("objects") if isinstance(endpoint, dict) else None
+    if objects is not None:
+        if not isinstance(objects, dict):
+            p.append("endpoint.objects must be a mapping")
+        else:
+            if "from" in objects and objects["from"] != "icp_reference":
+                p.append("endpoint.objects.from must be icp_reference (the agent IDs come from its raw snapshots)")
+            if "dataset" in objects and objects["dataset"] != "agents":
+                p.append("endpoint.objects.dataset must be agents")
+            if "batch_size" in objects and not _int_in(objects["batch_size"], 1, OBJECTS_MAX):
+                p.append(f"endpoint.objects.batch_size must be an integer from 1 to {OBJECTS_MAX}")
 
     # Classification of codes into fixed classes (release causes -> agent / caller / system, DD-91 item 5): every
     # class known, codes integers, no code in two classes
@@ -348,6 +405,16 @@ def validate_overrides(doc: dict, overrides: dict[str, str]) -> list[str]:
             elif not (isinstance(value, str) and re.fullmatch(r"[0-9]{1,3}", value)) \
                     or not 1 <= int(value) <= STALE_DAYS_MAX:
                 p.append(f"{name}={value}: must be an integer from 1 to {STALE_DAYS_MAX}")
+        elif name == "midnight_skip_minutes":
+            default = win.get("midnight_skip_minutes")
+            if not _int_in(default, 1, MIDNIGHT_SKIP_MAX):
+                p.append(f"{name}={value}: this contract has no valid window.midnight_skip_minutes to override")
+            elif not (isinstance(value, str) and re.fullmatch(r"[0-9]{1,3}", value)) \
+                    or not 1 <= int(value) <= MIDNIGHT_SKIP_MAX:
+                p.append(f"{name}={value}: must be an integer from 1 to {MIDNIGHT_SKIP_MAX}")
+            elif int(value) < default:
+                # Shorter could take the previous day's values for the new day's (DD-98 item two): a change of meaning
+                p.append(f"{name}={value}: can only be raised, not below the contract default {default}")
         else:
             p.append(f"{name}={value}: not a hot-tunable parameter")
     return p
@@ -362,3 +429,9 @@ def effective_lookback_minutes(doc: dict, overrides: dict[str, str]) -> int:
 def effective_stale_days(doc: dict, overrides: dict[str, str]) -> int:
     """Contract default, replaced by a hot-tuned value if there is one. Call only after both have been validated."""
     return int(overrides.get("version_stale_days", doc["window"]["version_stale_days"]))
+
+
+def effective_midnight_skip_minutes(doc: dict, overrides: dict[str, str]) -> int:
+    """Contract default, raised by a hot-tuned value if there is one. Call only after both have been validated."""
+    default = doc["window"]["midnight_skip_minutes"]
+    return max(default, int(overrides["midnight_skip_minutes"])) if "midnight_skip_minutes" in overrides else default

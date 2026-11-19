@@ -16,5 +16,5 @@
 release:
   - if03a_icp_cdr.yaml        # raw.icp_cdr_voice，结构变更 0004
   - if03d_icp_reference.yaml  # raw.icp_reference，结构变更 0007
-  # if03b_icp_agent_session.yaml   待 raw 表的结构变更
-  # if03c_icp_agent_day.yaml       待 raw 表的结构变更
+  - if03b_icp_agent_session.yaml   # raw.icp_agent_session，结构变更 0015
+  - if03c_icp_agent_day.yaml       # raw.icp_agent_day，结构变更 0015

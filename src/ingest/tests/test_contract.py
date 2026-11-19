@@ -159,7 +159,7 @@ class ContractRulesTest(unittest.TestCase):
 
     def test_source_without_ingestion_cannot_be_released(self):
         doc = cdr()
-        doc["source_id"] = "icp_agent_day"
+        doc["source_id"] = "icp_skill_day"   # no code ingests it
         self.assertProblem(doc, "no ingestion")
 
     def test_connector_and_target(self):

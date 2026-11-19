@@ -17,6 +17,7 @@ import urllib.request
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import agent_index        # noqa: E402
 import generator as gen   # noqa: E402
 import server as srv      # noqa: E402
 
@@ -284,6 +285,42 @@ class FakeICPTest(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError):
             self.control(ref={"remove": "no-such-agent"})
 
+
+    # ---------- hindex/agent (agent_index.py) ----------
+    def hindex(self, ids, indexes, token=None):
+        _, _, body = self.post(agent_index.INDEX_PATH, {"ccId": "1", "vdnId": "1", "objectIds": ids,
+                                                         "indexIds": indexes}, token or self.token())
+        return json.loads(body)
+
+    def test_hindex_today_so_far(self):
+        # 2026-10-14 12:00 UTC is 15:00 at UTC+3: the first interval is closed, the second still open
+        doc = self.hindex([101, 999], [agent_index.SESSION_INDEX, "IDX_04_02_001", "IDX_04_02_022"])
+        self.assertEqual(doc["retcode"], "0")
+        a, unknown = doc["result"]
+        sessions = a["idxs"][0]["val"]
+        self.assertEqual(len(sessions), 2)
+        self.assertTrue(sessions[0]["outTime"] and not sessions[1]["outTime"])
+        self.assertEqual(a["idxs"][1]["val"], "2")
+        self.assertTrue(a["idxs"][2]["val"].endswith(".0"))                  # like the document's example
+        self.assertEqual([x["val"] for x in unknown["idxs"]], [None, None, None])
+
+    def test_hindex_calls_agree_with_the_cdrs(self):
+        now = datetime(2026, 10, 14, 12, 0, 0)
+        legs = [r for r in gen.rows_in_window(7, agent_index.day_start(now), now, now)
+                if r["DEVICETYPE"] == "2" and r["DEVICENO"] == "101" and r["CALLBEGIN"] and r["CALLEND"]]
+        doc = self.hindex([101], ["IDX_04_02_003"])
+        self.assertEqual(doc["result"][0]["idxs"][0]["val"], str(len(legs)))
+
+    def test_hindex_requires_token_and_integer_ids(self):
+        self.assertEqual(self.hindex([101], ["IDX_04_02_001"], token="nope")["retcode"], "300-008")
+        self.assertEqual(self.hindex(["101"], ["IDX_04_02_001"])["retcode"], "000-002")
+
+    def test_hindex_injections(self):
+        self.control(agent_inject=["extra_agent", "day_bad_value"])
+        doc = self.hindex([101], ["IDX_04_02_001"])
+        self.assertEqual([r["id"] for r in doc["result"]], ["101", "999"])
+        self.assertEqual(doc["result"][0]["idxs"][0]["val"], "12.5")
+        self.assertEqual(self.hindex([101], ["IDX_04_02_001"])["result"][0]["idxs"][0]["val"], "2")   # used once
 
 if __name__ == "__main__":
     unittest.main()
