@@ -21,4 +21,12 @@
     exception when others then
         return null;
     end $f$;
+
+    -- An integer written "n" or "n.0" (ICP's historical indexes send "10759.0" for whole seconds, DD-98 item four)
+    create or replace function staging.try_whole(p text) returns integer
+    language plpgsql immutable set search_path = pg_catalog as $f$
+    begin
+        if p is null or p !~ '^-?[0-9]{1,9}(\.0+)?$' then return null; end if;
+        return split_part(p, '.', 1)::integer;
+    end $f$;
 {%- endmacro %}

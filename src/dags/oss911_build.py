@@ -59,6 +59,9 @@ BUILDS = {
     # agent and first queue: fact_call follows them. The shared pool keeps them from running at the same time as
     # build_icp_cdr_voice
     "icp_reference": "stg_icp_reference dim_agent dim_queue reference_value fact_call",
+    # Agent metrics (DD-98): dim_agent relinks these two as well when its versions change (macros/agent_facts.sql)
+    "icp_agent_session": "stg_icp_agent_session fact_agent_session",
+    "icp_agent_day": "stg_icp_agent_day fact_agent_day",
 }
 
 DEFAULT_ARGS = {
@@ -120,4 +123,4 @@ with DAG(dag_id="maintenance_checks", description="Call-level consistency tests 
          schedule="30 4 * * *", start_date=datetime(2026, 10, 1, tzinfo=UTC), catchup=False, max_active_runs=1,
          default_args=DEFAULT_ARGS, tags=["maintenance"]) as maintenance_checks:
     _task("full_checks", "test --select fact_call_recomputes_from_legs fact_call_for_every_call batches_reach_core "
-                         "mart_closing_not_behind --vars '{full_check: true}'")
+                         "mart_closing_not_behind agent_day_columns_match_contract --vars '{full_check: true}'")

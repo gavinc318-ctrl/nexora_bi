@@ -1,5 +1,5 @@
 -- =====================================================================
--- Verification of database roles and grants (structural changes 0002 to 0013 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
+-- Verification of database roles and grants (structural changes 0002 to 0015 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
 --
 -- It verifies the five privilege roles themselves: inside a transaction the script creates one temporary
 -- login user per role, the superuser session does SET ROLE to that login user, and then runs statements
@@ -95,6 +95,8 @@ SELECT pg_temp.expect_error($$SELECT meta.ensure_monthly_partitions('meta.srid_c
 -- raw is partitioned on a timestamptz (0004); the bounds must be UTC month boundaries whatever the session TimeZone
 SET LOCAL TimeZone = 'Asia/Riyadh';
 SELECT pg_temp.expect_ok($$SELECT meta.ensure_monthly_partitions('raw.icp_cdr_voice', current_date, current_date)$$);
+SELECT pg_temp.expect_ok($$SELECT meta.ensure_monthly_partitions('raw.icp_agent_session', current_date, current_date)$$);
+SELECT pg_temp.expect_ok($$SELECT meta.ensure_monthly_partitions('raw.icp_agent_day', current_date, current_date)$$);
 SELECT pg_temp.expect_error($$SELECT meta.ensure_monthly_partitions('raw.zz_roles_check', current_date, current_date)$$,
                             :'err_partition_scope');                  -- not a partitioned table
 RESET TimeZone;
@@ -163,6 +165,11 @@ SELECT pg_temp.expect_ok    ($$INSERT INTO meta.ingest_batch (run_id, batch_seq,
 SELECT pg_temp.expect_error ($$INSERT INTO meta.ingest_batch (run_id, batch_seq, source_id, mode, window_from, window_to,
                                    row_count, rows_written, contract_version)
                                VALUES (gen_random_uuid(), 1, 'zz_check', 'manual', 'a', 'b', 0, 0, 1)$$, '%ck_ingest_batch_mode%');
+-- An observation of today so far (0015, DD-98): the agent metrics' batch mode
+SELECT pg_temp.expect_ok    ($$INSERT INTO meta.ingest_batch (run_id, batch_seq, source_id, mode, window_from, window_to,
+                                   row_count, rows_written, contract_version)
+                               VALUES ('00000000-0000-0000-0000-0000000000c3', 1, 'zz_check', 'observation',
+                                       '2026-11-19', '2026-11-19T12:00:00+03:00', 1, 1, 1)$$);
 -- The staging batch registry is dbt's (0005), not ingestion's
 SELECT pg_temp.expect_denied($$INSERT INTO meta.staging_batch_state (model, run_id, batch_seq)
                                VALUES ('stg_x', '00000000-0000-0000-0000-0000000000c1', 1)$$);
@@ -182,6 +189,22 @@ SELECT pg_temp.expect_ok    ($$SELECT count(*) FROM raw.icp_cdr_voice r
 SELECT pg_temp.expect_denied($$UPDATE raw.icp_cdr_voice SET callerno = 'x'$$);
 SELECT pg_temp.expect_denied($$DELETE FROM raw.icp_cdr_voice$$);
 SELECT pg_temp.expect_denied($$TRUNCATE raw.icp_cdr_voice$$);
+-- raw.icp_agent_session / raw.icp_agent_day (0015): the same, append only and every row in a registered batch
+SELECT pg_temp.expect_ok    ($$INSERT INTO raw.icp_agent_session (cc_id, vdn_id, id, intime, payload, observed_at, run_id,
+                                   batch_seq, contract_version, content_hash)
+                               VALUES ('1', '1', '101', '2026-11-19 05:00:00', '{"id": "101"}', now(),
+                                       '00000000-0000-0000-0000-0000000000c3', 1, 1, sha256('x'))$$);
+SELECT pg_temp.expect_error ($$INSERT INTO raw.icp_agent_session (cc_id, vdn_id, id, payload, observed_at, run_id,
+                                   batch_seq, contract_version, content_hash)
+                               VALUES ('1', '1', '101', '{}', now(), gen_random_uuid(), 1, 1, sha256('x'))$$,
+                             '%fk_icp_agent_session_batch%');
+SELECT pg_temp.expect_ok    ($$INSERT INTO raw.icp_agent_day (cc_id, vdn_id, id, date_key, idxs, payload, observed_at,
+                                   run_id, batch_seq, contract_version, content_hash)
+                               VALUES ('1', '1', '101', 20261119, '[]', '{"id": "101"}', now(),
+                                       '00000000-0000-0000-0000-0000000000c3', 1, 1, sha256('x'))$$);
+SELECT pg_temp.expect_denied($$UPDATE raw.icp_agent_session SET duration = 'x'$$);
+SELECT pg_temp.expect_denied($$DELETE FROM raw.icp_agent_day$$);
+SELECT pg_temp.expect_denied($$TRUNCATE raw.icp_agent_day$$);
 SELECT pg_temp.expect_ok    ($$INSERT INTO meta.clarification_queue (source_id, src_column, src_value, impacted_rows)
                                VALUES ('zz_check', 'CALLTYPE', '9999', 1)$$);
 SELECT pg_temp.expect_denied($$UPDATE meta.clarification_queue SET status = 'closed' WHERE false$$);
@@ -216,6 +239,14 @@ RESET ROLE;
 SET ROLE :"transform_user";
 SELECT pg_temp.expect_ok    ($$SELECT * FROM raw.zz_roles_check$$);
 SELECT pg_temp.expect_ok    ($$SELECT * FROM raw.icp_cdr_voice$$);
+SELECT pg_temp.expect_ok    ($$SELECT * FROM raw.icp_agent_session$$);
+SELECT pg_temp.expect_ok    ($$SELECT * FROM raw.icp_agent_day$$);
+SELECT pg_temp.expect_denied($$INSERT INTO raw.icp_agent_day (cc_id, vdn_id, date_key, idxs, payload, observed_at, run_id,
+                                   batch_seq, contract_version, content_hash)
+                               VALUES ('1', '1', 20261119, '[]', '{}', now(), '00000000-0000-0000-0000-0000000000c3', 1, 1,
+                                       sha256('x'))$$);
+-- The agent facts keep an agent without a dimension row (0015, DD-98 item five): agent_sk may be empty
+SELECT pg_temp.expect_ok    ($$UPDATE core.fact_agent_day SET agent_sk = NULL WHERE false$$);
 SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.ingest_batch$$);
 -- Staging batch registry (0005, DD-89): dbt registers and, when rebuilding a model, clears; only existing batches
 SELECT pg_temp.expect_ok    ($$INSERT INTO meta.staging_batch_state (model, run_id, batch_seq)
@@ -259,6 +290,7 @@ SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.field_visibility$$);
 SELECT pg_temp.expect_denied($$SELECT * FROM staging.zz_check$$);       -- the service layer does not read staging (DD-03)
 SELECT pg_temp.expect_denied($$SELECT * FROM raw.zz_roles_check$$);
 SELECT pg_temp.expect_denied($$SELECT * FROM raw.icp_cdr_voice$$);
+SELECT pg_temp.expect_denied($$SELECT * FROM raw.icp_agent_day$$);
 SELECT pg_temp.expect_ok    ($$INSERT INTO audit.access_log (date_key, user_principal, role_code, action)
                                VALUES (to_char(current_date, 'YYYYMMDD')::int, 'x', 'x', 'query')$$);
 SELECT pg_temp.expect_denied($$UPDATE audit.access_log SET row_count = 0$$);
@@ -461,6 +493,11 @@ SELECT pg_temp.expect_ok    ($$INSERT INTO meta.source_runtime_param (source_id,
                                VALUES ('zz_check', 'version_stale_days', '7', 'x')$$);
 SELECT pg_temp.expect_error ($$INSERT INTO meta.source_runtime_param (source_id, param_name, param_value, updated_by)
                                VALUES ('zz_check', 'version_stale_days', '0', 'x')$$, '%ck_source_runtime_param_whitelist%');
+-- Hot-tuned minutes after midnight not used for day totals (0015, DD-98 item two): whitelisted, typed
+SELECT pg_temp.expect_ok    ($$INSERT INTO meta.source_runtime_param (source_id, param_name, param_value, updated_by)
+                               VALUES ('zz_check', 'midnight_skip_minutes', '45', 'x')$$);
+SELECT pg_temp.expect_error ($$INSERT INTO meta.source_runtime_param (source_id, param_name, param_value, updated_by)
+                               VALUES ('zz_check', 'midnight_skip_minutes', '721', 'x')$$, '%ck_source_runtime_param_whitelist%');
 
 -- ---------- Ownership and PUBLIC ----------
 DO $$

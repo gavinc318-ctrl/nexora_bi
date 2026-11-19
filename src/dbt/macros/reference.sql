@@ -298,7 +298,8 @@
        and f.{{ sk }} is distinct from x.new_sk
 {%- endmacro %}
 
-{#- Repair, by hand: relink every agent and queue leg in core, not only those of entities changed in this run.
+{#- Repair, by hand: relink every agent and queue leg in core, and every agent sign-in interval and day total
+    (macros/agent_facts.sql), not only those of entities changed in this run.
     The dimension models relink in the same transaction as their own change, so the two cannot drift apart in normal
     operation; this is for when test fact_call_leg_dimension_links fails anyway (runbook 14). Writes only legs whose
     link really changes.
@@ -307,6 +308,7 @@
     {% set sql %}
     {{ relink_call_legs('agent_sk', 2, 'core.dim_agent', true) }};
     {{ relink_call_legs('queue_sk', 1, 'core.dim_queue', true) }};
+    {{ relink_agent_facts(true) }};
     {% endset %}
     {% do run_query(sql) %}
     {% do run_query('commit') %}
@@ -335,7 +337,8 @@
      group by f.device_no
 {%- endmacro %}
 
-{#- Pre-hook, first, of fact_call_leg, dim_agent and dim_queue: one at a time, also outside Airflow.
+{#- Pre-hook, first, of fact_call_leg, dim_agent and dim_queue -- and of fact_agent_session and fact_agent_day, linked
+    to dim_agent the same two-sided way (macros/agent_facts.sql): one at a time, also outside Airflow.
     The links between call legs and dimensions are kept right from two sides -- fact_call_leg joins the dimension
     version valid at each new leg, and a dimension model relinks the legs already in core. If the two run at the same
     time, each can miss the other's uncommitted rows: legs written by the one, dimension versions by the other, and

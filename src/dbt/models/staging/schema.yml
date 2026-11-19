@@ -19,3 +19,20 @@ models:
         data_tests: [not_null]
       - name: observed_at
         data_tests: [not_null]
+
+  - name: stg_icp_agent_session
+    description: "ICP agent sign-in intervals, typed, one row per raw observation (contract if03b · DD-98)."
+    columns:
+      - name: run_id
+        data_tests: [not_null]
+      - name: observed_at
+        data_tests: [not_null]
+  - name: stg_icp_agent_day
+    description: "ICP agent day totals, typed, one row per raw observation (contract if03c · DD-98)."
+    columns:
+      - name: run_id
+        data_tests: [not_null]
+      - name: date_key
+        data_tests: [not_null]
+      - name: observed_at
+        data_tests: [not_null]

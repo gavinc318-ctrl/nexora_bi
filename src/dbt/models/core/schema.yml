@@ -63,6 +63,26 @@ models:
         data_tests: [not_null, unique]
       - name: name_en
         data_tests: [not_null]
+  - name: fact_agent_session
+    description: "core.fact_agent_session -- written by this model, owned by oss911_owner (DD-74 · DD-98)."
+    columns:
+      - name: agent_session_sk
+        description: "Unique across all partitions: the primary key includes date_key, so the database cannot check it."
+        data_tests: [not_null, unique]
+      - name: agent_no
+        data_tests: [not_null]
+      - name: signin_at
+        data_tests: [not_null]
+  - name: fact_agent_day
+    description: "core.fact_agent_day -- written by this model, owned by oss911_owner (DD-74 · DD-98)."
+    columns:
+      - name: agent_day_sk
+        data_tests: [not_null, unique]
+      - name: source_kind
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['platform_index']
 
 sources:
   - name: core

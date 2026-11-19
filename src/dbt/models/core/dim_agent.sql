@@ -3,8 +3,9 @@
     versions are cut: macros/reference.sql (scd2_timeline). Rows are only inserted and closed (change 0007). The
     pre-hooks fix this build's snapshots and timeline (DD-94 item twenty), log every changed field and close the
     current versions; the post-hooks flag renamed translations,
-    relink the call legs already in core, raise an item for agents of call legs that no version covers (DD-95), and
-    register the snapshots.
+    relink the call legs already in core, raise an item for agents of call legs that no version covers (DD-95), do the
+    same for the agent sign-ins and day totals (macros/agent_facts.sql, DD-98 items five, six), and register the
+    snapshots.
 -#}
 {{ config(
     materialized='incremental',
@@ -15,7 +16,8 @@
               "{{ scd2_log(agent_attrs(), agent_mark_attrs() | map(attribute=0) | list) }}",
               "{{ scd2_close('agent_sk') }}"],
     post_hook=["{{ flag_renamed_labels('name_en') }}", "{{ relink_call_legs('agent_sk', 2) }}",
-               "{{ raise_unlinked_member_items(2) }}", "{{ register_snapshot_batches('agents') }}"]
+               "{{ raise_unlinked_member_items(2) }}", "{{ relink_agent_facts() }}",
+               "{{ raise_unlinked_agent_fact_items() }}", "{{ register_snapshot_batches('agents') }}"]
 ) }}
 
 select core.sk_scd('{{ var("site_code") }}', 'icp', x.nk, x.at)       as agent_sk,
