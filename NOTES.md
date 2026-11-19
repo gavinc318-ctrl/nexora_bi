@@ -2155,3 +2155,42 @@ uvicorn（BSD-3，不带 [standard]，即不引入 uvloop、httptools）、pydan
 **排期**：① 上述六项 → ② 第 7 步 if03b / if03c（DD-98）→ ③ 监控告警通道（封账落后、STALE、待澄清数、dbt WARN、未关联工号现在只进日志；
 开工前请列方案与需定，Prometheus 已在机上）。Mac 侧同时做第 10 步设计（门户外壳、四张话务报表、Superset 去留）。
 
+
+## 2026-11-19  开发机：服务层评审六项已实现、真机已部署；封账核对结论与需定
+
+**实现（提交 76213e4、52dc2f3）**
+1. 分析读一个 REPEATABLE READ READ ONLY 事务（目录、权限、选版、取数、元字段），审计另一连接独立提交。补测：选版后取数前插入一次
+   intraday 重写，响应不得为 published + 空；退回 READ COMMITTED 时该测必败。
+2. 封账边界取 `contracts/resweep.yml` 的回扫起始日：`publish_marts_nightly` 从 DAG 发布清单传 `--vars resweep_from`，缺失即编译失败。
+   补测 `test/mart_closing_check.sh`：15 日有 pending、16 日成功 → 15、16 日都不封；丢弃后才封；旧代码该测失败。
+3. 主体键 sub：结构变更 0014——`meta.user_department_map` 按 subject（唯一），用户名移到 username 只作显示，旧行保留但不匹配任何人，
+   新写或改动的行必须有 subject（NOT VALID 约束）；`audit.access_log` 加 `user_display`，旧审计行不改写。23 剧本核验每个测试用户令牌的
+   sub 等于其 Keycloak 用户 id（`verified: … sub ok`）。
+4. 身份确认与权限判断分两步：令牌有效即写审计，含 role_missing、role_ambiguous（role_code 记 `none`）与 request_invalid
+   （object_ref 为路径，不记 metric_codes 与请求取值）；令牌无效只进服务日志。
+5. 一个用户只许一个业务角色，多个 → 403 `role_ambiguous`。
+6. 部门过滤只对 dispatcher、supervisor，过滤列取 `agency_type` 维度的列；46 校验声明 `row_filter: department` 的表须有该维度。
+   `/v1/me` 的 problems 只列对该角色生效的过滤所缺的映射。
+
+服务 0.2.0，OpenAPI 重新生成；测试 60 项。真机按 40 → 45 → 50 → 46 → 23 → 60 部署完毕（Gavin 执行）。`meta.user_department_map`
+真机 0 行，无旧数据需迁移。
+
+**真机已封日子的核对：没有被这条缺陷提前封的日子**
+- 已封：五张 mart 表 20261019–20261114 各 27 天（`calls__day__repeat_failed` 11-18 才建，同范围）。
+- 逐日核对封账时其覆盖的源端日（2026-10-25 起）是否已回扫进 core：10-27 起全部满足。
+- 源端日 10-25 一度看似「从未回扫」：它的回扫是 Airflow `scheduled__2026-10-26T02:00`（10-26 05:00 首跑、16:23 重跑，两批均进 core，
+  窗口 10-24 23:45 – 10-26 00:00），当时 `resweep` 模式尚未存在（结构变更 0005 于 10-26 16:26 才加），记为 `backfill`。
+  数据在 10-26 已完整进 core，10-25、10-26 两天的封账是对的。无需修正版本。
+
+**需定**
+- (a) **源端日 10-25 在新封账逻辑下永远算「未回扫」**：`mart_final_days` 只认 `mode = 'resweep'`，而 10-25 的回扫记为 `backfill`。
+  已封的日子不重开、下一次 nightly 从 11-15 起，**当前无影响**；但任何从头写的 mart 表（新增表、整表重建，if03b/if03c 可能就有）
+  会封到 10-24 后永远停住（封账不越过未封的日子）。三种做法：
+  ① `contracts/resweep.yml` 起始日改为 2026-10-26，10-25 算历史（其数据实际已完整进 core）——只改一行配置，代码不动（开发机倾向）；
+  ② 把那次运行的两批在 `meta.ingest_batch` 改记 `resweep`——改历史记录；
+  ③ 封账同时承认 0005 之前回扫 DAG 记为 `backfill` 的运行——改代码，且须区分手工补数与回扫。
+- (b) nightly 缺 `resweep_from` 时直接编译失败（DAG 失败），而不是悄悄不封。开发机这样定了，请确认。
+- (c) 令牌无效且请求格式不对：答 401，不写审计（身份未确认，与令牌无效同一规则）。请确认。
+- (d) role_ambiguous 与 role_missing 一样 role_code 记 `none`（多个角色不挑一个记）。请确认。
+
+**下一步**：第 7 步 if03b / if03c（DD-98）。
