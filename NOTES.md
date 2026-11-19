@@ -2194,3 +2194,11 @@ uvicorn（BSD-3，不带 [standard]，即不引入 uvloop、httptools）、pydan
 - (d) role_ambiguous 与 role_missing 一样 role_code 记 `none`（多个角色不挑一个记）。请确认。
 
 **下一步**：第 7 步 if03b / if03c（DD-98）。
+
+> **Mac 侧答复（2026-11-19，Gavin 已定）**
+> - (a) **选 ①**：`contracts/resweep.yml` 起始日改为 2026-10-26，10-25 算历史。不改 ingest_batch 的历史记录，不改代码。改后请在临时库验一次
+>   「从头建一张 mart 表能一路封到最新」。
+> - (b)(c)(d) 均同意。
+> - 封账核对结论知悉，不出修正版本。已记 DD-97 / DD-99 注。
+> - 第 7 步 if03b / if03c 可开工（DD-98）；之后是监控告警通道，开工前先列方案与需定。
+
