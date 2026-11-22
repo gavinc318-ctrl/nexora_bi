@@ -2264,3 +2264,81 @@ uvicorn（BSD-3，不带 [standard]，即不引入 uvloop、httptools）、pydan
    失败的显示 stderr
 
 **下一步**：真机部署按 40 → 30 → 45 → 50（40 已跑过的不用重跑）。
+
+## 2026-11-22 开发机：第 7 步真机部署完成；监控告警通道方案与需定（只列，未实现）
+
+**第 7 步真机**：40 → 30 → 45 → 50 全过（顺序更正见上节）。core 两表：区间 120 行、日累计 60 行，全部关联，60 名坐席，
+最新观测在十分钟内。坐席 101：两段区间，时长与签入签出逐秒相符，在线那段 `signout_at` 为空；日累计 `signin_count` 2
+与段数一致，`signin_seconds` 70458 对区间合计 70460（观测早 1.5 秒）。`publish_marts_nightly` 11-21、11-22 两晚 success
+（回扫起始日 10-26 之后）。
+
+### 一、现状：信号已有，通道没有
+
+| 信号 | 现在在哪 | 谁能看到 |
+| --- | --- | --- |
+| 封账落后 | dbt 测试 `mart_closing_not_behind`（ERROR，`maintenance_checks` 每日 04:30） | Airflow 里那一个任务变红 |
+| 参照副本过期 | `run_log.message` 里的 `STALE:`，任务仍 success | 无人，除非去翻 message |
+| 待澄清 | `meta.clarification_queue`（open / asked） | 无界面（M-03 未建） |
+| dbt WARN | 六个 warn 测试（`fact_call_leg_without_dimension`、`agent_facts_without_dimension` 等），只写在 Airflow 任务日志 | 无人 |
+| 未关联工号 | 话单腿与坐席两表 `agent_sk IS NULL`；坐席两表另开待澄清 | 同上 |
+| 坐席两源批次进没进 core | 无（`batches_reach_core` 只查话单） | — |
+| 日累计与话单对账 | 无 | — |
+
+Prometheus 在机上，只采自己与 HAProxy；没有 Alertmanager，没有任何告警规则，也没有投递出口。
+
+### 二、方案（建议）
+
+**1. 一个只读的指标导出程序 `oss911-monitor`**，查 meta / core，以 Prometheus 文本格式暴露 gauge。规则放在 Prometheus，
+导出程序只报「是多少」，不判「该不该响」。
+
+- 放在接入程序包里作第二个入口（复用连库、配置与打包；不新增 wheel）；systemd 常驻，只绑宿主机对容器网关的地址
+- 查询结果缓存 60 秒，Prometheus 该 job 采集间隔 60 秒——指标查询不随采集次数打库
+- 新只读角色 `oss911_monitor`（结构变更 0016），只 SELECT 用到的 meta 表与 core 三表；凭据在 `/etc/oss911/monitor.env`
+- 依赖 `prometheus_client`（Apache 2.0）进 wheelhouse
+
+**2. 指标（第一批）**
+
+| 指标 | 含义 | 来源 |
+| --- | --- | --- |
+| `oss911_mart_closed_lag_days{mart}` | 今天（Asia/Riyadh）减最新封账日 | `meta.mart_day_publication` |
+| `oss911_reference_sync_age_seconds{scope}` | 参照副本距上次同步的秒数 | `meta.ingest_batch.snapshot_synced_at` 最新一份 |
+| `oss911_clarification_open{source_id}` · `oss911_clarification_oldest_age_seconds{source_id}` | 未处理条数、最老一条挂了多久 | `meta.clarification_queue` |
+| `oss911_dbt_test_failures{test, severity}` | 最近一次运行该测试的失败行数 | 新表 `meta.check_result`（见第 3 条） |
+| `oss911_unlinked_agents{table}` | `agent_sk IS NULL` 的不同工号数 | core 三表（坐席两表走 0015 的部分索引；话单腿需同类部分索引，0016 加） |
+| `oss911_unprocessed_batches{source_id, model}` · `_oldest_age_seconds` | 已提交、未进 core 的批次 | `meta.ingest_batch` 对 `meta.staging_batch_state`，覆盖全部源（补需定 (b) 之外的那条缺口） |
+| `oss911_source_last_success_age_seconds{source_id}` · `oss911_source_consecutive_failures{source_id}` | LD-01 10 章「源中断」「水位停滞」 | `meta.run_log` |
+| `oss911_threshold{signal, key}` | 库里已有的阈值原样导出（`version_stale_days` 热调值、封账落后天数） | `meta.source_runtime_param` / 契约 |
+
+最后一行的用意：已有的阈值（可热调的 `version_stale_days`、dbt 变量里的 3 天）不在规则文件里再写一份，规则写成
+`metric > on(...) oss911_threshold`，阈值只有一个权威。
+
+**3. dbt 测试结果落库**：`on-run-end` 宏把本次每个测试的 状态 / 失败行数 / 严重度 写进 `meta.check_result`（0016 新建，
+只增，按月分区，保留 90 天）。WARN 从此可查、可报，M-08 将来也读这张表。不读 `run_results.json`：它在 Airflow 节点
+本地、每次覆盖，生产两台 worker 各一份。
+
+**4. 规则与投递**：Prometheus 规则文件 `alerts.yml` 由 22-containers 部署，部署前 `promtool check rules`；新增 Alertmanager
+容器（Apache 2.0，digest 钉死，进 MANIFEST 与离线介质）。告警只含定位信息（源、表、条数、阈值），**不含工号、号码等
+数据本体**（LD-01 10.2：告警出 DMZ）。开发机没有短信邮件网关：Alertmanager 发 webhook 到 `test/` 下一个落文件的假网关，
+用于验收「告警可送达」；生产接入方式见需定 ②。
+
+**5. 日累计与话单对账**（需定 (b) 的落法）：按坐席逐日，比 `fact_agent_day.inbound_calls` 与**应答时刻早于该日
+`src_observed_at`** 的话单腿数——用日终值自己的观测时刻截断话单，最后十分钟的缺口两边一起去掉，不再天天报差。
+已封账的日子才比，结果写 `meta.check_result`（作为一项检查），超差计数进上表的 dbt 指标。
+
+**实现分块**（批准后）：① 0016（角色、`meta.check_result`、话单腿部分索引）+ on-run-end 宏 + 对账测试；
+② `oss911-monitor` + 30 部署 + Prometheus 采集与规则；③ Alertmanager + 假网关 + runbook 21 + 权限验证补项。
+
+### 三、需定
+
+| # | 问题 | 建议 |
+| --- | --- | --- |
+| ① | **新增 Alertmanager 组件**（选型变更，入 MANIFEST 与 LD-09） | 加。Prometheus 自身不投递；自写投递等于重造分组、静默、去重 |
+| ② | **生产投递路径**：Alertmanager 直连总包商的邮件 / 短信网关，还是先进本方「统一投递服务」（LD-01 10.2，写 `audit.delivery_log` 留交接点证据）？后者尚未设计 | 走统一投递服务（举证要交接点证据，直连拿不到）；在它建成前，开发机用假网关，真机只出现在 M-08 |
+| ③ | **收件人与分级**：几级、谁收、短信还是只发邮件、夜间是否发短信 | 两级：`page`（源中断、封账落后、批次积压）短信 + 邮件；`notify`（其余）只邮件，每日 08:00 一封汇总 |
+| ④ | **阈值**（各项建议值） | 源中断：话务 10 分钟源连续 3 次、参照 30 分钟源连续 2 次、日批源 1 次；批次未进 core 超 1 小时；封账落后 > 3 天（沿用）；副本过期 > `version_stale_days`（沿用）；待澄清最老一条 > 7 天；对账差 > max(2, 2%) |
+| ⑤ | **WARN 的报法**：一些 WARN 会长期不为零（配置未补全前的未关联工号） | 只在「由 0 变为非 0」与「比上次增加」时报，并进每日汇总；不按每次构建报 |
+| ⑥ | **告警里能否带工号**：工号算不算数据本体 | 不带，只带条数；工号在 M-03 / 待澄清里看 |
+| ⑦ | **`meta.check_result` 保留期** | 90 天（举证另有 `audit.sla_*`，这张表只为排障与 M-08） |
+| ⑧ | **Airflow 任务失败**本身是否也进这条通道（Airflow 3 可出 StatsD / OpenTelemetry 指标，要再加 exporter） | 第一批不接，源中断已由 `run_log` 覆盖；dbt 构建失败由 `oss911_unprocessed_batches` 间接覆盖 |
+
+**下一步**：等 Mac 侧对方案与上表答复再开工。
