@@ -2251,3 +2251,16 @@ uvicorn（BSD-3，不带 [standard]，即不引入 uvloop、httptools）、pydan
 另：`batches_reach_core`（maintenance_checks）只查话单批次；坐席两源的批次进没进 core 暂无夜间检查，随监控告警通道一并列。
 
 **下一步**：真机部署（runbook 20：40 → 45 → 30 → 50，重启假接口，各手工跑一次，开四个 DAG）。同时开始写监控告警通道的方案与需定（只列，不实现）。
+
+## 2026-11-22 开发机：第 7 步部署顺序更正——30 须在 45 之前
+
+真机跑 45 报 `the field 'args' has an invalid value … Expecting value: line 1 column 1`。原因两层：
+
+1. **runbook 20 的顺序写错了**（40 → 45 → 30 → 50）。45 用已装的接入程序校验契约，真机上还是 0.1.0，不认识
+   `icp_agent_session` / `icp_agent_day`（`no ingestion for connector 'rest_api'`），校验失败。前几步（13、14）一直是
+   30 在 45 之前，这次是我排错了。已改为 40 → 30 → 45 → 50。45 停在校验，同步之前，库与发布目录未动，不需要回滚
+2. **45 的断言把真正的报错盖住了**：assert 失败时也会渲染 success_msg，对空 stdout 做 `from_json` 即模板错误，
+   fail_msg 里的 stderr 就看不到了。改为只在 rc 为 0 时解析 stdout。本地用两条模拟结果验过：成功的照常显示覆盖值，
+   失败的显示 stderr
+
+**下一步**：真机部署按 40 → 30 → 45 → 50（40 已跑过的不用重跑）。

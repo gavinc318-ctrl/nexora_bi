@@ -64,16 +64,19 @@ core 的 `agent_sk` 允许为空、另存源端工号 `agent_no`（结构变更 
 sudo -v
 cd ~/src/nexora_bi/infra
 ansible-playbook playbooks/40-schema.yml -e ansible_connection=local -K
-ansible-playbook playbooks/45-contracts.yml -e ansible_connection=local -K
 ansible-playbook playbooks/30-python.yml -e ansible_connection=local -K
+ansible-playbook playbooks/45-contracts.yml -e ansible_connection=local -K
 ansible-playbook playbooks/50-dags.yml -e ansible_connection=local -K
 ```
+
+**30 必须在 45 之前**：45 用已装的接入程序校验契约，0.1.0 不认识这两个新源（`no ingestion for connector 'rest_api' /
+source 'icp_agent_day'`），校验不过即停在同步之前，库与发布目录都不动。先跑 30 装上 0.2.0 再跑 45 即可。
 
 | 剧本 | 第一遍预期 | 第二遍 |
 | --- | --- | --- |
 | 40 | 执行 0015；权限验证全过（178 项） | `changed=0` |
-| 45 | `icp_agent_day|inserted|1`、`icp_agent_session|inserted|1`，另两个 `unchanged`；新发布目录；`dags.json` 重写 | `changed=0` |
 | 30 | 接入程序重装，`oss911-ingest 0.2.0` | `changed=0` |
+| 45 | `icp_agent_day|inserted|1`、`icp_agent_session|inserted|1`，另两个 `unchanged`；新发布目录；`dags.json` 重写 | `changed=0` |
 | 50 | DAG 与 dbt 项目更新；四个新 DAG 出现，处于暂停 | `changed=0` |
 
 以下 Airflow 命令用第 11 步定义的 `af` 函数。

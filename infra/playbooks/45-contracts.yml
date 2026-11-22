@@ -89,6 +89,7 @@
       loop: "{{ contracts_release }}"
 
     # Asserted separately so that every contract's problems are shown, not only the first one's
+    # (success_msg is templated even when the assertion fails, so stdout is parsed only for a valid contract)
     - name: Assert every contract is valid
       ansible.builtin.assert:
         that:
@@ -96,7 +97,7 @@
         fail_msg: |-
           {{ item.item }} (exit code {{ item.rc }}{{ ': configuration error' if item.rc == 2 else '' }}):
           {{ item.stderr }}
-        success_msg: "{{ item.item }}: valid, hot-tuned values {{ (item.stdout | from_json).overrides }}"
+        success_msg: "{{ item.item }}: valid, hot-tuned values {{ (item.stdout | from_json).overrides if item.rc == 0 else '' }}"
       loop: "{{ _valid.results }}"
       loop_control:
         label: "{{ item.item }}"
