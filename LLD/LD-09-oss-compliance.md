@@ -45,7 +45,9 @@ format: converted from docx, content unchanged
 
 版本基线在实施启动时一次性冻结，此后按 REQ-LIC-08 的补丁流程演进，每次变更更新清单。冻结之前的条目标为「待冻结」，不留空白。
 
-按治理模式，在用组件分为两类。基金会或社区治理的：PostgreSQL、PostGIS（OSGeo）、Airflow 与 Superset（ASF）、etcd 与 Keycloak 与 Prometheus（CNCF）、Podman 与 Ansible（Red Hat）、HAProxy、React。单一公司或单一维护者主导、需持续关注的：SeaweedFS、Patroni、WeasyPrint、dbt-core。后一类是第 8 章复核机制的重点对象。
+按治理模式，在用组件分为两类。基金会或社区治理的：PostgreSQL、PostGIS（OSGeo）、Airflow 与 Superset（ASF）、etcd 与 Keycloak 与 Prometheus 及其 Alertmanager（CNCF）、Podman 与 Ansible（Red Hat）、HAProxy、React。单一公司或单一维护者主导、需持续关注的：SeaweedFS、Patroni、WeasyPrint、dbt-core。后一类是第 8 章复核机制的重点对象。
+
+【2026-11-22 补充，DD-100】监控告警通道新增两项：Alertmanager（Apache 2.0，Prometheus 项目，独立容器，经网络协议交互）与 Python 库 prometheus_client（Apache 2.0，导出程序直接 import）。两者均为宽松许可，不改变第 4 章的判定；版本与 digest 由开发机登记入 compliance/components.csv 与 MANIFEST。
 
 ## 4  许可判定与传染性分析
 
@@ -71,7 +73,7 @@ LGPL 的使用附三个条件（2026-10-14 修订，DD-86）：一、不修改�
 
 | 使用关系 | 涉及组件 | 判定 |
 | --- | --- | --- |
-| 独立服务（网络协议交互） | PostgreSQL · Superset · Keycloak · SeaweedFS · Prometheus · etcd · Airflow | 不构成衍生作品。许可类型不影响自研代码 |
+| 独立服务（网络协议交互） | PostgreSQL · Superset · Keycloak · SeaweedFS · Prometheus · Alertmanager · etcd · Airflow | 不构成衍生作品。许可类型不影响自研代码 |
 | 数据库扩展（经 SQL 使用） | PostGIS（GPLv2） | 与调用 GPL 命令行工具同性质，不构成衍生作品。RFP 2.7.3.1 要求的是开放许可与 MOI 的扩展自由，GPL 完全满足 |
 | 独立进程与命令行工具 | HAProxy（GPLv2）· Ansible（GPLv3）· dbt-core · Podman | 不链接，不构成衍生作品 |
 | 直接 import 的库 | WeasyPrint（BSD）· python-docx（MIT）· React（MIT）· MCP SDK（MIT） | 全部为宽松许可，符合 4.2 的纪律 |

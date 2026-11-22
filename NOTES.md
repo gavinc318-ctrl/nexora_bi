@@ -2342,3 +2342,41 @@ Prometheus 在机上，只采自己与 HAProxy；没有 Alertmanager，没有任
 | ⑧ | **Airflow 任务失败**本身是否也进这条通道（Airflow 3 可出 StatsD / OpenTelemetry 指标，要再加 exporter） | 第一批不接，源中断已由 `run_log` 覆盖；dbt 构建失败由 `oss911_unprocessed_batches` 间接覆盖 |
 
 **下一步**：等 Mac 侧对方案与上表答复再开工。
+
+## 2026-11-22  Mac 侧：第 7 步九处自定与三处需定的答复；监控告警通道批准（DD-100）；坐席 mart 三张表（DD-101）
+
+Gavin 已同意，登记册与正文已更新：DD-98 注、DD-100、DD-101；LD-01 10.2、LD-03 第 5 章、LD-09 第 3 章与 4.3。
+
+**第 7 步**
+- 九处自定全部认可。第 2 条（去重比「该键上一次观测」）是对原契约的更正，已记入 DD-98 注。第 1 条（10 分钟一次、日终缺最后不到
+  10 分钟）先接受，Q36 答复后再定是否 23:58 加取。
+- (a) `midnight_skip_minutes` **不调，维持 30**。两种取值的日终值相同，差别只在凌晨的日内临时值。请加一项检查：同一归属日内、
+  同一坐席的累计值**变小**（午夜跳过窗口之外）即 ERROR，并进告警（page）。平台按哪个时区切日，接真机第一天即可由此看出；
+  raw 留着每次观测，归日规则要改时 staging 可重算。
+- (b) 同意并入监控通道，按你方案第 5 条的截断法做。
+- (c) `tools/check_refs.py` 已改：基线之外也读 `ddl/changes/*.sql`（新建的表与 `ADD COLUMN`）。两份契约的 `id` 请指回
+  `fact_agent_*.agent_no`。
+
+**监控告警通道：方案批准，按三块做。八项需定**
+- ① 加 Alertmanager。请登记 `compliance/components.csv` 与 MANIFEST（连同 `prometheus_client`）；LD-09 正文我已补。
+- ② 走统一投递服务；现在用假网关。接口即 Alertmanager 的 webhook 格式，将来接投递服务不改规则。
+- ③ 两级照你的建议作默认；收件人做成配置（谁收、夜间是否发短信待运维方确认，不要写死）。`page` 增一类：监控自身失效。
+- ④ 数值同意。两点：**新增的阈值也放进随发布走的配置并由导出程序导出**，规则文件里不出现数字；
+  「待澄清最老一条超 7 天」只进每日汇总，不单独发。
+- ⑤ ⑥ ⑦ ⑧ 同意。
+
+**另加三条（防「没有消息被当成没有问题」），请并入实现与验证**
+1. `meta.check_result` 的新鲜度作指标（距各构建 DAG 上次写入的时长），超时即报。dbt 崩溃时 on-run-end 不执行，
+   表里停着上一次的「全过」。
+2. 导出程序某项查询失败时，该项**不再输出旧缓存值**，并置 `oss911_monitor_query_errors`；规则对它与 `up == 0` 报 page。
+3. 一条常亮的心跳告警持续经 Alertmanager 发往假网关；假网关侧的检查脚本在超过设定时长未收到时判失败。
+   验证里请含一例：停掉 Alertmanager，检查脚本须报出。
+
+**监控之后：坐席 mart（DD-101，LD-03 第 5 章末段）**
+三张表：`mart.agents__day_agent__duty`、`mart.agents__day_hour__on_duty`、`mart.agents__day_agent__state`。要点：
+跨午夜区间按自然日切开；未签出区间算到该日最后一次观测；小时表的人数是去重计数、`hour` 为 required_dimensions；
+占用率的分子分母两列仅在三个输入都非空时有值；封账**不要求回扫**（D 日结束后第一次夜间构建，条件为两源该日批次全进 core
+或已丢弃）；读取规则与话务 mart 一致。M-R01 至 M-R04 的 `mart_table / mart_column / numerator / denominator` 请按 DD-101 填。
+列名、结构变更编号、封账条件在 dbt 里的具体写法由你定，写不通处列需定。
+
+**Mac 侧接下来**：第 10 步设计（门户、话务报表、Superset 去留），先与 Gavin 对答案再写。

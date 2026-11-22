@@ -303,9 +303,13 @@ CHAPTER_PROBLEMS = drift + bad_num + bad_title
 print('\n=== 跨文件交叉校验 ===')
 problems = []
 
-ddl_text = ''.join(io.open(f, encoding='utf-8').read() for f in sorted(glob.glob('ddl/0*.sql')))
-ddl_tables = set(re.findall(r'CREATE TABLE (\w+\.\w+)', ddl_text))
+# 基线 ddl/0*.sql 之外，结构变更（ddl/changes/*.sql）新建的表与 ALTER 加的列同样算数：
+# 只读基线时，契约指向结构变更新增的列会被误报为不存在（2026-11-22，开发机 NOTES 需定 (c)）。
+ddl_text = ''.join(io.open(f, encoding='utf-8').read()
+                   for f in sorted(glob.glob('ddl/0*.sql')) + sorted(glob.glob('ddl/changes/*.sql')))
+ddl_tables = set(re.findall(r'CREATE TABLE (?:IF NOT EXISTS )?(\w+\.\w+)', ddl_text))
 ddl_cols    = set(re.findall(r'^\s{4}(\w+)\s', ddl_text, re.M))
+ddl_cols   |= set(re.findall(r'ADD COLUMN (?:IF NOT EXISTS )?(\w+)', ddl_text))
 
 for m in yaml.safe_load(open('metrics/metrics.yaml'))['metrics']:
     for t in (m.get('source_tables') or []):
