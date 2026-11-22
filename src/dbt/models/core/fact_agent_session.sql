@@ -15,6 +15,7 @@
     pre_hook=["{{ lock_call_leg_links() }}",
               "{{ ensure_agent_partitions('session') }}"],
     post_hook=["{{ raise_unlinked_agent_fact_items() }}",
+               "{{ confirm_agent_facts('session') }}",
                "{{ register_agent_batches('stg_icp_agent_session', 'icp_agent_session') }}"]
 ) }}
 
@@ -45,7 +46,13 @@ candidate as (
            now()                                                                              as last_change_at,
            now()                                                                              as built_at,
            l.agent_no,
-           l.observed_at                                                                      as src_observed_at
+           l.observed_at                                                                      as src_observed_at,
+           -- never back: a newer content keeps the confirmation already reached (confirm_agent_facts moves it on)
+           greatest(l.observed_at, (select e2.src_confirmed_at from {{ this }} e2
+                                     where e2.agent_session_sk = core.sk('{{ var("site_code") }}', 'icp',
+                                                                           core.nk(l.agent_no, l.signin_text))
+                                       and e2.date_key = to_char(l.signin_at at time zone '{{ var("report_timezone") }}',
+                                                                 'YYYYMMDD')::integer))  as src_confirmed_at
       from latest l
 )
 

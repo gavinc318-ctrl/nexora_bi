@@ -10,6 +10,9 @@ is one observation of the current values (DD-98 item one) -- no window, no water
      (meta.ingest_batch mode observation: window_from the day, window_to the observation time)
   3. writes, per key, only an observation whose content differs from the key's previous one (contract raw_write):
      the previous one is the latest not in a pending or discarded batch, so a value that changes back is written again
+  4. registers, per batch, which agents were asked for and which came back (raw.icp_agent_coverage, DD-98 review
+     note). An agent asked for but not returned is registered there, not quarantined: the request includes agents
+     removed during the day, which the platform may leave out (Q40). dbt derives src_confirmed_at from it
 Sign-in intervals: one raw row per interval, key (id, inTime); an interval belongs to the day of its inTime, so the
 observation time does not matter for it. Day totals: one raw row per agent, key (id, date_key) with date_key the day
 of the observation time; an observation within midnight_skip_minutes after midnight may still hold the previous
@@ -36,6 +39,11 @@ SOURCE_TIME = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2
 INTEGER_TEXT = re.compile(r"^-?[0-9]+(\.0+)?$")      # "n" or "n.0" (DD-98 item four)
 AGENT_ID = re.compile(r"^[0-9]+$")                   # objectIds is an array of integers (p.935)
 EXAMPLES = 5                                         # how many examples a quarantine reason lists
+
+
+def _id_order(agent_id: str):
+    # Integer IDs in numeric order, anything else after them
+    return (0, int(agent_id), "") if AGENT_ID.match(agent_id) else (1, 0, agent_id)
 
 
 def as_text(value) -> str | None:
@@ -101,6 +109,17 @@ def check_records(result, requested: set[str], problems: Problems) -> list[tuple
             # objectIds and the response do not match: the records cannot be trusted to be the agents asked for
             problems.add("agent not asked for", aid)
     return out
+
+
+def coverage(records, requested) -> tuple[list[str], list[str]]:
+    """(returned, missing): the agent IDs with a record in the response, and those asked for without one, each
+    sorted. Missing agents are registered (raw.icp_agent_coverage), not quarantined -- the request includes agents
+    removed during the day, which the platform may leave out (DD-98 review note, Q40). An agent returned but not
+    asked for is a batch check failure of check_records, not counted here as returned-for-the-request."""
+    asked = set(requested)
+    returned = sorted({a for a, _, _ in records if a is not None and a in asked}, key=_id_order)
+    missing = sorted(asked - set(returned), key=_id_order)
+    return returned, missing
 
 
 def session_rows(records, problems: Problems) -> list[dict]:
@@ -186,6 +205,7 @@ class AgentObservation:
         self.params = {"midnight_skip_minutes": self.skip} if self.kind == "day" else {}
         self.messages: list[str] = []
         self.seq = 0
+        self.missing = 0                              # agents asked for but not returned, over the run's batches
 
     # ------------------------------------------------------------------------------------------------------------
     def run(self) -> str | None:
@@ -212,6 +232,9 @@ class AgentObservation:
                 break
             self._one_batch(chunk, observed_at)
         self.conn.commit()
+        if self.missing:
+            self.messages.append(f"{self.missing} agent(s) asked for but not returned, registered in "
+                                 "raw.icp_agent_coverage (DD-98 review note, Q40)")
         return "; ".join(self.messages) or None
 
     def _now(self) -> datetime:
@@ -274,6 +297,7 @@ class AgentObservation:
             rows = day_rows(records, self.index_ids, int(day.strftime("%Y%m%d")), problems, unknown)
         new = self._new_rows(rows)
         quarantine = problems.reasons()
+        returned, missing = coverage(records, chunk)
 
         self.seq += 1
         self.conn.execute(
@@ -301,6 +325,12 @@ class AgentObservation:
                     [(cc, vdn, x["id"], x["date_key"], json.dumps(x["idxs"], ensure_ascii=False),
                       json.dumps(x["payload"], ensure_ascii=False), observed_at, self.r.run_id, self.seq,
                       self.contract_version, x["content_hash"]) for x in new])
+        self.conn.execute(
+            """INSERT INTO raw.icp_agent_coverage (source_id, cc_id, vdn_id, date_key, observed_at, requested,
+                   returned, missing_count, run_id, batch_seq, contract_version)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (self.r.source_id, cc, vdn, int(day.strftime("%Y%m%d")), observed_at, sorted(chunk, key=_id_order),
+             returned, len(missing), self.r.run_id, self.seq, self.contract_version))
         if quarantine:
             self.conn.execute(
                 "INSERT INTO meta.quarantine_batch (run_id, batch_seq, failure_reason, row_count) VALUES (%s, %s, %s, %s)",
@@ -315,8 +345,11 @@ class AgentObservation:
         self.r.committed += 1
         self.r.rows_received += len(rows)
         self.r.wm_to = observed_at.isoformat(timespec="seconds")
+        self.missing += len(missing)
         self.r.say(f"  batch {self.seq} {len(chunk)} agent(s), observed {observed_at:%Y-%m-%d %H:%M:%S %z}: "
                    f"received {len(rows)}, written {len(new)}"
+                   + (f", {len(missing)} agent(s) not returned (registered, not quarantined): {missing[:EXAMPLES]}"
+                      if missing else "")
                    + (f", QUARANTINED: {'; '.join(quarantine)}" if quarantine else ""))
 
     def _new_rows(self, rows: list[dict]) -> list[dict]:

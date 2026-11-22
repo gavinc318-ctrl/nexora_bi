@@ -123,4 +123,5 @@ with DAG(dag_id="maintenance_checks", description="Call-level consistency tests 
          schedule="30 4 * * *", start_date=datetime(2026, 10, 1, tzinfo=UTC), catchup=False, max_active_runs=1,
          default_args=DEFAULT_ARGS, tags=["maintenance"]) as maintenance_checks:
     _task("full_checks", "test --select fact_call_recomputes_from_legs fact_call_for_every_call batches_reach_core "
-                         "mart_closing_not_behind agent_day_columns_match_contract --vars '{full_check: true}'")
+                         "mart_closing_not_behind agent_day_columns_match_contract agent_day_totals_decrease "
+                         "--vars '{full_check: true}'")

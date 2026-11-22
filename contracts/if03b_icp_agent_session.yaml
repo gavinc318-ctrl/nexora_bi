@@ -11,7 +11,7 @@
 source_id: icp_agent_session
 connector: rest_api
 target_raw: raw.icp_agent_session
-contract_version: 1                  # 2026-11-19 按 DD-98 重写（尚未发布过，不递增）
+contract_version: 2                  # 2026-11-22 v2：id 指回 agent_no；请求未返回的工号登记不隔离（DD-98 评审注）。v1 为 2026-11-19 按 DD-98 重写
 enabled: true
 
 endpoint:
@@ -65,7 +65,7 @@ core_version:
   from: observed_at                # 源端无行级变更时间（签出时回填 outTime），取观测时刻
 
 columns:
-  - {src: id,       type: text,        target: fact_agent_session.agent_sk,          state: verified,          note: "坐席工号（文档类型 int、样例为字符串，原样存文本），经 dim_agent 解析为 agent_sk（AS-31），另原样写进 agent_no（结构变更 0015）；缺维度时 agent_sk 为空（DD-98 第五条）"}
+  - {src: id,       type: text,        target: fact_agent_session.agent_no,          state: verified,          note: "坐席工号（文档类型 int、样例为字符串，原样存文本），经 dim_agent 解析为 agent_sk（AS-31），另原样写进 agent_no（结构变更 0015）；缺维度时 agent_sk 为空（DD-98 第五条）"}
   - {src: inTime,   type: timestamptz, target: fact_agent_session.signin_at,         state: verified,          note: "签入时刻，格式 YYYY-MM-DD HH:MM:SS，按 window.source_timezone 解释"}
   - {src: outTime,  type: timestamptz, target: fact_agent_session.signout_at,        state: mapped_unverified, note: "签出时刻。为空即仍在线或当日未签出；未签出时报表算到观测时刻（DD-98 第八条，Q37）"}
   - {src: duration, type: integer,     target: fact_agent_session.duration_seconds,  state: mapped_unverified, note: "源端给出的时长，文本；「n.0」视为整数。不由本方用签出减签入重算——两者不一致时以源端为准并记入对账差异。未签出时含义待 Q37"}
@@ -74,6 +74,7 @@ quality:
   batch_checks:
     - "响应不是 {id, idxs} 记录的数组、idxs 里没有 IDX_04_03_001、val 既不是区间数组也不是 null：整批隔离（raw 照写能写的部分）"
     - "返回了请求里没有的工号：整批隔离——说明 objectIds 与响应对不上"
+    - "请求了而未返回的工号：登记在 raw.icp_agent_coverage（每批一行：请求的、返回的工号与观测时刻），不隔离，该批照常接入已返回的记录；空数组即全部缺失（DD-98 评审注，Q40）"
     - "inTime 缺失或不是 YYYY-MM-DD HH:MM:SS：整批隔离（键不完整）"
     - "outTime 非空时必须是同一格式且不早于 inTime；倒置的批次照常写入 raw，登记隔离（DD-76 · DD-82）"
     - "duration 不是整数（「n.0」算整数）：整批隔离"
@@ -98,4 +99,8 @@ integration_checks:
   - id: response_types
     question: "id、inTime、outTime、duration 的实际类型（文档 id 为 int、样例为字符串；duration 为字符串）"
     why: "接入程序两种都能读、raw 原样存；核实后收紧"
+    status: open
+  - id: missing_agents
+    question: "请求里的工号在响应里没有对应记录，意味着什么——当日已删除、当日没有数据，还是异常？（Q40）"
+    why: "答复前缺失的工号登记在 raw.icp_agent_coverage、不隔离（DD-98 评审注）；连续多次未返回由监控报出"
     status: open

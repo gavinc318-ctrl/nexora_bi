@@ -39,6 +39,10 @@ ICP 的坐席历史指标接口 `hindex/agent`（接口文档 p.935–936、p.10
 有效的那份，加上当日之后取到的每份**可信**快照（未隔离，或隔离后放行并已被 dbt 应用）。当天中途被删的坐席，这一天照样问。
 **一份可信快照都没有，运行失败**——先让 `ingest_icp_reference` 跑过（第 14 步）。每 2000 个工号一个请求、一个批次。
 
+问了而没返回的工号**登记、不隔离**（DD-98 评审注，Q40）：每个请求在 `raw.icp_agent_coverage` 留一行——请求的工号、返回的
+工号、观测时刻（结构变更 0016）。该批照常接入返回了的记录，run_log 的 message 写 `N agent(s) asked for but not returned`。
+空数组即全部缺失，也不隔离；响应根本不是记录数组的，仍整批隔离。
+
 ### 四、raw 只写变了的
 
 同一段区间签出前每次观测都在变（duration 增长，签出时 outTime 回填），日累计也一样。每个键（区间：工号 + inTime；
@@ -46,6 +50,14 @@ ICP 的坐席历史指标接口 `hindex/agent`（接口文档 p.935–936、p.10
 原样也会再写一行。core 每个键取最新的观测。
 
 批次检查不过（响应形状不对、返回了没问的工号、时间格式或先后不对、值不是整数或 null）照常写 raw、整批隔离，由 M-03 处理。
+
+内容最后变化的时刻是 `src_observed_at`；**平台最后一次确认的时刻**是 `src_confirmed_at`（0016）：该工号、该日最后一个返回了
+它的可用批次的观测时刻，由 dbt 从 `raw.icp_agent_coverage` 推进。仍在线而内容不变的坐席，raw 不写、`src_observed_at` 不动，
+`src_confirmed_at` 照样每十分钟前进。「数据截至何时」都读后者（对账截止点、mart 里未签出区间算到何时，DD-101）。
+
+日累计是「当日至今」的累计，只增不减。同一坐席同一归属日的任一累计值比上一次观测**变小**，测试
+`agent_day_totals_decrease` 报 ERROR——多半是平台按别的时区切日。它在 `fact_agent_day` 之后跑，只报告、不挡 core 写入；
+查近两天的观测，所以一次变小会让 build 任务红到它滑出窗口。
 `"10759.0"` 这种写法算整数（文档样例就是这样）；**null 保持 null**，那是「没有这一天」，不是 0。
 
 ### 五、配置里没有的坐席照样进 core
@@ -133,3 +145,45 @@ SELECT agent_no, date_key, signin_count, signin_seconds, inbound_calls, talk_sec
   `integration_checks` 里，联调时逐条核实，核实结论回写契约并递增版本
 - 报表批的时间表：午夜后 30 分钟够不够，日终值能拿全到什么程度
 - 2000 个工号一次请求的耗时与响应大小（文档上限 20000）
+
+## 补丁：缺失工号登记与最后确认时刻（2026-11-22，DD-98 评审注）
+
+第 7 步已上真机之后的修正：结构变更 0016、接入程序 0.3.0、两份契约 v2（`id` 指回 `agent_no`）、dbt 两个 core 模型与新测试
+`agent_day_totals_decrease`、假接口（日累计各项只增不减；新注入 `agent_missing`）。**30 在 45 之前**（45 用已装的接入程序
+校验契约，应由与契约同一发布的 0.3.0 来校验）。
+
+```bash
+sudo -v
+cd ~/src/nexora_bi/infra
+ansible-playbook playbooks/40-schema.yml -e ansible_connection=local -K
+ansible-playbook playbooks/30-python.yml -e ansible_connection=local -K
+ansible-playbook playbooks/45-contracts.yml -e ansible_connection=local -K
+ansible-playbook playbooks/50-dags.yml -e ansible_connection=local -K
+```
+
+| 剧本 | 第一遍预期 | 第二遍 |
+| --- | --- | --- |
+| 40 | 执行 0016；权限验证全过（187 项） | `changed=0` |
+| 30 | 接入程序重装，`oss911-ingest 0.3.0` | `changed=0` |
+| 45 | `icp_agent_day|updated|2`、`icp_agent_session|updated|2`，另两个 `unchanged` | `changed=0` |
+| 50 | dbt 项目更新（新测试、两个 core 模型） | `changed=0` |
+
+然后重启假接口（跑 `test/fake_icp/start.sh` 的终端 Ctrl+C 再运行）。等二十分钟：
+
+```bash
+sudo -u postgres psql -d oss911 -P pager=off -c "
+SELECT source_id, count(*) AS requests, sum(missing_count) AS missing, max(observed_at)
+  FROM raw.icp_agent_coverage GROUP BY 1"
+sudo -u postgres psql -d oss911 -P pager=off -c "
+SELECT 'session' AS t, count(*) FILTER (WHERE src_confirmed_at > src_observed_at) AS confirmed_later, max(src_confirmed_at)
+  FROM core.fact_agent_session WHERE date_key = to_char(now() AT TIME ZONE 'Asia/Riyadh', 'YYYYMMDD')::int
+UNION ALL
+SELECT 'day', count(*) FILTER (WHERE src_confirmed_at > src_observed_at), max(src_confirmed_at)
+  FROM core.fact_agent_day WHERE date_key = to_char(now() AT TIME ZONE 'Asia/Riyadh', 'YYYYMMDD')::int"
+```
+
+预期：两源各有若干请求、`missing` 为 0；`max` 在最近十分钟内。`confirmed_later` 大于 0：已签出的区间内容不再变，
+确认时刻仍在前进。
+
+想看缺失登记：`curl -s -X POST localhost:18080/_fake/control -d '{"agent_inject": ["agent_missing"]}'`，下一次接入的
+批次行写 `1 agent(s) not returned (registered, not quarantined)`，任务仍 `success`，`missing` 加 1。

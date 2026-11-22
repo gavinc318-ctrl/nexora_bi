@@ -81,6 +81,7 @@ curl -s -X POST localhost:18080/_fake/control -d '{"ref": {"end_time": "2026-10-
 curl -s -X POST localhost:18080/_fake/control -d '{"agent_inject": ["day_bad_value"]}'     # 一个日累计值为 "12.5"
 curl -s -X POST localhost:18080/_fake/control -d '{"agent_inject": ["session_inverted"]}'  # 一段区间签出早于签入
 curl -s -X POST localhost:18080/_fake/control -d '{"agent_inject": ["extra_agent"]}'       # 多返回一个没请求的工号
+curl -s -X POST localhost:18080/_fake/control -d '{"agent_inject": ["agent_missing"]}'     # 少返回第一个请求的工号（登记，不隔离）
 ```
 
 ## 覆盖的边界情况（NOTES.md 草稿第二节）

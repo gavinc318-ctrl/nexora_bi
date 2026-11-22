@@ -15,6 +15,7 @@
     pre_hook=["{{ lock_call_leg_links() }}",
               "{{ ensure_agent_partitions('day') }}"],
     post_hook=["{{ raise_unlinked_agent_fact_items() }}",
+               "{{ confirm_agent_facts('day') }}",
                "{{ register_agent_batches('stg_icp_agent_day', 'icp_agent_day') }}"]
 ) }}
 
@@ -45,6 +46,9 @@ candidate as (
            now()                                                                              as built_at,
            l.agent_no,
            l.observed_at                                                                      as src_observed_at,
+           -- never back: a newer content keeps the confirmation already reached (confirm_agent_facts moves it on)
+           greatest(l.observed_at, (select e2.src_confirmed_at from {{ this }} e2
+                                     where e2.agent_no = l.agent_no and e2.date_key = l.date_key))  as src_confirmed_at,
            now()                                                                              as last_change_at
       from latest l
 )

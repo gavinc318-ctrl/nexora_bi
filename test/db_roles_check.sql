@@ -97,6 +97,7 @@ SET LOCAL TimeZone = 'Asia/Riyadh';
 SELECT pg_temp.expect_ok($$SELECT meta.ensure_monthly_partitions('raw.icp_cdr_voice', current_date, current_date)$$);
 SELECT pg_temp.expect_ok($$SELECT meta.ensure_monthly_partitions('raw.icp_agent_session', current_date, current_date)$$);
 SELECT pg_temp.expect_ok($$SELECT meta.ensure_monthly_partitions('raw.icp_agent_day', current_date, current_date)$$);
+SELECT pg_temp.expect_ok($$SELECT meta.ensure_monthly_partitions('raw.icp_agent_coverage', current_date, current_date)$$);
 SELECT pg_temp.expect_error($$SELECT meta.ensure_monthly_partitions('raw.zz_roles_check', current_date, current_date)$$,
                             :'err_partition_scope');                  -- not a partitioned table
 RESET TimeZone;
@@ -202,6 +203,17 @@ SELECT pg_temp.expect_ok    ($$INSERT INTO raw.icp_agent_day (cc_id, vdn_id, id,
                                    run_id, batch_seq, contract_version, content_hash)
                                VALUES ('1', '1', '101', 20261119, '[]', '{"id": "101"}', now(),
                                        '00000000-0000-0000-0000-0000000000c3', 1, 1, sha256('x'))$$);
+-- raw.icp_agent_coverage (0016, DD-98 review note): one row per request, append only, in a registered batch
+SELECT pg_temp.expect_ok    ($$INSERT INTO raw.icp_agent_coverage (source_id, cc_id, vdn_id, date_key, observed_at,
+                                   requested, returned, missing_count, run_id, batch_seq, contract_version)
+                               VALUES ('icp_agent_day', '1', '1', 20261119, now(), '{101,102}', '{101}', 1,
+                                       '00000000-0000-0000-0000-0000000000c3', 1, 1)$$);
+SELECT pg_temp.expect_error ($$INSERT INTO raw.icp_agent_coverage (source_id, cc_id, vdn_id, date_key, observed_at,
+                                   requested, returned, missing_count, run_id, batch_seq, contract_version)
+                               VALUES ('icp_agent_day', '1', '1', 20261119, now(), '{}', '{}', 0, gen_random_uuid(), 1, 1)$$,
+                             '%fk_icp_agent_coverage_batch%');
+SELECT pg_temp.expect_denied($$UPDATE raw.icp_agent_coverage SET missing_count = 0$$);
+SELECT pg_temp.expect_denied($$DELETE FROM raw.icp_agent_coverage$$);
 SELECT pg_temp.expect_denied($$UPDATE raw.icp_agent_session SET duration = 'x'$$);
 SELECT pg_temp.expect_denied($$DELETE FROM raw.icp_agent_day$$);
 SELECT pg_temp.expect_denied($$TRUNCATE raw.icp_agent_day$$);
@@ -247,6 +259,11 @@ SELECT pg_temp.expect_denied($$INSERT INTO raw.icp_agent_day (cc_id, vdn_id, dat
                                        sha256('x'))$$);
 -- The agent facts keep an agent without a dimension row (0015, DD-98 item five): agent_sk may be empty
 SELECT pg_temp.expect_ok    ($$UPDATE core.fact_agent_day SET agent_sk = NULL WHERE false$$);
+-- What each request returned (0016): dbt reads it for src_confirmed_at, and moves that column on in both facts
+SELECT pg_temp.expect_ok    ($$SELECT * FROM raw.icp_agent_coverage$$);
+SELECT pg_temp.expect_denied($$DELETE FROM raw.icp_agent_coverage$$);
+SELECT pg_temp.expect_ok    ($$UPDATE core.fact_agent_session SET src_confirmed_at = now() WHERE false$$);
+SELECT pg_temp.expect_ok    ($$UPDATE core.fact_agent_day SET src_confirmed_at = now() WHERE false$$);
 SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.ingest_batch$$);
 -- Staging batch registry (0005, DD-89): dbt registers and, when rebuilding a model, clears; only existing batches
 SELECT pg_temp.expect_ok    ($$INSERT INTO meta.staging_batch_state (model, run_id, batch_seq)

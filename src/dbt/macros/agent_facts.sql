@@ -96,6 +96,55 @@
                         where r.model = '{{ this.identifier }}' and r.run_id = x.run_id and r.batch_seq = x.batch_seq)
 {%- endmacro %}
 
+{#- Post-hook of the two models, before register_agent_batches: move src_confirmed_at forward (DD-98 review note item
+    two). The coverage rows of the batches this run takes into core (staged, not yet registered for this model) give,
+    per agent and observation day, the last time the platform returned the agent. Day totals: the row of that agent
+    and day. Sign-in intervals: the agent's rows whose sign-in day is not after that day and whose content was last
+    seen (src_observed_at) on or after it -- an interval is confirmed by the days it was observed on, so one the
+    platform stops returning (Q38) is not confirmed by later days. Only rows whose time really moves are written. -#}
+{% macro confirm_agent_facts(kind) -%}
+    {%- set source_id = 'icp_agent_session' if kind == 'session' else 'icp_agent_day' -%}
+    {%- set stg = 'stg_' ~ source_id -%}
+    with cov as (
+        select x.agent_no, c.date_key, max(c.observed_at) as confirmed_at
+          from raw.icp_agent_coverage c
+          join meta.staging_batch_state s
+            on s.model = '{{ stg }}' and s.run_id = c.run_id and s.batch_seq = c.batch_seq
+         cross join lateral unnest(c.returned) as x(agent_no)
+         where c.source_id = '{{ source_id }}'
+           and not exists (select 1 from meta.staging_batch_state r
+                            where r.model = '{{ this.identifier }}' and r.run_id = c.run_id and r.batch_seq = c.batch_seq)
+           and not exists (select 1 from meta.quarantine_batch q
+                            where q.run_id = c.run_id and q.batch_seq = c.batch_seq and q.state in ('pending', 'discarded'))
+         group by x.agent_no, c.date_key
+    )
+    {%- if kind == 'day' %}
+    update core.fact_agent_day f
+       set src_confirmed_at = cov.confirmed_at
+      from cov
+     where f.agent_no = cov.agent_no and f.date_key = cov.date_key
+       and cov.confirmed_at > f.src_confirmed_at
+    {%- else %}
+    , hit as (
+        select f.agent_session_sk, f.date_key, max(cov.confirmed_at) as confirmed_at
+          from core.fact_agent_session f
+          join cov on cov.agent_no = f.agent_no
+                  and f.date_key <= cov.date_key
+                  and cov.date_key <= to_char(f.src_observed_at at time zone '{{ var("report_timezone") }}',
+                                              'YYYYMMDD')::integer
+         -- partitions: an interval is confirmed on its sign-in day or, past midnight, on the next few days
+         where f.date_key >= (select to_char(to_date(min(date_key)::text, 'YYYYMMDD') - 7, 'YYYYMMDD')::integer
+                                from cov)
+         group by f.agent_session_sk, f.date_key
+    )
+    update core.fact_agent_session f
+       set src_confirmed_at = hit.confirmed_at
+      from hit
+     where f.agent_session_sk = hit.agent_session_sk and f.date_key = hit.date_key
+       and hit.confirmed_at > f.src_confirmed_at
+    {%- endif %}
+{%- endmacro %}
+
 {#- Post-hook of the two models and of dim_agent: one open clarification item per agent ID that no dimension version
     covers in the agent facts (DD-95 · DD-98 item five), not raised again while one is open. Silent while dim_agent is
     empty. Read through the partial indexes on agent_sk IS NULL (change 0015). -#}

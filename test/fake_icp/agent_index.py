@@ -29,7 +29,7 @@ DAY_OFFSET = timedelta(hours=3)          # the fake platform's day: 00:00 UTC+3
 SESSION_INDEX = "IDX_04_03_001"
 DAY_INDEXES = [f"IDX_04_02_{i:03d}" for i in range(1, 29)]
 MAX_OBJECTS = 20000
-INJECTIONS = ("day_bad_value", "session_inverted", "extra_agent")
+INJECTIONS = ("day_bad_value", "session_inverted", "extra_agent", "agent_missing")
 _cdr_cache: dict = {}
 
 
@@ -74,42 +74,106 @@ def sessions_so_far(seed: int, agent: int, now: datetime) -> list[dict]:
 
 
 def _agent_legs(seed: int, now: datetime) -> dict[str, list[dict]]:
-    """Today's answered agent legs so far, by agent ID, from the fake CDRs. Cached per (seed, day, minute)."""
+    """Today's answered agent legs so far, by agent ID, from the fake CDRs: exactly those the CDR interface shows at
+    now (an agent leg appears when it leaves the device, at its CALLEND). The legs visible by the end of now's minute
+    are generated once per (seed, day, minute) and filtered by CALLEND <= now, so the answer depends on now alone,
+    not on when in the minute the cache was filled -- a leg turning up late would make the smoothed state totals of
+    day_totals jump."""
     start = day_start(now)
-    key = (seed, start, now.replace(second=0, microsecond=0))
+    minute = now.replace(second=0, microsecond=0)
+    key = (seed, start, minute)
     if key not in _cdr_cache:
         _cdr_cache.clear()
-        legs: dict[str, list[dict]] = {}
-        for r in gen.rows_in_window(seed, start, now, now, "on_leave"):
+        legs: dict[str, list[tuple[datetime, dict]]] = {}
+        upto = minute + timedelta(minutes=1)
+        for r in gen.rows_in_window(seed, start, upto, upto, "on_leave"):
             if r["DEVICETYPE"] == str(gen.DEVICE_AGENT) and r["CALLBEGIN"] and r["CALLEND"]:
-                legs.setdefault(r["DEVICENO"], []).append(r)
+                legs.setdefault(r["DEVICENO"], []).append((datetime.strptime(r["CALLEND"], gen.TS_FMT), r))
         _cdr_cache[key] = legs
-    return _cdr_cache[key]
+    return {a: [r for end, r in rows if end <= now] for a, rows in _cdr_cache[key].items()}
+
+
+def _smooth(work: list[tuple[datetime, int]], avail, times: list[datetime]) -> dict[datetime, int]:
+    """A state total that grows no faster than the time available to it, at each of times (sorted).
+
+    work: the raw total as a step function -- (time, total from then on), sorted. It jumps when a call ends (the fake
+    CDRs give a call's talk time at once, and calls of one agent may overlap), so "signed in minus every state" would
+    go down. The platform's totals only grow, and the agent_day_totals_decrease check fails a batch whose do not.
+    The smoothed total is min over s <= t of work(s) + avail(t) - avail(s): never above the raw one, never down, and
+    rising at most as fast as avail -- so what is left (idle) never goes down either. Exact at each point, so the
+    same moment always gives the same answer."""
+    out, steps, best = {}, [], None
+    j = 0
+    for t in times:
+        while j < len(work) and work[j][0] <= t:
+            before = work[j - 1][1] if j else 0
+            steps.append(before - avail(work[j][0]))    # s just before the jump at work[j][0]
+            j += 1
+        raw = work[j - 1][1] if j else 0
+        best = min(steps) if steps else None
+        a = avail(t)
+        cand = [raw, a]                                   # s = t, and s = the day's start (work 0, avail 0)
+        if best is not None:
+            cand.append(best + a)
+        out[t] = max(0, min(cand))
+    return out
 
 
 def day_totals(seed: int, agent: int, now: datetime) -> dict[str, str]:
+    """The day totals at now. The counts and inbound_seconds are the fake CDRs' exactly (reconciliation); the state
+    durations are smoothed (_smooth) so that every total only grows and the states add up to the signed-in time."""
     sessions = sessions_so_far(seed, agent, now)
     signin = sum(int(s["duration"]) for s in sessions)
     legs = _agent_legs(seed, now).get(str(agent), [])
-    talk = sum(int((datetime.strptime(r["CALLEND"], gen.TS_FMT)
-                    - datetime.strptime(r["CALLBEGIN"], gen.TS_FMT)).total_seconds()) for r in legs)
     rng = random.Random(f"{seed}:agent-day:{agent}:{day_start(now):%Y%m%d}")
     calls = len(legs)
-    acw = calls * rng.randint(10, 40)
-    hold = calls * rng.randint(0, 5)
-    rest = min(signin // 10, rng.randint(0, 3600)) if signin else 0
-    busy = rng.randint(0, 600) if signin else 0
-    idle = max(0, signin - talk - acw - hold - rest - busy)
+    acw_per, hold_per = rng.randint(10, 40), rng.randint(0, 5)
+    rest_cap, busy_once = rng.randint(0, 3600), rng.randint(0, 600)
+
+    def signed(t):
+        return sum(int(s["duration"]) for s in sessions_so_far(seed, agent, t))
+
+    def rest_at(t):
+        sg = signed(t)
+        return min(sg // 10, rest_cap) if sg else 0
+
+    def busy_at(t):
+        sg = signed(t)
+        return min(busy_once, sg - rest_at(t)) if sg else 0
+
+    def avail(t):
+        return signed(t) - rest_at(t) - busy_at(t)
+
+    ends = sorted((datetime.strptime(r["CALLEND"], gen.TS_FMT),
+                   int((datetime.strptime(r["CALLEND"], gen.TS_FMT)
+                        - datetime.strptime(r["CALLBEGIN"], gen.TS_FMT)).total_seconds())) for r in legs)
+    times = sorted({e for e, _ in ends} | {now})
+    talk_raw, acc = [], 0
+    for e, d in ends:
+        acc += d
+        talk_raw.append((e, acc))
+    talk_s = _smooth(talk_raw, avail, times)
+    avail2 = lambda t: avail(t) - talk_s[t] if t in talk_s else avail(t)      # noqa: E731
+    acw_raw = [(e, (i + 1) * acw_per) for i, (e, _) in enumerate(ends)]
+    acw_s = _smooth(acw_raw, avail2, times)
+    avail3 = lambda t: avail2(t) - acw_s[t] if t in acw_s else avail2(t)      # noqa: E731
+    hold_raw = [(e, (i + 1) * hold_per) for i, (e, _) in enumerate(ends)]
+    hold_s = _smooth(hold_raw, avail3, times)
+
+    talk = acc
+    rest = rest_at(now)
+    busy = busy_at(now)
+    idle = max(0, avail3(now) - hold_s[now])
     v = {i: "0" for i in DAY_INDEXES}
     v.update({
         "IDX_04_02_001": str(len(sessions)), "IDX_04_02_002": str(signin),
         "IDX_04_02_003": str(calls), "IDX_04_02_004": str(talk),
         "IDX_04_02_005": str(talk // calls if calls else 0),
-        "IDX_04_02_009": str(calls), "IDX_04_02_010": str(acw),
+        "IDX_04_02_009": str(calls), "IDX_04_02_010": str(acw_s[now]),
         "IDX_04_02_012": str(1 if rest else 0), "IDX_04_02_013": str(rest),
-        "IDX_04_02_015": str(calls // 10), "IDX_04_02_016": str(hold),
+        "IDX_04_02_015": str(calls // 10), "IDX_04_02_016": str(hold_s[now]),
         "IDX_04_02_018": str(1 if busy else 0), "IDX_04_02_019": str(busy),
-        "IDX_04_02_021": str(talk), "IDX_04_02_022": f"{idle}.0",
+        "IDX_04_02_021": str(talk_s[now]), "IDX_04_02_022": f"{idle}.0",
         "IDX_04_02_023": str(calls // 20), "IDX_04_02_024": str(calls // 25),
     })
     return v
@@ -149,6 +213,8 @@ def _apply(result: list, inject: list[str]) -> None:
     for name in inject:
         if name == "extra_agent":
             result.append({"id": "999", "idxs": []})
+        if name == "agent_missing" and result:
+            del result[0]                             # an agent asked for, left out of the response (Q40)
         for rec in result:
             for x in rec["idxs"]:
                 if name == "day_bad_value" and x["id"] != SESSION_INDEX and x["val"] is not None:

@@ -321,6 +321,32 @@ class FakeICPTest(unittest.TestCase):
         self.assertEqual([r["id"] for r in doc["result"]], ["101", "999"])
         self.assertEqual(doc["result"][0]["idxs"][0]["val"], "12.5")
         self.assertEqual(self.hindex([101], ["IDX_04_02_001"])["result"][0]["idxs"][0]["val"], "2")   # used once
+        self.control(agent_inject=["agent_missing"])
+        self.assertEqual([r["id"] for r in self.hindex([101, 102], ["IDX_04_02_001"])["result"]], ["102"])
+
+    def test_day_totals_do_not_depend_on_when_the_cache_was_filled(self):
+        # Two requests in one minute: the later one sees the legs that ended between them, as a fresh one would
+        t1, t2 = datetime(2026, 11, 22, 18, 29, 2), datetime(2026, 11, 22, 18, 29, 58)
+        agent_index._cdr_cache.clear()
+        fresh = {a: agent_index.day_totals(3, a, t2) for a in (101, 139)}
+        agent_index._cdr_cache.clear()
+        for a in (101, 139):
+            agent_index.day_totals(3, a, t1)
+        self.assertEqual({a: agent_index.day_totals(3, a, t2) for a in (101, 139)}, fresh)
+
+    def test_day_totals_only_grow_and_fit_the_signed_in_time(self):
+        # Every day total is cumulative: the agent_day_totals_decrease check fails a batch whose go down
+        cols = [f"IDX_04_02_{i:03d}" for i in (1, 2, 3, 4, 6, 7, 10, 13, 16, 19, 21, 22, 23, 24)]
+        states = ["IDX_04_02_010", "IDX_04_02_013", "IDX_04_02_016", "IDX_04_02_019", "IDX_04_02_021", "IDX_04_02_022"]
+        start = agent_index.day_start(datetime(2026, 11, 20, 12, 0))
+        prev = None
+        for minutes in range(1, 24 * 60, 90):
+            v = {k: int(float(x)) for k, x in agent_index.day_totals(1, 101, start + timedelta(minutes=minutes)).items()}
+            self.assertLessEqual(sum(v[c] for c in states), v["IDX_04_02_002"])
+            if prev:
+                for c in cols:
+                    self.assertGreaterEqual(v[c], prev[c], f"{c} at +{minutes} min")
+            prev = v
 
 if __name__ == "__main__":
     unittest.main()

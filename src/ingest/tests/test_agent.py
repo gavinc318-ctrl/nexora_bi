@@ -18,7 +18,7 @@ REPO = os.path.dirname(os.path.dirname(INGEST))
 sys.path.insert(0, os.path.join(INGEST, "src"))
 
 from oss911_ingest.agent import (                                 # noqa: E402
-    AgentObservation, Problems, check_records, day_rows, is_integer_value, session_rows)
+    AgentObservation, Problems, check_records, coverage, day_rows, is_integer_value, session_rows)
 from oss911_ingest.contract import (                              # noqa: E402
     effective_midnight_skip_minutes, load_contract, validate_contract, validate_overrides)
 
@@ -106,6 +106,36 @@ class RecordsTest(unittest.TestCase):
         reasons = " ".join(problems.reasons())
         self.assertIn("repeated", reasons)
         self.assertIn("not asked for (1x, e.g. 999)", reasons)
+
+
+class CoverageTest(unittest.TestCase):
+    """Agents asked for but not returned: registered, not quarantined (DD-98 review note, Q40)"""
+
+    def test_missing_agent_is_registered_not_quarantined(self):
+        problems = Problems()
+        records = check_records([{"id": "101", "idxs": []}, {"id": "103", "idxs": []}], {"101", "102", "103"},
+                                problems)
+        self.assertEqual(problems.reasons(), [])
+        self.assertEqual(coverage(records, ["103", "102", "101"]), (["101", "103"], ["102"]))
+
+    def test_empty_array_is_every_agent_missing(self):
+        problems = Problems()
+        records = check_records([], {"101", "102"}, problems)
+        self.assertEqual(problems.reasons(), [])
+        self.assertEqual(coverage(records, ["101", "102"]), ([], ["101", "102"]))
+
+    def test_not_a_list_still_quarantines(self):
+        problems = Problems()
+        records = check_records({"id": "101"}, {"101"}, problems)
+        self.assertEqual(len(problems.reasons()), 1)
+        self.assertEqual(coverage(records, ["101"]), ([], ["101"]))
+
+    def test_numeric_order_and_extra_agent(self):
+        problems = Problems()
+        records = check_records([{"id": "1000", "idxs": []}, {"id": "99", "idxs": []}, {"id": "7", "idxs": []}],
+                                {"1000", "99"}, problems)
+        self.assertEqual(coverage(records, ["1000", "99"]), (["99", "1000"], []))
+        self.assertTrue(any("not asked for" in r for r in problems.reasons()))
 
 
 class SessionTest(unittest.TestCase):
