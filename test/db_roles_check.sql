@@ -1,5 +1,5 @@
 -- =====================================================================
--- Verification of database roles and grants (structural changes 0002 to 0015 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
+-- Verification of database roles and grants (structural changes 0002 to 0017 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
 --
 -- It verifies the five privilege roles themselves: inside a transaction the script creates one temporary
 -- login user per role, the superuser session does SET ROLE to that login user, and then runs statements
@@ -75,6 +75,8 @@ CREATE ROLE :"ingest_user"    LOGIN IN ROLE oss911_ingest;
 CREATE ROLE :"transform_user" LOGIN IN ROLE oss911_transform;
 CREATE ROLE :"query_user"     LOGIN IN ROLE oss911_query_svc;
 CREATE ROLE :"admin_user"     LOGIN IN ROLE oss911_admin_svc;
+\set monitor_user   zz_chk_monitor
+CREATE ROLE :"monitor_user"   LOGIN IN ROLE oss911_monitor;   -- the monitoring exporter (0017, DD-100); created by 40-schema
 
 -- ---------- Fixture: a raw table created as the owner role, so default privileges apply ----------
 SET ROLE oss911_owner;
@@ -515,6 +517,60 @@ SELECT pg_temp.expect_ok    ($$INSERT INTO meta.source_runtime_param (source_id,
                                VALUES ('zz_check', 'midnight_skip_minutes', '45', 'x')$$);
 SELECT pg_temp.expect_error ($$INSERT INTO meta.source_runtime_param (source_id, param_name, param_value, updated_by)
                                VALUES ('zz_check', 'midnight_skip_minutes', '721', 'x')$$, '%ck_source_runtime_param_whitelist%');
+
+-- ---------- Monitoring foundation (0017, DD-100) ----------
+-- dbt appends its results to meta.check_result and nobody rewrites them; old months go through the retention function
+SET ROLE :"transform_user";
+SELECT pg_temp.expect_ok    ($$SELECT meta.ensure_monthly_partitions('meta.check_result', current_date, current_date)$$);
+SELECT pg_temp.expect_ok    ($$INSERT INTO meta.check_result (invocation_id, command, unique_id, resource_type, node_name,
+                                   status, severity, failures)
+                               VALUES (gen_random_uuid(), 'test', 'test.zz.check', 'test', 'zz_check', 'fail', 'warn', 3)$$);
+SELECT pg_temp.expect_error ($$INSERT INTO meta.check_result (invocation_id, command, unique_id, resource_type, node_name,
+                                   status)
+                               VALUES (gen_random_uuid(), 'test', 'test.zz.check', 'test', 'zz_check', 'unknown')$$,
+                             '%check_result_status_check%');
+SELECT pg_temp.expect_denied($$UPDATE meta.check_result SET failures = 0 WHERE false$$);
+SELECT pg_temp.expect_denied($$DELETE FROM meta.check_result WHERE false$$);
+SELECT pg_temp.expect_ok    ($$SELECT meta.drop_expired_check_partitions(90)$$);
+SELECT pg_temp.expect_error ($$SELECT meta.drop_expired_check_partitions(30)$$, '%kept at least 90 days%');
+SELECT pg_temp.expect_error ($$SELECT meta.ensure_monthly_partitions('meta.run_log', current_date, current_date)$$,
+                             :'err_partition_scope');               -- meta is allowed, a table that is not partitioned not
+RESET ROLE;
+SET ROLE :"ingest_user";
+SELECT pg_temp.expect_denied($$SELECT meta.drop_expired_check_partitions(90)$$);
+SELECT pg_temp.expect_denied($$INSERT INTO meta.check_result (invocation_id, command, unique_id, resource_type, node_name,
+                                   status) VALUES (gen_random_uuid(), 'test', 'x', 'test', 'x', 'pass')$$);
+RESET ROLE;
+-- The exporter reads registries and counts: no writes, no raw payloads, no numbers or other columns of the legs
+SET ROLE :"monitor_user";
+SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.check_result$$);
+SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.mart_day_publication$$);
+SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.ingest_batch$$);
+SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.staging_batch_state$$);
+SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.quarantine_batch$$);
+SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.run_log$$);
+SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.clarification_queue$$);
+SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.source_contract$$);
+SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.source_runtime_param$$);
+SELECT pg_temp.expect_ok    ($$SELECT source_id, date_key, observed_at, returned, missing_count FROM raw.icp_agent_coverage$$);
+SELECT pg_temp.expect_ok    ($$SELECT count(DISTINCT device_no) FROM core.fact_call_leg
+                               WHERE device_type_code = 2 AND agent_sk IS NULL$$);
+SELECT pg_temp.expect_ok    ($$SELECT agent_no, date_key, src_confirmed_at FROM core.fact_agent_day WHERE agent_sk IS NULL$$);
+SELECT pg_temp.expect_ok    ($$SELECT agent_no, src_confirmed_at FROM core.fact_agent_session WHERE agent_sk IS NULL$$);
+SELECT pg_temp.expect_ok    ($$SELECT src_natural_key FROM core.dim_agent WHERE is_current$$);
+SELECT pg_temp.expect_denied($$SELECT caller_number FROM core.fact_call_leg LIMIT 1$$);
+SELECT pg_temp.expect_denied($$SELECT * FROM core.fact_call_leg LIMIT 1$$);
+SELECT pg_temp.expect_denied($$SELECT * FROM core.fact_call LIMIT 1$$);
+SELECT pg_temp.expect_denied($$SELECT inbound_calls FROM core.fact_agent_day LIMIT 1$$);
+SELECT pg_temp.expect_denied($$SELECT * FROM raw.icp_cdr_voice LIMIT 1$$);
+SELECT pg_temp.expect_denied($$SELECT * FROM raw.icp_agent_coverage LIMIT 1$$);   -- ingested_at, cc_id: not granted
+SELECT pg_temp.expect_denied($$SELECT * FROM meta.field_visibility$$);
+SELECT pg_temp.expect_denied($$SELECT * FROM audit.access_log$$);
+SELECT pg_temp.expect_denied($$INSERT INTO meta.check_result (invocation_id, command, unique_id, resource_type, node_name,
+                                   status) VALUES (gen_random_uuid(), 'test', 'x', 'test', 'x', 'pass')$$);
+SELECT pg_temp.expect_denied($$SELECT meta.ensure_monthly_partitions('meta.check_result', current_date, current_date)$$);
+SELECT pg_temp.expect_denied($$SELECT meta.drop_expired_check_partitions(90)$$);
+RESET ROLE;
 
 -- ---------- Ownership and PUBLIC ----------
 DO $$

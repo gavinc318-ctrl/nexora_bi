@@ -67,6 +67,32 @@
           Current ids: {{ ddl_changes | map(attribute='id') | join(' ') }}
         success_msg: "Change manifest valid: {{ ddl_changes | length }} changes, {{ ddl_changes | map(attribute='id') | first }} to {{ ddl_changes | map(attribute='id') | last }}"
 
+    # ================= 2a. Privilege roles added after 0002 =================
+    # 0002 created the first five privilege roles as the superuser; from 0003 on changes run as the owner role, which
+    # cannot create roles (DD-74). A role a later change grants to is created here, before the changes, with 0002's
+    # rule: NOLOGIN and no privileged attribute -- an existing role with another attribute fails, never altered.
+    # oss911_monitor: the monitoring exporter's read-only role (change 0017, DD-100).
+    - name: Create the privilege roles added after 0002
+      ansible.builtin.command:
+        cmd: psql -X -tA -v ON_ERROR_STOP=1 -d {{ pg_database }}
+        stdin: |
+          DO $$
+          DECLARE rec pg_roles%ROWTYPE;
+          BEGIN
+              SELECT * INTO rec FROM pg_roles WHERE rolname = '{{ item }}';
+              IF NOT FOUND THEN
+                  EXECUTE format('CREATE ROLE %I NOLOGIN', '{{ item }}');
+                  RAISE NOTICE 'created';
+              ELSIF rec.rolcanlogin OR rec.rolsuper OR rec.rolcreaterole OR rec.rolcreatedb
+                    OR rec.rolreplication OR rec.rolbypassrls THEN
+                  RAISE EXCEPTION 'Role % exists with other attributes: a privilege role must be NOLOGIN without any privileged attribute', '{{ item }}';
+              END IF;
+          END $$;
+      become_user: postgres
+      loop: [oss911_monitor]
+      register: _added_role
+      changed_when: "'created' in _added_role.stderr"
+
     # ================= 2-3. Load the DDL files and execute the structural changes =================
     # The executor is shared with 41-cad-mirror.yml (tasks/ddl_changes.yml); its rules are described there and in
     # the header of this file.
@@ -97,7 +123,7 @@
       ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/db_connect.yml"
       vars:
         dbc_database: "{{ pg_database }}"
-        dbc_grantees: [oss911_ingest, oss911_transform, oss911_query_svc, oss911_admin_svc, pgbouncer]
+        dbc_grantees: [oss911_ingest, oss911_transform, oss911_query_svc, oss911_admin_svc, oss911_monitor, pgbouncer]
 
     # ================= 5. Initial partitions (monthly, DD-77) =================
     # Call the partition function as the orchestration's real identity (the dbt user, through pgBouncer),
@@ -115,7 +141,7 @@
             FROM pg_partitioned_table pt
             JOIN pg_class c     ON c.oid = pt.partrelid
             JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname IN ('core', 'audit', 'raw')"
+            WHERE n.nspname IN ('core', 'audit', 'raw', 'meta')"
       args:
         executable: /bin/bash
       become_user: airflow

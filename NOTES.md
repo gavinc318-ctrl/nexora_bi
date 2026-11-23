@@ -2475,3 +2475,40 @@ Gavin 已部署 19c326d（40 → 30 → 45 → 50，17:02 重启假接口）。�
 
 **留给监控第一块**：检查失败时 Airflow 照默认重试两次，对确定性的测试失败没有意义，且每 10 分钟一次 ERROR 会让
 构建 DAG 一直显示失败。待 check_result 落库后再定：构建任务里的测试失败是否不重试、只经监控通道上报。
+
+## 2026-11-23 开发机：监控通道第一块已实现（DD-100）——测试结果落库、只读角色、未关联话单腿索引、日累计对账；待真机部署
+
+**内容**：结构变更 0017；dbt `on-run-end` 宏 `macros/check_results.sql`；新测试 `agent_day_reconciles_with_legs`（WARN）；
+`maintenance_partitions` 增任务 `drop_expired_check_results`；`maintenance_checks` 加入对账测试；40 在执行结构变更前建
+`oss911_monitor`；权限验证 187 → 222 项；runbook 21 第一节。
+
+**临时库验证**
+- 落库：一次 `build` 写 12 行（2 模型、10 测试）；一次 FAIL 写 `fail / error / 6`；SQL 报错的测试写 `error`、`failures` 为空；
+  模拟 Airflow 环境变量后 `dag_id / task_id / dag_run_id / try_number` 正确，含单引号的 run id 无误
+- 对账：灌入今天的话单与日累计，临时把今天标为已封账：59 名坐席呼入合计 2382，与截至 `src_confirmed_at` 的接通坐席腿
+  2382 逐人相符；容差设 0 仍 PASS；两名坐席各加 3 后 WARN 2。临时标记已删
+- 保留期：建 2026-01 至 08 的分区后执行，删 7 个（1–7 月），留 8 月与本月；传 30 天被拒
+- 三个构建 DAG 的选择里都不含对账测试；夜间检查一套里只有临时库数据旧导致的 `mart_closing_not_behind` 失败（已知）
+
+**开发机自定（请 Mac 侧过目）**
+
+| # | 自定 | 理由 |
+| --- | --- | --- |
+| 1 | **`oss911_monitor` 由 40 在执行结构变更前建**（同 0002 的属性检查：NOLOGIN、无特权属性，属性不符即失败、不改），0017 只授权 | `changes.yml` 规定 0003 起一律以属主角色执行（DD-74），属主角色不能建角色。另一个办法是让 0017 以超级用户执行，那要改「仅 0000–0002」这条规则，我没动 |
+| 2 | `meta.check_result` **模型与测试都记**，一行一节点一次调用；带 Airflow 上下文（`dag_id`、`task_id`、`dag_run_id`、`try_number`，来自 BashOperator 给的 `AIRFLOW_CTX_*`）；parse、compile、ls 等不记 | 预期检查清单要按「构建任务」与「检查」两类逐项判；模型的 skipped（上游失败）也是一种状态。重试第几次可分辨「重试后才过」 |
+| 3 | dbt 少见状态并入六种：runtime error、partial success → error；no-op、reused → skipped，原状态写在 message 开头 | 表上有 CHECK；绝不并入 pass / success |
+| 4 | 报错或跳过的测试 `failures` 为空 | 评审第三条：报错、跳过不折算成 0 |
+| 5 | message 截 500 字。dbt 测试的 message 只有行数；模型报错是数据库错误原文，可能引用某个值 | 表只给运维与将来 M-08 看，不进告警（告警只带条数，需定 ⑥） |
+| 6 | 按 `checked_at` 月分区（UTC 月界，同 raw）；分区函数放开 meta（非分区表照样拒绝）；钩子先建当月分区再插入 | 缺分区会让钩子失败，连带整条 dbt 命令失败 |
+| 7 | 保留期函数 `meta.drop_expired_check_partitions(keep_days)` **只认这一张表**，少于 90 天拒绝；整月过期才删，所以至少留 90 天；dbt 变量 `check_result_keep_days: 90` | 编排手里不该有一个能删任意分区的通用函数（raw、core 的保留期各有 DD-38 的规定） |
+| 8 | 监控角色的授权：meta 十张登记表整表可读；raw 覆盖记录与 core 四表**只授列**（工号、日期、`agent_sk`、`src_confirmed_at`；话单腿另有 `device_type_code`）。第二块若要更多列，另开结构变更 | 「只读用到的」，并在列上兑现需定 ⑥（不读数据本体） |
+| 9 | 对账的「已封账」= `mart.legs__day_agent__handling` 有封账版本；话单腿口径：设备类型 2、`device_no` = 工号、有 `call_begin`、方向不是 outbound / internal、`date_key`（`wait_begin` 归日）同日、`call_end` ≤ 日累计行的 `src_confirmed_at`；范围最近 7 天；容差与天数在 dbt 变量 `agent_reconcile` | 腿表封账即该日话单含回扫已定稿。腿在离开设备时可见（`call_end`），与平台「当日至今」同一截法。方向为空的（如 CALLTYPE 不在值表）算呼入 |
+| 10 | 对账测试不引用模型（同 `mart_closing_not_behind`），只在 `maintenance_checks` 每晚跑 | 每 10 分钟的构建跑它没有意义，且 dbt 的间接选择会把它拉进两个构建 |
+
+**留给第二块**
+- 预期检查清单的文件与格式、新鲜度、`oss911_monitor_query_errors` 等都在导出程序里做
+- 构建任务里**测试失败也被 Airflow 重试两次**（今天变小检查误报时每次 4.5 分钟）。建议：构建 DAG 的 dbt 命令区分退出原因，
+  只有测试失败、没有模型报错时不重试、任务标失败，由监控通道上报。dbt 的退出码分不出这两种，要读 `check_result` 或
+  dbt 的结果文件。做法放到第二块与清单一起定
+
+**下一步**：Gavin 部署第一块（40 → 45 → 50，runbook 21 第一节）；我开工第二块。

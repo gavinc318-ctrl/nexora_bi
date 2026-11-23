@@ -126,3 +126,9 @@
   summary: Agent observations (DD-98 review note) -- raw.icp_agent_coverage, the agents each hindex/agent request asked for and got back (missing ones registered, not quarantined); src_confirmed_at on fact_agent_session / fact_agent_day
   files:
     - changes/0016_agent_coverage_and_confirmation.sql
+
+- id: "0017"
+  run_as: owner
+  summary: Monitoring foundation (DD-100 block one) -- meta.check_result (dbt results per node and invocation, monthly partitions, 90 days) with its retention function; the partition function accepts meta; partial index on unlinked agent legs; read-only grants to oss911_monitor (the role is created by 40-schema)
+  files:
+    - changes/0017_monitoring_foundation.sql

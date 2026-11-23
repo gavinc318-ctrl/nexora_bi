@@ -24,6 +24,10 @@ clean-targets: []
 on-run-start:
   - "{{ create_safe_casts() }}"            # target and logs live outside the read-only project directory (--target-path, --log-path)
 
+# Every model and test result into meta.check_result (DD-100, change 0017; macros/check_results.sql)
+on-run-end:
+  - "{{ record_check_results(results) }}"
+
 vars:
   site_code: MKK             # DD-91 item 2; dim_site's row is written by structural change 0006
   report_timezone: Asia/Riyadh   # date_key is the day in this zone; day cut 00:00 AST (LD-02 chapter 6, AS-12)
@@ -33,6 +37,10 @@ vars:
   # a fake ICP whose idle time could go down (fixed 2026-11-22, running there from 2026-11-23 17:02 on, so that day
   # mixes the two); production has no earlier day totals
   agent_day_totals_checked_from: 20261124
+  check_result_keep_days: 90  # meta.check_result retention (DD-100 item 7); the function refuses fewer than 90
+  # agent_day_reconciles_with_legs (DD-100 item five, review note item two): a day differs when its inbound calls and
+  # the agent's answered legs differ by more than max(min_calls, ratio x legs); over the closed days of the last N days
+  agent_reconcile: {min_calls: 2, ratio: 0.02, days: 7}
 
 models:
   oss911:

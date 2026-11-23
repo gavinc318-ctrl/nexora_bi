@@ -8,18 +8,24 @@ Like the ingestion DAGs, generated from the DAG manifest /opt/oss911/release/dag
                            10). The two never hand over through files -- staging takes what raw holds, by batch
                            (meta.staging_batch_state, DD-89), so build and ingestion need no ordering
   maintenance_partitions   daily: monthly partitions for this month and the next three, every partitioned table in
-                           core, audit and raw (DD-77). A missing partition makes every write for that month fail
+                           core, audit, raw and meta (DD-77). A missing partition makes every write for that month
+                           fail. And the retention of meta.check_result: whole months past 90 days dropped (DD-100)
   maintenance_checks       daily: the call-level consistency tests over every call (var full_check). The builds run
                            them over the calls of the last day only (macros/fact_call.sql, calls_to_check): over all
                            calls their time grows with the data, and a build runs every few minutes. Also
                            batches_reach_core: CDR batches older than a day that never reached core.fact_call_leg; and
                            mart_closing_not_behind: a mart table whose last closed day is more than 3 days back
+                           (both ERROR); agent_day_totals_decrease over every day; agent_day_reconciles_with_legs
+                           (WARN, DD-100): day totals against the call records on the closed days of the last week
   publish_marts_intraday   hourly: the days not closed yet, as provisional rows (close_version 0), and their tests
   publish_marts_nightly    daily: fact_call brought up to date with the legs, then the days whose re-sweep has reached
                            core (every source day from the source's first re-sweep day on, var resweep_from) are
                            closed (close_version 1) and the last 7 closed days corrected where they changed
                            (macros/mart.sql · DD-97 items six to nine). A day whose re-sweep is late is simply closed
                            by a later night: whether a day is final is read from the database, not from the clock
+
+Every dbt command records its models' and tests' results in meta.check_result (on-run-end, macros/check_results.sql),
+with the task's Airflow context: the monitoring exporter reads results and their age from there (DD-100).
 
 All of them use the pool dbt_build (one slot for the whole cluster, DD-85): dbt invocations never overlap, which the
 core models rely on (macros/fact_call_leg.sql, register_core_batches) and which keeps dbt's threads within the
@@ -100,6 +106,8 @@ with DAG(dag_id="maintenance_partitions", description="Monthly partitions for th
          schedule="30 1 * * *", start_date=datetime(2026, 10, 1, tzinfo=UTC), catchup=False, max_active_runs=1,
          default_args=DEFAULT_ARGS, tags=["maintenance"]) as maintenance_partitions:
     _task("ensure_partitions", "run-operation ensure_partitions_ahead --args '{months: 3}'")
+    # meta.check_result keeps 90 days (DD-100 item 7): whole months past that are dropped
+    _task("drop_expired_check_results", "run-operation drop_expired_check_results")
 
 # Mart publication (macros/mart.sql). Nightly at 04:00 UTC: after the 02:00 re-sweep of a source in UTC (the fake
 # ICP) and 01:00 for one in Asia/Riyadh, with the builds every few minutes in between; a re-sweep not yet in core
@@ -124,4 +132,5 @@ with DAG(dag_id="maintenance_checks", description="Call-level consistency tests 
          default_args=DEFAULT_ARGS, tags=["maintenance"]) as maintenance_checks:
     _task("full_checks", "test --select fact_call_recomputes_from_legs fact_call_for_every_call batches_reach_core "
                          "mart_closing_not_behind agent_day_columns_match_contract agent_day_totals_decrease "
+                         "agent_day_reconciles_with_legs "
                          "--vars '{full_check: true}'")
