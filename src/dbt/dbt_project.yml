@@ -30,8 +30,9 @@ vars:
   service_level_seconds: 20  # M-C05's X (metrics.yaml params x_seconds); another X is a new metric version and column
   repeat_min_failed: 2       # M-C15: failed calls a day that make a repeat caller (metrics.yaml params min_failed)
   # agent_day_totals_decrease checks days from this one on: the development machine's day totals before it came from
-  # a fake ICP whose idle time could go down (fixed 2026-11-22); production has no earlier day totals
-  agent_day_totals_checked_from: 20261123
+  # a fake ICP whose idle time could go down (fixed 2026-11-22, running there from 2026-11-23 17:02 on, so that day
+  # mixes the two); production has no earlier day totals
+  agent_day_totals_checked_from: 20261124
 
 models:
   oss911:
