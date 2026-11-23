@@ -2512,3 +2512,64 @@ Gavin 已部署 19c326d（40 → 30 → 45 → 50，17:02 重启假接口）。�
   dbt 的结果文件。做法放到第二块与清单一起定
 
 **下一步**：Gavin 部署第一块（40 → 45 → 50，runbook 21 第一节）；我开工第二块。
+
+## 2026-11-23 开发机：监控通道第二块已实现（DD-100）——导出程序 oss911-monitor、预期检查清单、告警规则；待真机部署
+
+### 先记一件事：源日 11-15 的回扫缺口（第二块告警的实例）
+
+第一块部署后手工跑 `maintenance_checks`，`mart_closing_not_behind` 失败 5 行：话务 5 张 mart 表封账停在 11-14。
+查下来，11-16 凌晨 04:55–05:29 假接口没在跑（24 次 `Connection refused`），那天 02:00 UTC 的回扫三次尝试都失败，
+源日 11-15 从此没有回扫。封账只能按日期顺序走，11-15 卡住，后面每天都封不了；`maintenance_checks` 至少 11-22、
+11-23 两晚是红的，没人看到。Gavin 清掉那次失败的 run 重扫后，夜间发布一次封到 11-22。这正是「没有消息被当成没有
+问题」：本块的 `OSS911ResweepMissing`（某源日到期未回扫进 core，page）当天早上就会响。
+
+### 内容
+
+- `src/ingest/src/oss911_ingest/monitor.py`：接入程序包第二个入口 `oss911-monitor`，包版本 0.4.0；`config.py` 加
+  `monitor_settings`；单元测试 13 个（总计 121）
+- `contracts/monitoring.yml`：随发布走的监控配置——业务阈值、各源阈值与模型、预期检查清单 15 项；进发布目录
+- `infra/files/monitoring_install.py`：安装时合并 `deployed_at`（已有的保留、新增的记当时），并用导出程序自己的规则校验
+- `infra/playbooks/55-monitor.yml`（新）：monitor.conf、监控配置、systemd 单元、启动，以 oss911mon 身份跑一轮
+  `--once`、取 /metrics、查 Prometheus 已采集
+- `infra/files/prometheus/alerts.yml` 22 条规则、`alerts_test.yml` 规则单元测试；22 部署前用镜像自带 promtool 检查并测试
+- inventory：登录用户 `monitor`（事务池、`statement_timeout` 10s、系统账号 oss911mon）、`monitor_port` 9188；
+  pgBouncer HBA 与 `db_login.yml` 把 `oss911_monitor` 归入事务池
+- 顺带修三处：HAProxy 采集目标一直 down（只绑回环、没开 /metrics）；6 个 systemd unit 的 `StartLimitIntervalSec`
+  写在 `[Service]` 被忽略，挪到 `[Unit]`；构建 DAG 与 `maintenance_checks` 不再重试
+- runbook 21 第二节
+
+### 临时库验证
+
+- 以 `oss911_monitor` 角色的登录用户跑一轮：11 项查询全过；数据库连不上时 11 项全置错误、阈值照常导出
+- 注入 3 条覆盖记录（一个在册工号、一个已删工号，连续 3 次未返回）：在册 1、已删 1；临时行已删
+- 临时库未跑回扫：`oss911_resweep_missing_days` 7、首个缺日 11-16，与实际相符
+- HTTP：/metrics 200、内容类型 0.0.4、267 个样本；/nope 404；绑一个本机没有的地址也能起（IP_FREEBIND，无需特权）
+- 规则：promtool 22 条通过；单元测试 5 组通过，改坏一个期望值即报 FAILED
+- DAG 导入：构建与夜间检查 retries 0，发布与分区维护仍为 2
+
+### 开发机自定（请 Mac 侧过目）
+
+| # | 自定 | 理由 |
+| --- | --- | --- |
+| 1 | **不引入 `prometheus_client`**，文本格式自己输出（约 40 行，有单元测试） | 只用到 gauge；少一个依赖就少一次联网取 wheel、许可登记与八年维护。所以本块无需登记组件（Alertmanager 在第三块登记） |
+| 2 | **部署放新剧本 55-monitor**，不放 30：30 只装程序（同一 venv）；配置、单元、启动与验证在 55 | 监控配置来自发布目录，由 45 建出，晚于 30；登录与凭据由 40 建，也晚于 30 |
+| 3 | 登录用户 `monitor` **走事务池**（同服务层），`statement_timeout` 10s，自己的系统账号 oss911mon | 每项查询一个短的只读事务，无会话状态 |
+| 4 | **监控配置放 `contracts/monitoring.yml`**，与 pools.yml、resweep.yml 并列进发布目录；装成 `/etc/oss911/monitoring.yml`；导出程序按修改时间自动重读，换发布不用重启 | 「随发布维护」；不新开发布目录下的一级目录 |
+| 5 | **源清单、周期、回扫起始日取自 DAG 清单 dags.json**，不在监控配置里再抄一份 | 一个权威 |
+| 6 | 清单状态在评审六种之外**加三种**：`warned`（WARN 有差异）、`grace`（宽限期内未运行）、`disabled`；dag 类取该 DAG 最近一次 dbt 命令里**最差**的状态 | WARN 不该算失败也不该算正常；宽限与停用要能从指标上看出来 |
+| 7 | 接入 DAG 不进清单，由 run_log 的源指标覆盖；`maintenance_partitions` 不进清单（run-operation 不写结果），改看 `oss911_partition_days_ahead` | 清单只收写 `check_result` 的东西；分区本身才是要看的 |
+| 8 | **回扫缺日**：从回扫起始日到「源时区现在减 6 小时的前一天」，每个源日须有成功且全进 core（或已丢弃）的回扫，口径同封账宏 | 11-15 这类缺口当天可见，不等三天后的封账落后 |
+| 9 | **坐席未返回**：每名坐席在最近 N 次「请求了它」的观测里都没返回才计（N = 阈值 3），按 dim_agent 当前版本分「在册 / 已删」；在册的 notify，已删的只进汇总 | 评审第一条；按请求而不是按批次计，同一工号只在一个批次里 |
+| 10 | 级别：ERROR 测试失败（任何 DAG）page；dag 类 `error` page；`stale / never_run` page（for 5m）；`skipped` notify；WARN 比上一次增加 notify | 评审：「报错、跳过不折算成 0」；WARN 不按每次构建报 |
+| 11 | 构建 DAG 与 `maintenance_checks` **retries 0**；发布与分区维护保留 2 次 | 第一块留下的问题。构建按源周期自然重跑；确定性的测试失败重试无益 |
+| 12 | HAProxy 统计页加绑容器网关地址（`transparent`）并开 `/metrics`（HAProxy 内置的 prometheus-exporter） | 原采集目标从第 6 步起一直 down，因为没有规则所以没人发现 |
+
+### 需定
+
+| # | 问题 | 建议 |
+| --- | --- | --- |
+| ① | **封账落后的 3 天写了两处**：监控配置 `closing_lag_days` 与夜间测试 `mart_closing_not_behind` 里的 3 | 留下测试做夜间兜底，但改成读 dbt 变量，并在监控配置注明两处须一致；或者删掉测试，只靠告警。倾向前者，第三块里一起改 |
+| ② | 告警现在只显示在 Prometheus 页面上，第三块的 Alertmanager 上线前不发往任何地方 | 按原定顺序，第三块紧接着做 |
+
+**下一步**：Gavin 部署第二块（21 → 40 → 30 → 45 → 50 → 22 → 55 → 60，runbook 21 第二节）；我开工第三块
+（Alertmanager、假网关、心跳定时检查、每日汇总）。

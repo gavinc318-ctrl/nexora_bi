@@ -15,7 +15,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oss911-ingest"
-version = "0.3.0"
+version = "0.4.0"
 description = "OSS911 BI ingestion: fetch by source contract, validate, write raw, advance the watermark"
 requires-python = ">=3.12"
 dependencies = [
@@ -25,6 +25,7 @@ dependencies = [
 
 [project.scripts]
 oss911-ingest = "oss911_ingest.cli:main"
+oss911-monitor = "oss911_ingest.monitor:main"   # the monitoring exporter (DD-100), same package and dependencies
 
 [tool.setuptools.packages.find]
 where = ["src"]

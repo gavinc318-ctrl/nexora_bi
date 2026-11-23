@@ -76,6 +76,12 @@ DEFAULT_ARGS = {
     "retry_delay": timedelta(minutes=2),
     "execution_timeout": timedelta(minutes=30),
 }
+# The builds and the nightly checks are not retried (DD-100): a failing test fails the same way two minutes later,
+# and three attempts held the pool for 4.5 minutes each time (NOTES 2026-11-23). A build runs again at the source's
+# next schedule anyway; a check's result reaches the monitoring channel through meta.check_result. The publications
+# and maintenance_partitions keep their retries: they run once a night or an hour, and a passing database hiccup
+# should not cost a closing.
+NO_RETRY_ARGS = {**DEFAULT_ARGS, "retries": 0}
 TASK_ENV = {
     "PATH": "/usr/bin:/bin",
     "LANG": "C.UTF-8",
@@ -98,7 +104,7 @@ for _s in _sources:
         continue
     with DAG(dag_id=f"build_{_sid}", description=f"dbt build of {_sid}: {BUILDS[_sid]}",
              schedule=_s["schedule"], start_date=datetime(2026, 10, 1, tzinfo=UTC), catchup=False,
-             max_active_runs=1, default_args=DEFAULT_ARGS, tags=["build", _sid]) as _d:
+             max_active_runs=1, default_args=NO_RETRY_ARGS, tags=["build", _sid]) as _d:
         _task("dbt_build", f"build --select {BUILDS[_sid]}")
     globals()[_d.dag_id] = _d
 
@@ -129,7 +135,7 @@ with DAG(dag_id="publish_marts_nightly", description="Close the final days of ma
 # After the nightly publication
 with DAG(dag_id="maintenance_checks", description="Call-level consistency tests over every call (full_check)",
          schedule="30 4 * * *", start_date=datetime(2026, 10, 1, tzinfo=UTC), catchup=False, max_active_runs=1,
-         default_args=DEFAULT_ARGS, tags=["maintenance"]) as maintenance_checks:
+         default_args=NO_RETRY_ARGS, tags=["maintenance"]) as maintenance_checks:
     _task("full_checks", "test --select fact_call_recomputes_from_legs fact_call_for_every_call batches_reach_core "
                          "mart_closing_not_behind agent_day_columns_match_contract agent_day_totals_decrease "
                          "agent_day_reconciles_with_legs "

@@ -1,0 +1,114 @@
+# Unit tests of alerts.yml: promtool test rules alerts_test.yml (22-containers runs them before deploying).
+# Series are written as the exporter serves them (job oss911_monitor, one instance).
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # A source fails at its threshold, not before; a source without threshold trips the guard instead
+  - interval: 1m
+    input_series:
+      - series: 'oss911_source_consecutive_failures{job="oss911_monitor",instance="m",source_id="icp_cdr_voice"}'
+        values: '0 2 3 3'
+      - series: 'oss911_threshold{job="oss911_monitor",instance="m",signal="source_consecutive_failures",source_id="icp_cdr_voice"}'
+        values: '3 3 3 3'
+      - series: 'oss911_source_consecutive_failures{job="oss911_monitor",instance="m",source_id="icp_new"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: OSS911SourceFailing
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: OSS911SourceFailing
+        exp_alerts:
+          - exp_labels: {severity: page, job: oss911_monitor, instance: m, source_id: icp_cdr_voice}
+            exp_annotations: {summary: "Source icp_cdr_voice: 3 failed runs in a row"}
+      - eval_time: 6m
+        alertname: OSS911SourceThresholdMissing
+        exp_alerts:
+          - exp_labels: {severity: page, job: oss911_monitor, instance: m, source_id: icp_new}
+            exp_annotations: {summary: "Source icp_new has no failure or age threshold: its outage alerts cannot fire"}
+
+  # Closing: compared with the exported threshold; strictly more days back
+  - interval: 1m
+    input_series:
+      - series: 'oss911_mart_closed_lag_days{job="oss911_monitor",instance="m",mart_table="mart.calls__day__volume"}'
+        values: '3 4'
+      - series: 'oss911_threshold{job="oss911_monitor",instance="m",signal="closing_lag_days"}'
+        values: '3 3'
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: OSS911ClosingBehind
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: OSS911ClosingBehind
+        exp_alerts:
+          - exp_labels: {severity: page, job: oss911_monitor, instance: m, mart_table: mart.calls__day__volume}
+            exp_annotations: {summary: "mart.calls__day__volume: latest closed day is 4 days back"}
+
+  # A missing threshold is an alert of its own, after 5 minutes
+  - interval: 1m
+    input_series:
+      - series: 'oss911_threshold{job="oss911_monitor",instance="m",signal="batch_backlog_seconds"}'
+        values: '3600x10'
+      - series: 'oss911_threshold{job="oss911_monitor",instance="m",signal="partition_min_days_ahead"}'
+        values: '20x10'
+      - series: 'oss911_threshold{job="oss911_monitor",instance="m",signal="agent_missing_consecutive"}'
+        values: '3x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: OSS911ThresholdMissing
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: OSS911ThresholdMissing
+        exp_alerts:
+          - exp_labels: {severity: page, signal: closing_lag_days}
+            exp_annotations: {summary: "A threshold of the alert rules is missing: the rule that compares against it cannot fire"}
+
+  # WARN: reported when it grows against the result before, not while it stays
+  - interval: 1m
+    input_series:
+      - series: 'oss911_test_failures{job="oss911_monitor",instance="m",dag_id="build_icp_cdr_voice",node="fact_call_leg_without_dimension",severity="warn"}'
+        values: '1 1 2'
+      - series: 'oss911_test_failures_previous{job="oss911_monitor",instance="m",dag_id="build_icp_cdr_voice",node="fact_call_leg_without_dimension",severity="warn"}'
+        values: '1 1 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: OSS911WarnIncreased
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: OSS911WarnIncreased
+        exp_alerts:
+          - exp_labels: {severity: notify, job: oss911_monitor, instance: m, dag_id: build_icp_cdr_voice,
+                         node: fact_call_leg_without_dimension}
+            exp_annotations: {summary: "build_icp_cdr_voice: WARN test fact_call_leg_without_dimension grew to 2 rows"}
+
+  # No news is not good news; and a failing exporter query pages
+  - interval: 1m
+    input_series:
+      - series: 'oss911_expected_check_state{job="oss911_monitor",instance="m",check="maintenance_checks",dag_id="maintenance_checks",kind="dag",state="stale"}'
+        values: '1x10'
+      - series: 'oss911_monitor_query_errors{job="oss911_monitor",instance="m",query="checks"}'
+        values: '0 1 1 1 1 1'
+      - series: 'up{job="oss911_monitor",instance="m"}'
+        values: '1x10'
+      - series: 'up{job="haproxy",instance="h"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OSS911CheckMissing
+        exp_alerts:
+          - exp_labels: {severity: page, job: oss911_monitor, instance: m, check: maintenance_checks,
+                         dag_id: maintenance_checks, kind: dag, state: stale}
+            exp_annotations: {summary: "Expected check maintenance_checks is stale: no recent result in meta.check_result"}
+      - eval_time: 4m
+        alertname: OSS911MonitorQueryFailing
+        exp_alerts:
+          - exp_labels: {severity: page, job: oss911_monitor, instance: m, query: checks}
+            exp_annotations: {summary: "Exporter query checks fails: its metrics are missing and its alerts cannot fire"}
+      - eval_time: 6m
+        alertname: OSS911TargetDown
+        exp_alerts:
+          - exp_labels: {severity: page, job: haproxy, instance: h}
+            exp_annotations: {summary: "Scrape target haproxy (h) is down"}

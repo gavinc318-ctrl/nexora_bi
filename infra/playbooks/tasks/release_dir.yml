@@ -4,7 +4,7 @@
 #
 #   /opt/oss911/releases/<first 12 hex digits of the content hash>/      (root, read-only for everyone else;
 #   not /opt/oss911/release/, which holds the DAG manifest that airflow rewrites by rename)
-#       contracts/  release.yml, pools.yml, resweep.yml and the released contracts
+#       contracts/  release.yml, pools.yml, resweep.yml, monitoring.yml (DD-100) and the released contracts
 #       dags/       the DAG files of src/dags
 #       dbt/        the dbt project of src/dbt (project file, models, macros, tests)
 #       metrics/    metrics/*.yaml: the metric definitions 46-metrics syncs into meta.metric_registry (DD-97)
@@ -28,9 +28,9 @@
 - name: List the files of this release (control node)
   ansible.builtin.set_fact:
     _rel_sources: >-
-      {{ dict(['contracts/release.yml', 'contracts/pools.yml', 'contracts/resweep.yml']
+      {{ dict(['contracts/release.yml', 'contracts/pools.yml', 'contracts/resweep.yml', 'contracts/monitoring.yml']
               | zip([_repo ~ '/contracts/release.yml', _repo ~ '/contracts/pools.yml',
-                     _repo ~ '/contracts/resweep.yml']))
+                     _repo ~ '/contracts/resweep.yml', _repo ~ '/contracts/monitoring.yml']))
          | combine(dict(((lookup('ansible.builtin.file', _repo ~ '/contracts/release.yml') | from_yaml).release)
                         | map('regex_replace', '^', 'contracts/') | list
                         | zip(((lookup('ansible.builtin.file', _repo ~ '/contracts/release.yml') | from_yaml).release)

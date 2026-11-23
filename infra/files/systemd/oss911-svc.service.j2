@@ -5,6 +5,9 @@
 Description=OSS911 BI query API (dev)
 After=network-online.target pgbouncer.service
 Wants=network-online.target
+# Restart limits belong to [Unit]: in [Service] systemd ignores StartLimitIntervalSec (and the limit fell back to 10 s)
+StartLimitIntervalSec=300
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -14,8 +17,6 @@ WorkingDirectory=/var/lib/oss911svc
 ExecStart={{ venv_root }}/venv-svc/bin/uvicorn --factory oss911_svc.app:serve --host {{ svc_listen }} --port {{ svc_port }} --no-server-header
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=300
-StartLimitBurst=3
 TimeoutStopSec=20
 # Least privilege: the service reads its settings and talks over the network, nothing else
 NoNewPrivileges=true

@@ -4,8 +4,10 @@
     ingest.env   0600  database login user and password                            written by 40-schema.yml
     icp.env      0600  ICP gateway address and service account                     written by 30-python.yml
                        (development) or by operations (production; the playbook only checks it)
+    monitor.conf 0644  the monitoring exporter: database, listen address, files     written by 55-monitor.yml
+    monitor.env  0600  its database login user and password                        written by 40-schema.yml
 
-All three are KEY=VALUE lines, the format systemd and "set -a; . file" read too. The program reads them itself:
+All are KEY=VALUE lines, the format systemd and "set -a; . file" read too. The program reads them itself:
 no password passes through the DAG, a template or the Airflow parent process (LD-01 2.5).
 
 Contract references map to variable names (LD-01 2.5):
@@ -88,3 +90,32 @@ def db_settings() -> DbSettings:
         user=require(cred, "INGEST_DB_USER", "ingest.env"),
         password=require(cred, "INGEST_DB_PASSWORD", "ingest.env"),
     )
+
+
+@dataclass(frozen=True)
+class MonitorSettings:
+    db: DbSettings
+    listen: str              # address the exporter binds: the host's address on the container network
+    port: int
+    config_path: str         # the monitoring configuration of the release (contracts/monitoring.yml, installed)
+    manifest_path: str       # the DAG manifest (sources, schedules, re-sweep days)
+
+
+def monitor_settings() -> MonitorSettings:
+    """The exporter's settings (DD-100): monitor.conf and monitor.env. Its database login uses the transaction pool --
+    one short read-only transaction per query, no session state."""
+    conf = read_env_file("monitor.conf")
+    cred = read_env_file("monitor.env")
+    nums = {}
+    for key in ("OSS911_DB_PORT", "MONITOR_PORT"):
+        value = require(conf, key, "monitor.conf")
+        if not value.isdigit():
+            raise ConfigError(f"{key} in monitor.conf must be a number")
+        nums[key] = int(value)
+    db = DbSettings(host=require(conf, "OSS911_DB_HOST", "monitor.conf"), port=nums["OSS911_DB_PORT"],
+                    dbname=require(conf, "OSS911_DB_NAME", "monitor.conf"),
+                    user=require(cred, "MONITOR_DB_USER", "monitor.env"),
+                    password=require(cred, "MONITOR_DB_PASSWORD", "monitor.env"))
+    return MonitorSettings(db=db, listen=require(conf, "MONITOR_LISTEN", "monitor.conf"), port=nums["MONITOR_PORT"],
+                           config_path=require(conf, "MONITOR_CONFIG", "monitor.conf"),
+                           manifest_path=require(conf, "MONITOR_MANIFEST", "monitor.conf"))

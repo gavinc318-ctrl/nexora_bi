@@ -1,13 +1,19 @@
 # Managed by infra/playbooks/22-containers.yml, do not edit by hand
 #
-# On the development machine scrape only itself and HAProxy for now. Exporters for the database and business components are added as each component goes live --
-# targets live here rather than scattered around, so that "what does monitoring cover" has exactly one answer.
+# Targets live here rather than scattered around, so that "what does monitoring cover" has exactly one answer:
+# Prometheus itself, HAProxy, and the OSS911 exporter (DD-100). Exporters for the database and other components are
+# added as each goes live.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
     env: dev
     site: MAK
+
+# Alert rules of the monitoring channel (DD-100), deployed next to this file by 22-containers after promtool checks
+# and tests them. Alertmanager (the delivery) comes with block three; until then the alerts show at /alerts only.
+rule_files:
+  - /etc/prometheus/rules/alerts.yml
 
 scrape_configs:
   - job_name: prometheus
@@ -19,3 +25,11 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ['{{ podman_internal_gateway }}:{{ haproxy_stats_port }}']
+
+  # The OSS911 exporter (oss911-monitor, DD-100): it caches its database round for 60 s, so scraping more often would
+  # only re-read the cache. On the host's address on the container network, as HAProxy
+  - job_name: oss911_monitor
+    scrape_interval: 60s
+    scrape_timeout: 30s
+    static_configs:
+      - targets: ['{{ podman_internal_gateway }}:{{ monitor_port }}']

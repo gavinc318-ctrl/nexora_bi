@@ -27,6 +27,12 @@ defaults
 listen stats
     mode http
     bind 127.0.0.1:{{ haproxy_stats_port }}
+    # Prometheus scrapes from its container, through the host's address on the container network (22-containers,
+    # prometheus.yml). That bridge comes up with podman's first container, possibly after HAProxy: "transparent" lets
+    # the bind succeed before the address exists (IP_FREEBIND). Until 2026-11-23 only the loopback was bound and the
+    # target was down from the start, unnoticed: there were no alert rules (DD-100)
+    bind {{ podman_internal_gateway }}:{{ haproxy_stats_port }} transparent
+    http-request use-service prometheus-exporter if { path /metrics }
     stats enable
     stats uri /
     stats refresh 5s

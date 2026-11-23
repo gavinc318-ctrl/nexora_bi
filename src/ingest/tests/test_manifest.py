@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 INGEST = os.path.dirname(HERE)
@@ -83,7 +84,7 @@ class WriteTest(unittest.TestCase):
             self.assertFalse(write_atomic(path, data))                # same content: not rewritten
             self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o644)
             self.assertTrue(write_atomic(path, serialize({"sources": []})))
-            self.assertEqual(json.loads(open(path, encoding="utf-8").read()), {"sources": []})
+            self.assertEqual(json.loads(Path(path).read_text(encoding="utf-8")), {"sources": []})
             self.assertEqual([f for f in os.listdir(d)], ["dags.json"])   # no temporary file left behind
 
     def test_failed_write_leaves_old_file(self):
@@ -97,7 +98,7 @@ class WriteTest(unittest.TestCase):
                         write_atomic(path, b"new")
             finally:
                 os.chmod(d, 0o700)
-            self.assertEqual(open(path, "rb").read(), b"old")
+            self.assertEqual(Path(path).read_bytes(), b"old")
 
 
 class RunUsageTest(unittest.TestCase):

@@ -1,4 +1,4 @@
-# 22-containers -- containerised components: Keycloak, SeaweedFS, Prometheus
+# 22-containers -- containerised components: Keycloak, SeaweedFS, Prometheus (with the alert rules, DD-100)
 #
 # Three supporting components, all managed as Quadlet (systemd units) -- not podman run, and not the
 # deprecated podman generate systemd. Start at boot, dependency order and restart policy are left to
@@ -181,6 +181,59 @@
             mode: "0644"
           register: _promcfg
 
+        # ---------- Alert rules (DD-100): checked and unit-tested with the image's own promtool before deploying ----
+        # A rule file Prometheus cannot load would leave it running without any rule -- monitoring that looks calm.
+        # The candidate goes to a directory of its own first, promtool runs on it there (check rules, then the unit
+        # tests of alerts_test.yml), and only then is alerts.yml copied where Prometheus reads it. Copied, never
+        # templated: the rules' {{ $labels }} are Prometheus templates, not Jinja.
+        - name: Create the rule directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+          loop:
+            - "{{ oss911_etc }}/prometheus-rules"
+            - "{{ oss911_etc }}/prometheus-rules-candidate"
+
+        - name: Copy the candidate rules and their tests
+          ansible.builtin.copy:
+            src: "../files/prometheus/{{ item }}"
+            dest: "{{ oss911_etc }}/prometheus-rules-candidate/{{ item }}"
+            owner: root
+            group: root
+            mode: "0644"
+          loop: [alerts.yml, alerts_test.yml]
+
+        - name: Check and test the candidate rules with promtool
+          ansible.builtin.command:
+            cmd: >-
+              podman run --rm --network none --entrypoint /bin/sh
+              -v {{ oss911_etc }}/prometheus-rules-candidate:/r:ro -w /r {{ _pr_image }}
+              -c 'promtool check rules alerts.yml && promtool test rules alerts_test.yml'
+          register: _promtool
+          changed_when: false
+          failed_when: false
+
+        - name: Assert the rules are valid and pass their tests
+          ansible.builtin.assert:
+            that: ["_promtool.rc == 0"]
+            fail_msg: >-
+              promtool refused the alert rules (infra/files/prometheus/alerts.yml); nothing was deployed and Prometheus
+              keeps the rules it has. Output: {{ (_promtool.stdout ~ ' ' ~ _promtool.stderr) | trim }}
+            success_msg: "{{ _promtool.stdout_lines | select('search', 'SUCCESS') | list | length }} promtool checks passed"
+
+        - name: Deploy the alert rules
+          ansible.builtin.copy:
+            src: "{{ oss911_etc }}/prometheus-rules-candidate/alerts.yml"
+            remote_src: true
+            dest: "{{ oss911_etc }}/prometheus-rules/alerts.yml"
+            owner: root
+            group: root
+            mode: "0644"
+          register: _promrules
+
         # ---------- Quadlet units ----------
         - name: Deploy the Quadlet units
           ansible.builtin.template:
@@ -203,7 +256,8 @@
             # A changed env file (e.g. a rotated database password) restarts Keycloak only
             state: >-
               {{ 'restarted' if (_quadlets.changed or _promcfg.changed
-                                 or (item == 'keycloak' and _kcenv_w.changed)) else 'started' }}
+                                 or (item == 'keycloak' and _kcenv_w.changed)
+                                 or (item == 'prometheus' and _promrules.changed)) else 'started' }}
           loop: [keycloak, seaweedfs, prometheus]
 
         # ---------- Verification: check behaviour, not "is running" ----------
@@ -318,3 +372,27 @@
               Prometheus cannot find its own up metric: it is running but scraping fails.
               See http://127.0.0.1:{{ prometheus_port }}/targets for target status and errors.
             success_msg: "Prometheus scraping OK: up{job=prometheus} = 1"
+
+        # The rules really loaded: five groups, none with an evaluation error
+        - name: Query the rules Prometheus loaded
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ prometheus_port }}/api/v1/rules"
+            return_content: true
+          register: _promloaded
+          retries: 10
+          delay: 3
+          until: (_promloaded.json.data.groups | default([]) | length) > 0
+          failed_when: false
+
+        - name: Assert the alert rules are loaded
+          ansible.builtin.assert:
+            that:
+              - "(_promloaded.json.data.groups | default([]) | map(attribute='name') | list | sort)
+                 == ['oss911-checks', 'oss911-heartbeat', 'oss911-monitoring', 'oss911-processing', 'oss911-sources']"
+            fail_msg: >-
+              Prometheus has loaded these rule groups: {{ _promloaded.json.data.groups | default([])
+              | map(attribute='name') | list }}; expected the five of alerts.yml. See journalctl -u prometheus -n 40.
+            success_msg: >-
+              Alert rules loaded: {{ _promloaded.json.data.groups | map(attribute='rules') | map('length') | sum }}
+              rules in 5 groups. Exporter target: see http://127.0.0.1:{{ prometheus_port }}/targets
+              (job oss911_monitor is down until 55-monitor has run)

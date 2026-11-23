@@ -1,0 +1,73 @@
+# Monitoring configuration of the release (DD-100 and its review note, 2026-11-22). Read by the exporter
+# oss911-monitor (src/ingest/src/oss911_ingest/monitor.py), installed by 55-monitor.yml as /etc/oss911/monitoring.yml
+# with each expected check's deployed_at added (the start of its grace period, kept from one deployment to the next).
+#
+# Business thresholds live here, or in the database for the hot-tuned ones (version_stale_days); the exporter
+# exports both as oss911_threshold and the alert rules compare against that metric -- no number of these is written
+# in the rules (infra/files/prometheus/alerts.yml). Windows and debounce times are the rules' own.
+# The day-total reconciliation tolerance is a dbt variable (agent_reconcile): it decides the test's rows, not an alert.
+version: 1
+report_timezone: Asia/Riyadh
+
+thresholds:
+  closing_lag_days: 3             # a mart table's latest closed day this many days back or more (page). The nightly
+                                  # test mart_closing_not_behind uses the same 3 days
+  batch_backlog_seconds: 3600     # a processable batch a model has not taken in after an hour (page)
+  agent_missing_consecutive: 3    # an agent asked for and missing from this many responses in a row (notify)
+  partition_min_days_ahead: 20    # the last monthly partition of a table ends within this many days (page)
+  clarification_oldest_days: 7    # the oldest open clarification item (daily digest only, never an alert)
+
+# Per source of the DAG manifest; a source not listed takes default. models: the models that register the source's
+# batches, staging first and core last (backlog; the last one decides a re-sweep's day reached core)
+sources:
+  default:
+    max_consecutive_failures: 3
+    max_success_age_minutes: 30
+  icp_cdr_voice:                  # every 5 minutes, re-swept daily at 02:00 UTC
+    max_consecutive_failures: 3
+    max_success_age_minutes: 20
+    resweep_allowed_delay_hours: 6   # a source day is due once its re-sweep should have reached core: day + 1, 06:00
+    models: [stg_icp_cdr_voice, fact_call_leg]
+  icp_reference:                  # every 30 minutes
+    max_consecutive_failures: 2
+    max_success_age_minutes: 70
+    models: [stg_icp_reference]
+  icp_agent_session:              # every 10 minutes
+    max_consecutive_failures: 3
+    max_success_age_minutes: 30
+    models: [stg_icp_agent_session, fact_agent_session]
+  icp_agent_day:
+    max_consecutive_failures: 3
+    max_success_age_minutes: 30
+    models: [stg_icp_agent_day, fact_agent_day]
+
+# Expected checks (DD-100 review note, item three). kind dag: the DAG's latest dbt command in meta.check_result,
+# its worst status. kind check: one dbt node's latest result in that DAG. A result older than period + allowed delay
+# is stale; an item with no result is never_run once its grace period (one period + allowed delay from deployed_at)
+# is over. enabled: false keeps an item listed without judging it.
+# Not here: the ingestion DAGs (the sources above, from meta.run_log) and maintenance_partitions (dbt run-operation
+# writes no results; the partitions themselves are watched, oss911_partition_days_ahead).
+expected_checks:
+  - {id: build_icp_cdr_voice,       kind: dag, dag_id: build_icp_cdr_voice,       period_minutes: 5,  allowed_delay_minutes: 15}
+  - {id: build_icp_reference,       kind: dag, dag_id: build_icp_reference,       period_minutes: 30, allowed_delay_minutes: 30}
+  - {id: build_icp_agent_session,   kind: dag, dag_id: build_icp_agent_session,   period_minutes: 10, allowed_delay_minutes: 20}
+  - {id: build_icp_agent_day,       kind: dag, dag_id: build_icp_agent_day,       period_minutes: 10, allowed_delay_minutes: 20}
+  - {id: publish_marts_intraday,    kind: dag, dag_id: publish_marts_intraday,    period_minutes: 60, allowed_delay_minutes: 60}
+  - {id: publish_marts_nightly,     kind: dag, dag_id: publish_marts_nightly,     period_minutes: 1440, allowed_delay_minutes: 180}
+  - {id: maintenance_checks,        kind: dag, dag_id: maintenance_checks,        period_minutes: 1440, allowed_delay_minutes: 180}
+  - {id: agent_day_totals_decrease, kind: check, dag_id: build_icp_agent_day, node: agent_day_totals_decrease,
+     period_minutes: 10, allowed_delay_minutes: 20}
+  - {id: nightly/mart_closing_not_behind, kind: check, dag_id: maintenance_checks, node: mart_closing_not_behind,
+     period_minutes: 1440, allowed_delay_minutes: 180}
+  - {id: nightly/batches_reach_core, kind: check, dag_id: maintenance_checks, node: batches_reach_core,
+     period_minutes: 1440, allowed_delay_minutes: 180}
+  - {id: nightly/fact_call_recomputes_from_legs, kind: check, dag_id: maintenance_checks,
+     node: fact_call_recomputes_from_legs, period_minutes: 1440, allowed_delay_minutes: 180}
+  - {id: nightly/fact_call_for_every_call, kind: check, dag_id: maintenance_checks, node: fact_call_for_every_call,
+     period_minutes: 1440, allowed_delay_minutes: 180}
+  - {id: nightly/agent_day_totals_decrease, kind: check, dag_id: maintenance_checks, node: agent_day_totals_decrease,
+     period_minutes: 1440, allowed_delay_minutes: 180}
+  - {id: nightly/agent_day_columns_match_contract, kind: check, dag_id: maintenance_checks,
+     node: agent_day_columns_match_contract, period_minutes: 1440, allowed_delay_minutes: 180}
+  - {id: nightly/agent_day_reconciles_with_legs, kind: check, dag_id: maintenance_checks,
+     node: agent_day_reconciles_with_legs, period_minutes: 1440, allowed_delay_minutes: 180}

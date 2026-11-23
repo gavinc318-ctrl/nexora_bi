@@ -127,12 +127,14 @@
     != (_st.stdout_lines | select('match', '^after ') | first) | regex_replace('^after ', '')
   when: login.statement_timeout is defined
 
-# The pool a login uses (DD-67 · DD-93): dbt and ingestion the session pool (database oss911), the service layer the
-# transaction pool (oss911_txn); each is rejected on the other one.
+# The pool a login uses (DD-67 · DD-93): dbt and ingestion the session pool (database oss911), the service layer and
+# the monitoring exporter the transaction pool (oss911_txn); each is rejected on the other one.
 - name: "{{ login.name }}: which pool it uses"
   ansible.builtin.set_fact:
-    _own_db: "{{ pg_database ~ '_txn' if login.role in ['oss911_query_svc', 'oss911_admin_svc'] else pg_database }}"
-    _other_db: "{{ pg_database if login.role in ['oss911_query_svc', 'oss911_admin_svc'] else pg_database ~ '_txn' }}"
+    _own_db: "{{ pg_database ~ '_txn' if login.role in _txn_roles else pg_database }}"
+    _other_db: "{{ pg_database if login.role in _txn_roles else pg_database ~ '_txn' }}"
+  vars:
+    _txn_roles: [oss911_query_svc, oss911_admin_svc, oss911_monitor]
 
 # The real consumer (the airflow account, or the service layer's) reads its own env file and logs in through pgBouncer.
 # Do not verify as postgres instead: postgres uses peer authentication on the local socket, which verifies

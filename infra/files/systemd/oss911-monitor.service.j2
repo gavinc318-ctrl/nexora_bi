@@ -1,0 +1,30 @@
+# Managed by infra/playbooks/55-monitor.yml, do not edit by hand
+# The monitoring exporter (DD-100). Its settings are read by the program itself from /etc/oss911/monitor.conf and
+# monitor.env (src/ingest/src/oss911_ingest/config.py): nothing secret passes through this unit. It reads the
+# monitoring configuration and the DAG manifest again when they change; no restart is needed for a new release.
+[Unit]
+Description=OSS911 BI monitoring exporter (dev)
+After=network-online.target pgbouncer.service
+Wants=network-online.target
+# Restart limits belong to [Unit]: in [Service] systemd ignores StartLimitIntervalSec (and the limit fell back to 10 s)
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=oss911mon
+Group=oss911mon
+WorkingDirectory=/var/lib/oss911mon
+ExecStart={{ venv_root }}/venv-ingest/bin/oss911-monitor
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+# Least privilege: it reads its settings, two release files and the database, and listens on one port
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/oss911mon
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,207 @@
+# 55-monitor -- the monitoring exporter oss911-monitor (DD-100 block two)
+#
+# Basis: DD-100 and its review note (2026-11-22) · LD-01 10.2
+# Prerequisites: 21-connection (the monitor login is a transaction-pool login) · 40-schema (the role oss911_monitor,
+#                change 0017, the login and /etc/oss911/monitor.env) · 30-python (venv-ingest 0.4.0, which carries
+#                the oss911-monitor entry point) · 45-contracts (the release directory, with contracts/monitoring.yml)
+#                · 50-dags (the DAG manifest's DAGs) · 22-containers (Prometheus with the scrape job and the alert
+#                rules: the last step here checks that Prometheus scrapes the exporter)
+#
+# * The exporter is the ingestion package's second entry point (same venv, same dependencies), run by systemd as its
+#   own account oss911mon. It binds the host's address on the container network, where Prometheus scrapes it.
+# * The monitoring configuration comes from the release directory, verified by hash like every other release file
+#   (tasks/release_dir.yml), and is installed as /etc/oss911/monitoring.yml with each expected check's deployed_at
+#   -- kept for the checks already installed, now for new ones (infra/files/monitoring_install.py, which validates the
+#   file with the exporter's own rules first). The exporter reads it again when it changes: no restart for a release.
+# * Verification as the exporter itself: one refresh as oss911mon (`oss911-monitor --once`) must load the
+#   configuration and run every query without error; then /metrics must answer on the listen address; then, if
+#   Prometheus runs, its target must be up.
+
+- name: Monitoring exporter
+  hosts: all
+  gather_facts: false   # no facts used (same reasoning as 40-schema.yml)
+  become: true
+
+  vars:
+    oss911_etc: /etc/oss911
+    repo_root: "{{ playbook_dir }}/../.."
+    ingest_venv: "{{ venv_root }}/venv-ingest"
+    monitor_config: "{{ oss911_etc }}/monitoring.yml"
+
+  tasks:
+
+    # ========== Preconditions ==========
+    - name: Find and verify the release directory (created by 45-contracts)
+      ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/release_dir.yml"
+      vars:
+        rel_create: false
+
+    - name: Query the exporter's version and its env file
+      ansible.builtin.shell:
+        cmd: |
+          {{ ingest_venv }}/bin/oss911-monitor --version 2>&1 || echo "no-monitor"
+          test -f {{ oss911_etc }}/monitor.env && echo "env-ok" || echo "no-env"
+      register: _pre
+      changed_when: false
+      check_mode: false
+
+    - name: Assert the exporter is installed and has its login
+      ansible.builtin.assert:
+        that:
+          - "'no-monitor' not in _pre.stdout"
+          - "'env-ok' in _pre.stdout_lines"
+        fail_msg: >-
+          {{ _pre.stdout_lines | join(' | ') }}. The exporter comes with oss911-ingest 0.4.0 (run 30-python.yml) and
+          its login with 40-schema.yml (db_logins: monitor, after 21-connection.yml).
+        success_msg: "{{ _pre.stdout_lines | first }}, {{ oss911_etc }}/monitor.env present"
+
+    # ========== Configuration ==========
+    - name: Write the exporter's settings (non-secret)
+      ansible.builtin.copy:
+        dest: "{{ oss911_etc }}/monitor.conf"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Managed by infra/playbooks/55-monitor.yml, do not edit by hand. Non-secret settings of the monitoring
+          # exporter (src/ingest/src/oss911_ingest/config.py); the login user and password are in monitor.env (40).
+          # The transaction pool of pgBouncer: one short read-only transaction per query
+          OSS911_DB_HOST=127.0.0.1
+          OSS911_DB_PORT={{ pgb_listen_port }}
+          OSS911_DB_NAME={{ pg_database }}_txn
+          MONITOR_LISTEN={{ monitor_listen }}
+          MONITOR_PORT={{ monitor_port }}
+          MONITOR_CONFIG={{ monitor_config }}
+          MONITOR_MANIFEST={{ venv_root }}/release/dags.json
+      register: _monconf
+
+    - name: Merge the release's monitoring configuration with the installed one
+      ansible.builtin.command:
+        argv:
+          - "{{ ingest_venv }}/bin/python"
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/monitoring_install.py') }}"
+          - "{{ rel_dir }}/contracts/monitoring.yml"
+          - "{{ monitor_config }}"
+          - "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%S+00:00') }}"
+      register: _moncfg
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Assert the monitoring configuration is valid
+      ansible.builtin.assert:
+        that: ["_moncfg.rc == 0"]
+        fail_msg: "{{ rel_dir }}/contracts/monitoring.yml was refused: {{ _moncfg.stderr | trim }}"
+        success_msg: "Monitoring configuration valid ({{ _moncfg.stdout_lines | select('search', '- id:') | list | length }} expected checks)"
+
+    - name: Install the monitoring configuration
+      ansible.builtin.copy:
+        dest: "{{ monitor_config }}"
+        content: "{{ _moncfg.stdout }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+
+    # ========== The service ==========
+    - name: Deploy the systemd unit
+      ansible.builtin.template:
+        src: ../files/systemd/oss911-monitor.service.j2
+        dest: /etc/systemd/system/oss911-monitor.service
+        owner: root
+        group: root
+        mode: "0644"
+      register: _monunit
+
+    - name: Reload systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: _monunit.changed
+
+    # 30-python reinstalls the package when its version changes; the running process keeps the old code until restarted
+    - name: Find whether the program changed since the service started
+      ansible.builtin.shell:
+        cmd: >-
+          test "$(stat -c %Y {{ ingest_venv }}/lib/python3*/site-packages/oss911_ingest/monitor.py)"
+          -gt "$(date -d "$(systemctl show oss911-monitor -p ActiveEnterTimestamp --value)" +%s 2>/dev/null || echo 0)"
+          && echo newer || echo same
+      register: _monnewer
+      changed_when: false
+      check_mode: false
+
+    - name: Enable and (re)start the exporter
+      ansible.builtin.systemd_service:
+        name: oss911-monitor
+        enabled: true
+        state: "{{ 'restarted' if _monconf.changed or _monunit.changed or _monnewer.stdout == 'newer' else 'started' }}"
+
+    # ========== Verification, as the exporter ==========
+    - name: One refresh as oss911mon
+      ansible.builtin.command:
+        cmd: "{{ ingest_venv }}/bin/oss911-monitor --once"
+      become_user: oss911mon
+      register: _once
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Assert every query ran and the configuration loaded
+      ansible.builtin.assert:
+        that: ["_once.rc == 0"]
+        fail_msg: >-
+          The refresh reported errors: {{ _once.stdout_lines | select('search', '^oss911_monitor_(query_errors|config_ok)')
+          | reject('search', ' 0$') | list + (_once.stdout_lines | select('equalto', 'oss911_monitor_config_ok 0') | list) }}
+          {{ _once.stderr | trim }}
+        success_msg: >-
+          {{ _once.stdout_lines | select('match', '^oss911_monitor_query_errors') | list | length }} queries without
+          error, {{ _once.stdout_lines | reject('match', '^#') | list | length }} samples
+          (expected checks: {{ _once.stdout_lines | select('match', '^oss911_expected_check_state.* 1$')
+          | map('regex_replace', '^.*state="([a-z_]+)".*$', '\\1') | list | sort | unique | join(', ') }})
+
+    - name: Wait for the exporter to listen
+      ansible.builtin.wait_for:
+        host: "{{ monitor_listen }}"
+        port: "{{ monitor_port }}"
+        timeout: 30
+      failed_when: false
+
+    - name: Fetch /metrics
+      ansible.builtin.uri:
+        url: "http://{{ monitor_listen }}:{{ monitor_port }}/metrics"
+        return_content: true
+      register: _metrics
+      retries: 10
+      delay: 2
+      until: _metrics.status | default(0) == 200
+      failed_when: false
+
+    - name: Assert /metrics answers
+      ansible.builtin.assert:
+        that:
+          - _metrics.status | default(0) == 200
+          - "'oss911_monitor_info' in (_metrics.content | default(''))"
+        fail_msg: >-
+          http://{{ monitor_listen }}:{{ monitor_port }}/metrics answered {{ _metrics.status | default('nothing') }}.
+          Look at: journalctl -u oss911-monitor -n 40
+        success_msg: "The exporter answers on http://{{ monitor_listen }}:{{ monitor_port }}/metrics"
+
+    # Prometheus scrapes once a minute: wait for one scrape after the start
+    - name: Query Prometheus for the exporter's target
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ prometheus_port }}/api/v1/query?query=up%7Bjob%3D%22oss911_monitor%22%7D"
+        return_content: true
+      register: _promup
+      retries: 12
+      delay: 10
+      until: (_promup.json.data.result | default([]) | map(attribute='value') | map('last') | list) == ['1']
+      failed_when: false
+
+    - name: Assert Prometheus scrapes the exporter
+      ansible.builtin.assert:
+        that:
+          - (_promup.json.data.result | default([]) | map(attribute='value') | map('last') | list) == ['1']
+        fail_msg: >-
+          up{job="oss911_monitor"} is {{ _promup.json.data.result | default([]) | map(attribute='value') | list }}
+          (empty: the scrape job is missing -- rerun 22-containers.yml; 0: Prometheus cannot reach
+          {{ monitor_listen }}:{{ monitor_port }}). See http://127.0.0.1:{{ prometheus_port }}/targets
+        success_msg: "Prometheus scrapes the exporter: up{job=\"oss911_monitor\"} = 1"

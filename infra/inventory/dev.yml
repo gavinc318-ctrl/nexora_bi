@@ -272,6 +272,10 @@ all:
       # statement that escapes it
       - { name: svc,    role: oss911_query_svc, env_file: svc.env,    env_prefix: SVC_DB,    file_owner: oss911svc,
           statement_timeout: 30s }
+      # The monitoring exporter (DD-100, 55-monitor.yml): read only, the transaction pool like the service layer --
+      # short queries, no session state. Its own system account oss911mon (created by db_login.yml)
+      - { name: monitor, role: oss911_monitor,  env_file: monitor.env, env_prefix: MONITOR_DB, file_owner: oss911mon,
+          statement_timeout: 10s }
     # Initial partition window, monthly (DD-77): previous month, this month, three months ahead. From then on
     # orchestration calls meta.ensure_monthly_partitions to create future months in advance -- until orchestration is
     # in place the window runs out after partition_months_ahead months; then rerun the playbook to move it forward.
@@ -340,6 +344,10 @@ all:
     seaweedfs_filer_port: 8888
     seaweedfs_master_port: 9333
     prometheus_port: 9090
+    # The monitoring exporter oss911-monitor (DD-100): bound to the host's address on the container network, where the
+    # Prometheus container scrapes it -- as for pgBouncer, never on the external interface
+    monitor_listen: "{{ podman_internal_gateway }}"
+    monitor_port: 9188
     prometheus_retention: 15d           # 15 days is enough on the development machine; production follows LD-08's retention requirements
 
     # ---- Container networks: the two production segments simulated on one host ----

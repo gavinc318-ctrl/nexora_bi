@@ -1,0 +1,208 @@
+# Managed by infra/playbooks/22-containers.yml, do not edit on the host. Checked with promtool before it is deployed;
+# unit tests in alerts_test.yml (promtool test rules).
+#
+# Alert rules of the monitoring channel (DD-100 and its review note, 2026-11-22). Two levels, label severity:
+#   page    SMS and e-mail: a source down or stalled, a re-sweep missing, closing behind, batches not taken in,
+#           partitions running out, an ERROR test failing, an expected check stale or never run, and the
+#           monitoring itself failing
+#   notify  e-mail: WARN results that grew, agents not returned, a reference copy gone stale, quarantine waiting
+# What only the daily digest reports (the oldest clarification item, removed agents not returned, the day-total
+# reconciliation) has no rule here: the digest reads it (block three).
+#
+# Business thresholds are never written here: every comparison is against oss911_threshold, which the exporter
+# exports from the release (contracts/monitoring.yml) or the database -- one authority. What is written here are the
+# windows (for:), the debounce times and up == 0. A threshold that is missing would make its rule silently never
+# fire, so each one has an absent() guard of its own (review note, item three).
+#
+# Alerts carry where to look -- source, table, check, how many -- never data values such as agent IDs or numbers
+# (LD-01 10.2: alerts leave the DMZ; DD-100 item six).
+
+groups:
+
+  # ---------------------------------------------------------------- the monitoring itself
+  - name: oss911-monitoring
+    rules:
+      - alert: OSS911MonitorDown
+        expr: up{job="oss911_monitor"} == 0
+        for: 3m
+        labels: {severity: page}
+        annotations:
+          summary: "The monitoring exporter does not answer: every other OSS911 alert is blind"
+          runbook: "infra/runbook/21-monitoring.md"
+
+      - alert: OSS911MonitorNotScraped
+        expr: absent(up{job="oss911_monitor"})
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "Prometheus has no oss911_monitor job: the scrape configuration lost it"
+
+      - alert: OSS911TargetDown
+        expr: up{job!="oss911_monitor"} == 0
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "Scrape target {{ $labels.job }} ({{ $labels.instance }}) is down"
+
+      - alert: OSS911MonitorQueryFailing
+        expr: oss911_monitor_query_errors > 0
+        for: 3m
+        labels: {severity: page}
+        annotations:
+          summary: "Exporter query {{ $labels.query }} fails: its metrics are missing and its alerts cannot fire"
+
+      - alert: OSS911MonitorConfigInvalid
+        expr: oss911_monitor_config_ok == 0
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "The monitoring configuration or the DAG manifest did not load; the exporter runs on the previous one"
+
+      # Guards: a threshold that is missing silences its rule
+      - alert: OSS911ThresholdMissing
+        expr: |
+          absent(oss911_threshold{signal="closing_lag_days"})
+          or absent(oss911_threshold{signal="batch_backlog_seconds"})
+          or absent(oss911_threshold{signal="partition_min_days_ahead"})
+          or absent(oss911_threshold{signal="agent_missing_consecutive"})
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "A threshold of the alert rules is missing: the rule that compares against it cannot fire"
+
+      - alert: OSS911SourceThresholdMissing
+        expr: |
+          (oss911_source_consecutive_failures
+             unless on(source_id) oss911_threshold{signal="source_consecutive_failures"})
+          or (oss911_source_last_success_age_seconds
+             unless on(source_id) oss911_threshold{signal="source_last_success_age_seconds"})
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "Source {{ $labels.source_id }} has no failure or age threshold: its outage alerts cannot fire"
+
+  # ---------------------------------------------------------------- sources (LD-01 chapter 10)
+  - name: oss911-sources
+    rules:
+      - alert: OSS911SourceFailing
+        expr: |
+          oss911_source_consecutive_failures
+            >= on(source_id) group_left oss911_threshold{signal="source_consecutive_failures"}
+        labels: {severity: page}
+        annotations:
+          summary: "Source {{ $labels.source_id }}: {{ $value }} failed runs in a row"
+
+      - alert: OSS911SourceStalled
+        expr: |
+          oss911_source_last_success_age_seconds
+            > on(source_id) group_left oss911_threshold{signal="source_last_success_age_seconds"}
+        labels: {severity: page}
+        annotations:
+          summary: "Source {{ $labels.source_id }}: no successful run for {{ $value | humanizeDuration }}"
+
+      # One day without its re-sweep in core holds the closing of every later day (NOTES 2026-11-23: source day
+      # 11-15, a week unnoticed)
+      - alert: OSS911ResweepMissing
+        expr: oss911_resweep_missing_days > 0
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: "Source {{ $labels.source_id }}: {{ $value }} source day(s) due for re-sweep not in core; closing waits"
+
+      - alert: OSS911QuarantineWaiting
+        expr: oss911_quarantine_pending > 0
+        for: 1h
+        labels: {severity: notify}
+        annotations:
+          summary: "Source {{ $labels.source_id }}: {{ $value }} quarantined batch(es) wait for a decision in M-03"
+
+      - alert: OSS911ReferenceStale
+        expr: |
+          oss911_reference_sync_age_seconds
+            > on(source_id) group_left oss911_threshold{signal="reference_sync_age_seconds"}
+        for: 30m
+        labels: {severity: notify}
+        annotations:
+          summary: "Reference scope {{ $labels.scope }} last synced {{ $value | humanizeDuration }} ago"
+
+      - alert: OSS911AgentsNotReturned
+        expr: oss911_agents_not_returned{roster="current"} > 0
+        for: 10m
+        labels: {severity: notify}
+        annotations:
+          summary: "{{ $labels.source_id }}: {{ $value }} configured agent(s) missing from the last responses in a row"
+
+  # ---------------------------------------------------------------- processing and publication
+  - name: oss911-processing
+    rules:
+      - alert: OSS911BatchBacklog
+        expr: |
+          oss911_unprocessed_oldest_age_seconds
+            > on(job, instance) group_left oss911_threshold{signal="batch_backlog_seconds"}
+        labels: {severity: page}
+        annotations:
+          summary: "{{ $labels.model }} has not taken in a batch of {{ $labels.source_id }} for {{ $value | humanizeDuration }}"
+
+      - alert: OSS911ClosingBehind
+        expr: |
+          oss911_mart_closed_lag_days
+            > on(job, instance) group_left oss911_threshold{signal="closing_lag_days"}
+        labels: {severity: page}
+        annotations:
+          summary: "{{ $labels.mart_table }}: latest closed day is {{ $value }} days back"
+
+      - alert: OSS911PartitionsRunningOut
+        expr: |
+          oss911_partition_days_ahead
+            < on(job, instance) group_left oss911_threshold{signal="partition_min_days_ahead"}
+        labels: {severity: page}
+        annotations:
+          summary: "{{ $labels.table }}: its last monthly partition ends in {{ $value }} days; writes after that fail"
+
+  # ---------------------------------------------------------------- checks (meta.check_result)
+  - name: oss911-checks
+    rules:
+      - alert: OSS911TestFailed
+        expr: oss911_test_status{severity="error", status=~"fail|error"} == 1
+        labels: {severity: page}
+        annotations:
+          summary: "{{ $labels.dag_id }}: ERROR test {{ $labels.node }} is {{ $labels.status }}"
+
+      - alert: OSS911CheckError
+        expr: oss911_expected_check_state{kind="dag", state="error"} == 1
+        labels: {severity: page}
+        annotations:
+          summary: "{{ $labels.dag_id }}: its latest dbt command has an error (model or test)"
+
+      # No news is not good news: a check that stopped writing results, or never wrote one
+      - alert: OSS911CheckMissing
+        expr: oss911_expected_check_state{state=~"stale|never_run"} == 1
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "Expected check {{ $labels.check }} is {{ $labels.state }}: no recent result in meta.check_result"
+
+      - alert: OSS911CheckSkipped
+        expr: oss911_expected_check_state{state="skipped"} == 1
+        labels: {severity: notify}
+        annotations:
+          summary: "Expected check {{ $labels.check }} was skipped (an upstream model failed)"
+
+      # WARN results are reported when they grow, compared with the result before -- not at every build
+      # (DD-100 item five); a WARN that stays as it is goes to the daily digest
+      - alert: OSS911WarnIncreased
+        expr: oss911_test_failures{severity="warn"} > oss911_test_failures_previous
+        labels: {severity: notify}
+        annotations:
+          summary: "{{ $labels.dag_id }}: WARN test {{ $labels.node }} grew to {{ $value }} rows"
+
+  # ---------------------------------------------------------------- heartbeat (block three: Alertmanager, the gateway)
+  - name: oss911-heartbeat
+    rules:
+      # Always firing. It travels the whole delivery path continuously; the gateway side checks that it keeps
+      # arriving, so a broken path is noticed without any alert to carry the news (review note, item three)
+      - alert: OSS911Heartbeat
+        expr: vector(1)
+        labels: {severity: heartbeat}
+        annotations:
+          summary: "Heartbeat of the OSS911 alert path"

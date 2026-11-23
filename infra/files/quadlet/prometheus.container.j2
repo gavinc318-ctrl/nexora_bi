@@ -10,6 +10,7 @@ ContainerName=prometheus
 Network=internal
 PublishPort=127.0.0.1:{{ prometheus_port }}:9090
 Volume=/etc/oss911/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+Volume=/etc/oss911/prometheus-rules:/etc/prometheus/rules:ro,Z
 Volume=prometheus-data:/prometheus
 Exec=--config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time={{ prometheus_retention }}
 
