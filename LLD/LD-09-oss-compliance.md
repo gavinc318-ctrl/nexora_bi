@@ -47,7 +47,7 @@ format: converted from docx, content unchanged
 
 按治理模式，在用组件分为两类。基金会或社区治理的：PostgreSQL、PostGIS（OSGeo）、Airflow 与 Superset（ASF）、etcd 与 Keycloak 与 Prometheus 及其 Alertmanager（CNCF）、Podman 与 Ansible（Red Hat）、HAProxy、React。单一公司或单一维护者主导、需持续关注的：SeaweedFS、Patroni、WeasyPrint、dbt-core。后一类是第 8 章复核机制的重点对象。
 
-【2026-11-22 补充，DD-100】监控告警通道新增两项：Alertmanager（Apache 2.0，Prometheus 项目，独立容器，经网络协议交互）与 Python 库 prometheus_client（Apache 2.0，导出程序直接 import）。两者均为宽松许可，不改变第 4 章的判定；版本与 digest 由开发机登记入 compliance/components.csv 与 MANIFEST。
+【2026-11-22 补充，DD-100；2026-11-24 更正】监控告警通道新增一项组件：Alertmanager（Apache 2.0，Prometheus 项目，独立容器，经网络协议交互），宽松许可，不改变第 4 章的判定；版本与 digest 已由开发机登记入 compliance/components.csv 与 MANIFEST。原拟引入的 Python 库 prometheus_client 未采用：导出程序只输出 gauge，文本格式自行实现，不增加依赖。
 
 ## 4  许可判定与传染性分析
 

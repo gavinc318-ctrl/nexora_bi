@@ -1,0 +1,7 @@
+code,name_zh,name_en,name_ar,name_ar_state,mart_column
+M-R10,通话状态时长,Time in talk state,مدة التحدث,draft,talk_seconds
+M-R11,事后处理时长,After-call work time,مدة العمل بعد المكالمة,draft,acw_seconds
+M-R12,休息时长,Rest time,مدة الاستراحة,draft,rest_seconds
+M-R13,示忙时长,Busy (not ready) time,مدة حالة الانشغال,draft,busy_seconds
+M-R14,保持时长,Hold time,مدة وضع المكالمات قيد الانتظار,draft,hold_seconds
+M-R15,空闲时长,Idle (available) time,مدة الجاهزية,draft,idle_seconds
