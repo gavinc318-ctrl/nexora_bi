@@ -693,10 +693,10 @@ metrics:
     name_ar: "الموظفون على رأس العمل"
     name_ar_state: draft
     grain: agent_day   # 坐席日
-    aggregation: count
-    measure: "见 definition"
+    aggregation: avg
+    measure: "该小时在岗的不同工号数 / 天数"
     entity_date: date_key
-    definition: "某时刻在岗的坐席数"
+    definition: "按小时的在岗坐席数：该小时内有任一在岗区间的不同工号数。查一天即当天各小时的人数；跨日为各小时的日均人数（各日人数合计 / 天数，DD-101 注）"
     dimensions: [dim_date, dim_site, dim_agent, dim_shift]
     source_tables: [core.fact_agent_session]
     version: 1
@@ -704,7 +704,8 @@ metrics:
     retrospective: false
     published: true
     mart_table: mart.agents__day_hour__on_duty
-    mart_column: agents_on_duty
+    mart_numerator: agents_on_duty
+    mart_denominator: day_count
     rfp: ""
     notes: "签入签出为区间明细（IDX_04_03_001），故可按班次窗口求交（DD-53）。实时在岗人数另取实时接口，仅供看板"
   - code: M-R02
@@ -745,9 +746,9 @@ metrics:
     version: 2
     depends_unverified: true   # 2026-11-16 · DD-98: hindex/agent date semantics open (ICP Q36-Q38)
     retrospective: false
-    published: true
+    published: false   # DD-101 note 2026-11-24: split into M-R10 to M-R15
     rfp: ""
-    notes: "来源为平台历史指标 IDX_04_02_* 各状态时长（DD-65），非本方采样。日累计值，不可下钻到单次状态变化，也不可按班次切分——故维度中已去掉 dim_shift。报表须标注来源"
+    notes: "已拆为 M-R10 至 M-R15（DD-101 注 2026-11-24，循 M-I09 先例），不再发布；保留本条是因为既有文档引用它，这些引用指那一组。原注：来源为平台历史指标 IDX_04_02_* 各状态时长（DD-65），非本方采样。日累计值，不可下钻到单次状态变化，也不可按班次切分"
   - code: M-R04
     domain: 资源与勤务
     name_zh: "占用率"
@@ -865,6 +866,138 @@ metrics:
     published: true
     rfp: ""
     notes: "数据质量指标"
+  - code: M-R10
+    domain: 资源与勤务
+    name_zh: "通话状态时长"
+    name_en: "Time in talk state"
+    name_ar: "مدة التحدث"
+    name_ar_state: draft
+    grain: agent_day   # 坐席日
+    aggregation: avg
+    measure: "平台日累计 IDX_04_02_021 / 坐席日"
+    entity_date: date_key
+    definition: "通话状态时长：平台给出的该状态日累计秒数（IDX_04_02_021），按坐席日求均值"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_agent_day]
+    version: 1
+    depends_unverified: true   # DD-98: hindex/agent date semantics open (ICP Q36-Q38), as M-R03
+    retrospective: false
+    published: true
+    mart_table: mart.agents__day_agent__state
+    mart_numerator: talk_seconds
+    mart_denominator: agent_days
+    rfp: ""
+    notes: "由 M-R03 拆出（DD-101 注 2026-11-24）。来源为平台历史指标（DD-65），非本方采样：不可下钻到单次状态变化，不可按班次切分，报表须标注来源。源值为空的坐席日不计入分子，仍计入分母"
+  - code: M-R11
+    domain: 资源与勤务
+    name_zh: "事后处理时长"
+    name_en: "After-call work time"
+    name_ar: "مدة العمل بعد المكالمة"
+    name_ar_state: draft
+    grain: agent_day   # 坐席日
+    aggregation: avg
+    measure: "平台日累计 IDX_04_02_010 / 坐席日"
+    entity_date: date_key
+    definition: "事后处理时长：平台给出的该状态日累计秒数（IDX_04_02_010），按坐席日求均值"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_agent_day]
+    version: 1
+    depends_unverified: true   # DD-98: hindex/agent date semantics open (ICP Q36-Q38), as M-R03
+    retrospective: false
+    published: true
+    mart_table: mart.agents__day_agent__state
+    mart_numerator: acw_seconds
+    mart_denominator: agent_days
+    rfp: ""
+    notes: "由 M-R03 拆出（DD-101 注 2026-11-24）。来源为平台历史指标（DD-65），非本方采样：不可下钻到单次状态变化，不可按班次切分，报表须标注来源。源值为空的坐席日不计入分子，仍计入分母"
+  - code: M-R12
+    domain: 资源与勤务
+    name_zh: "休息时长"
+    name_en: "Rest time"
+    name_ar: "مدة الاستراحة"
+    name_ar_state: draft
+    grain: agent_day   # 坐席日
+    aggregation: avg
+    measure: "平台日累计 IDX_04_02_013 / 坐席日"
+    entity_date: date_key
+    definition: "休息时长：平台给出的该状态日累计秒数（IDX_04_02_013），按坐席日求均值"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_agent_day]
+    version: 1
+    depends_unverified: true   # DD-98: hindex/agent date semantics open (ICP Q36-Q38), as M-R03
+    retrospective: false
+    published: true
+    mart_table: mart.agents__day_agent__state
+    mart_numerator: rest_seconds
+    mart_denominator: agent_days
+    rfp: ""
+    notes: "由 M-R03 拆出（DD-101 注 2026-11-24）。来源为平台历史指标（DD-65），非本方采样：不可下钻到单次状态变化，不可按班次切分，报表须标注来源。源值为空的坐席日不计入分子，仍计入分母"
+  - code: M-R13
+    domain: 资源与勤务
+    name_zh: "示忙时长"
+    name_en: "Busy (not ready) time"
+    name_ar: "مدة حالة الانشغال"
+    name_ar_state: draft
+    grain: agent_day   # 坐席日
+    aggregation: avg
+    measure: "平台日累计 IDX_04_02_019 / 坐席日"
+    entity_date: date_key
+    definition: "示忙时长：平台给出的该状态日累计秒数（IDX_04_02_019），按坐席日求均值"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_agent_day]
+    version: 1
+    depends_unverified: true   # DD-98: hindex/agent date semantics open (ICP Q36-Q38), as M-R03
+    retrospective: false
+    published: true
+    mart_table: mart.agents__day_agent__state
+    mart_numerator: busy_seconds
+    mart_denominator: agent_days
+    rfp: ""
+    notes: "由 M-R03 拆出（DD-101 注 2026-11-24）。来源为平台历史指标（DD-65），非本方采样：不可下钻到单次状态变化，不可按班次切分，报表须标注来源。源值为空的坐席日不计入分子，仍计入分母"
+  - code: M-R14
+    domain: 资源与勤务
+    name_zh: "保持时长"
+    name_en: "Hold time"
+    name_ar: "مدة وضع المكالمات قيد الانتظار"
+    name_ar_state: draft
+    grain: agent_day   # 坐席日
+    aggregation: avg
+    measure: "平台日累计 IDX_04_02_016 / 坐席日"
+    entity_date: date_key
+    definition: "保持时长：平台给出的该状态日累计秒数（IDX_04_02_016），按坐席日求均值"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_agent_day]
+    version: 1
+    depends_unverified: true   # DD-98: hindex/agent date semantics open (ICP Q36-Q38), as M-R03
+    retrospective: false
+    published: true
+    mart_table: mart.agents__day_agent__state
+    mart_numerator: hold_seconds
+    mart_denominator: agent_days
+    rfp: ""
+    notes: "由 M-R03 拆出（DD-101 注 2026-11-24）。来源为平台历史指标（DD-65），非本方采样：不可下钻到单次状态变化，不可按班次切分，报表须标注来源。源值为空的坐席日不计入分子，仍计入分母"
+  - code: M-R15
+    domain: 资源与勤务
+    name_zh: "空闲时长"
+    name_en: "Idle (available) time"
+    name_ar: "مدة الجاهزية"
+    name_ar_state: draft
+    grain: agent_day   # 坐席日
+    aggregation: avg
+    measure: "平台日累计 IDX_04_02_022 / 坐席日"
+    entity_date: date_key
+    definition: "空闲时长：平台给出的该状态日累计秒数（IDX_04_02_022），按坐席日求均值"
+    dimensions: [dim_date, dim_site, dim_agent]
+    source_tables: [core.fact_agent_day]
+    version: 1
+    depends_unverified: true   # DD-98: hindex/agent date semantics open (ICP Q36-Q38), as M-R03
+    retrospective: false
+    published: true
+    mart_table: mart.agents__day_agent__state
+    mart_numerator: idle_seconds
+    mart_denominator: agent_days
+    rfp: ""
+    notes: "由 M-R03 拆出（DD-101 注 2026-11-24）。来源为平台历史指标（DD-65），非本方采样：不可下钻到单次状态变化，不可按班次切分，报表须标注来源。源值为空的坐席日不计入分子，仍计入分母"
   - code: M-P01
     domain: 绩效与质量
     name_zh: "个人处理量"

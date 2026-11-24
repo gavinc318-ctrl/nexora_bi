@@ -127,3 +127,39 @@ SELECT b.source_id, b.window_from AS day, count(*) AS batches,
 `agent_duty_reconciles_with_day_totals`（`maintenance_checks` 每晚）：已封账的最近 7 天，每个坐席每天的签入段数对平台的
 `signin_count`，在岗秒数对平台的 `signin_seconds`（差超过 300 秒与 2% 中较大者算不一致；dbt 变量 `agent_duty_reconcile`）。
 差异是平台两个接口之间的，照实报告，不由本方调平。行数增加时发一封 notify；每日汇总「只进汇总」一节列出结果。
+
+## 补丁（DD-101 注 2026-11-24）：M-R01 改为日均，M-R03 拆为六条
+
+- 小时表加一列 `day_count`（每行 1）。M-R01 = `agents_on_duty` 合计 / `day_count` 合计，仍须按小时查：查一天是当天各小时的人数，
+  查一周是各小时的日均人数
+- M-R03 不再发布（留在注册表，既有文档的引用指下面这一组）；拆为 M-R10 通话、M-R11 事后处理、M-R12 休息、M-R13 示忙、
+  M-R14 保持、M-R15 空闲，分子是状态表对应的秒数列，分母 `agent_days`
+- mart 表**加列**的做法：发布时若计算视图多了列，先给 mart 表加上（`mart_add_new_columns`，在 `macros/mart.sql`）。已有的行
+  新列为空——封账版本是当时提供出去的历史，不改写；夜间修正会给最近 7 个已封账日各写一个新版本（重算的行与旧行不同了），
+  更早的日子保持为空。视图少了列则拒绝发布：mart 的列不删（DD-97 第二条）
+
+```bash
+cd ~/src/nexora_bi/infra
+ansible-playbook playbooks/45-contracts.yml -e ansible_connection=local -K
+ansible-playbook playbooks/50-dags.yml      -e ansible_connection=local -K
+af() { sudo -u airflow bash -c "set -a; . /etc/oss911/airflow.env; set +a; /opt/oss911/venv-airflow/bin/airflow $*"; }
+af dags trigger publish_marts_intraday          # 给小时表加上 day_count；等它 success
+ansible-playbook playbooks/46-metrics.yml   -e ansible_connection=local -K
+af dags trigger publish_marts_nightly           # 给已封账的 11-22、11-23 写带 day_count 的修正版本
+```
+
+三个剧本再跑一遍应为 `changed=0`。
+
+| 步骤 | 预期 |
+| --- | --- |
+| 第一次 intraday | 成功；小时表的日志里没有报错，`mart_matches_publication` 全 PASS |
+| 46 | M-R01 `redefined`（上线前口径变更不升版本）；M-R03 `updated`、not_implemented；M-R10 至 M-R15 `inserted`、implemented；其余 unchanged |
+| nightly | 小时表 11-22、11-23 各多一个 close_version 2；另两张表不变 |
+
+```bash
+sudo -u postgres psql -d oss911 -P pager=off -c "
+SELECT date_key, close_version, count(*) AS rows, sum(day_count) AS day_count
+  FROM mart.agents__day_hour__on_duty GROUP BY 1, 2 ORDER BY 1, 2"
+```
+
+第 1 版的 `day_count` 为空，第 2 版为 24，今天的临时行为 24。

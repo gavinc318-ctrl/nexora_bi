@@ -128,6 +128,28 @@
 {%- endmacro %}
 
 
+{#- A column the calc view has gained is added to the mart table before anything else (DD-101 note 2026-11-24:
+    day_count). The rows already there keep NULL in it: closed versions are history as it was served and are not
+    rewritten (DD-81); the nightly correction writes a new version of each of the last 7 closed days, since the
+    recomputed rows now differ, and older days keep NULL. A column the view no longer has is refused: old columns are
+    kept (DD-97 item two), a metric version may still read it. Runs in the model's transaction, before dbt compares
+    the two schemas (on_schema_change fail then finds them equal). -#}
+{% macro mart_add_new_columns(calc) -%}
+{%- if execute and is_incremental() -%}
+    {%- set have = adapter.get_columns_in_relation(this) | map(attribute='name') | list -%}
+    {%- set calc_cols = adapter.get_columns_in_relation(calc) -%}
+    {%- set calc_names = calc_cols | map(attribute='name') | list -%}
+    {%- for name in have if name not in calc_names + ['close_version', 'publication_seq'] -%}
+        {{ exceptions.raise_compiler_error(this ~ " has column " ~ name ~ ", which " ~ calc ~ " no longer computes: "
+           ~ "a mart column is never dropped (DD-97 item two); compute it again, or end it in a new table") }}
+    {%- endfor -%}
+    {%- for c in calc_cols if c.name not in have %}
+alter table {{ this }} add column {{ adapter.quote(c.name) }} {{ c.data_type }};
+    {%- endfor %}
+{%- endif -%}
+{%- endmacro %}
+
+
 {#- Pre-hook: decide the days, compute their rows, drop corrections that change nothing, open the publications,
     delete the provisional rows of the days about to be written. Closing: source_id names the source whose re-sweep
     decides it (mart_final_days); observed, a list of agent sources, closes by observation instead
@@ -143,6 +165,7 @@
 {%- set today = "(now() at time zone '" ~ var('report_timezone') ~ "')::date" -%}
 {%- set table_name = this.schema ~ '.' ~ this.identifier -%}
 {%- set cols = mart_columns(calc) -%}
+{{ mart_add_new_columns(calc) }}
 create temp table mart_closed on commit drop as
 select date_key, max(close_version) as close_version
   from meta.mart_day_publication

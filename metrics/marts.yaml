@@ -97,7 +97,7 @@ tables:
       date: date_key
       site: site_sk
       hour: hour_of_day         # 0–23，利雅得时间
-    required_dimensions: [hour]   # agents_on_duty 是该小时内的去重人数，跨小时相加即重复计数
+    required_dimensions: [hour]   # agents_on_duty 是该小时内的去重人数，跨小时相加即重复计数；跨日由 day_count 作分母得日均（M-R01）
 
   mart.agents__day_agent__state:
     grain: 日 × 站点 × 坐席（平台日累计）
