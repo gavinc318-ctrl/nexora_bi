@@ -20,3 +20,12 @@ models:
   - name: calls__day__repeat_failed
     description: "Day x site: callers with two or more failed inbound calls that day, and those calls (M-C15)."
     data_tests: [mart_matches_publication]
+  - name: agents__day_agent__duty
+    description: "Day x site x agent, from the sign-in intervals cut at midnight: intervals, seconds on duty, open intervals, agent_days (M-R02)."
+    data_tests: [mart_matches_publication]
+  - name: agents__day_hour__on_duty
+    description: "Day x site x hour: different agents on duty and seconds on duty in the hour (M-R01); the count is distinct, not additive over hours."
+    data_tests: [mart_matches_publication]
+  - name: agents__day_agent__state
+    description: "Day x site x agent, the platform's day totals: seconds by state, calls, occupancy numerator and denominator (M-R03, M-R04)."
+    data_tests: [mart_matches_publication]

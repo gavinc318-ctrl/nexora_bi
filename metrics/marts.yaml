@@ -72,3 +72,44 @@ tables:
     dimensions:
       date: date_key
       site: site_sk
+
+  # 坐席 mart（DD-101 第六条）：两张日 × 坐席表与坐席处理表同一规则，小时表只给主管与管理员
+  mart.agents__day_agent__duty:
+    grain: 日 × 站点 × 坐席（签入区间按自然日切开）
+    roles: [call_taker, supervisor, admin]
+    row_filter: self
+    self_column: agent_no
+    dimensions:
+      date: date_key
+      site: site_sk
+      agent: agent_no           # 按工号，跨坐席维度版本；当日没有维度版本覆盖的坐席 agent_key 为 unlinked
+    attributes:
+      agent: [agent_key, agent_name_ar, agent_name_en]
+    sensitive_columns:
+      agent_name_ar: [supervisor, admin]
+      agent_name_en: [supervisor, admin]
+
+  mart.agents__day_hour__on_duty:
+    grain: 日 × 站点 × 小时
+    roles: [supervisor, admin]
+    row_filter: none
+    dimensions:
+      date: date_key
+      site: site_sk
+      hour: hour_of_day         # 0–23，利雅得时间
+    required_dimensions: [hour]   # agents_on_duty 是该小时内的去重人数，跨小时相加即重复计数
+
+  mart.agents__day_agent__state:
+    grain: 日 × 站点 × 坐席（平台日累计）
+    roles: [call_taker, supervisor, admin]
+    row_filter: self
+    self_column: agent_no
+    dimensions:
+      date: date_key
+      site: site_sk
+      agent: agent_no
+    attributes:
+      agent: [agent_key, agent_name_ar, agent_name_en]
+    sensitive_columns:
+      agent_name_ar: [supervisor, admin]
+      agent_name_en: [supervisor, admin]

@@ -2635,3 +2635,57 @@ rootless 起 Prometheus（真规则文件）、Alertmanager（真配置）、假
 **部署后预期多一封 notify 邮件**：首腿测试改为每通一行后，真机的 `failures` 由 1 变 3，`OSS911WarnIncreased` 会响一次。
 
 **下一步**：Gavin 部署第三块（30 → 45 → 50 → 22 → 55 → 56，runbook 21 第三节），含停掉 Alertmanager 的验证；我开工坐席 mart（DD-101）。
+
+## 2026-11-24 开发机：坐席 mart 三张表已实现（DD-101）——跨午夜切开、按观测封账、区间与日累计对账；待真机部署
+
+Gavin 贴来的 `check_result` 与两条常驻 WARN 已对上：坐席 102 的 53 条腿是 10-27、10-28 假接口 `ref remove 102` 留下的；
+3 通缺首腿是 10-19 至 10-21 `inversion` 注入的首腿进了隔离。都不是新问题。
+
+### 内容
+
+- `mart.agents__day_agent__duty`（日 × 站点 × 坐席）：`session_count`、`on_duty_seconds`、`open_session_count`、`agent_days`、
+  `first_signin_at`、`last_signout_at`。M-R02 = `on_duty_seconds / agent_days`
+- `mart.agents__day_hour__on_duty`（日 × 站点 × 小时）：`agents_on_duty`（去重）、`on_duty_seconds`。M-R01 = `agents_on_duty`；
+  marts.yaml `required_dimensions: [hour]`
+- `mart.agents__day_agent__state`（日 × 站点 × 坐席）：七项状态秒数、呼入呼出次数、`agent_days`、`occupied_seconds`、
+  `occupancy_base_seconds`（三个输入都非空才有值）。M-R04 = 后两列相除；M-R03 未映射（需定 ①）
+- 区间切分在 `macros/agent_marts.sql`（按日或按小时，利雅得时间）；未签出的区间算到 `src_confirmed_at`
+- 封账：`mart_plan` 加参数 `observed`，新宏 `mart_observed_days`；话务 mart 不变
+- 新测试 `agent_duty_reconciles_with_day_totals`（WARN，`maintenance_checks` 每晚；dbt 变量 `agent_duty_reconcile`），
+  登记进预期检查清单；每日汇总「只进汇总」一节多一行（接入程序 0.5.1）
+- 读取规则：两张日 × 坐席表 call_taker（本人）· supervisor · admin，姓名两列敏感；小时表 supervisor · admin
+- runbook 22
+
+### 临时库验证
+
+- intraday：三张表建出，publication 测试全过；小时表各日合计与日表只差 6–11 秒（各行四舍五入）
+- nightly：11-19 两源各有一个**待定**隔离批次 → 一天都不封；临时把它们置为丢弃后封了 11-19、11-20、11-21（后两天没有任何批次，
+  接入已越过它们，零行封账）；11-22 不封（签入区间源没有 11-22 之后的批次）。再跑一次 nightly 不写任何东西
+- 修正：把 11-19 一名坐席的 `acw_seconds` 改为空 → 状态表该日出 close_version 2，该坐席两列占用率同为空；另两张表不动
+- 构造三段区间：跨午夜（22:00–次日 02:30 → 7200 + 9000 秒）、未签出跨午夜（算到确认时刻）、签出早于签入（0 秒），结果都对
+- 对账测试：假接口两边差 0–5 秒，PASS；把一天的 `signin_seconds` 加 5000 秒后 WARN 1 行
+- 46 的同步在临时库跑过：M-R01、M-R02、M-R04 updated / implemented，M-R03 not_implemented，三条 `rule_inserted`
+- 全量 `build --select mart`（intraday）与 `fact_call mart`（nightly）全过；接入程序单元测试 138 个通过
+
+### 开发机自定（请 Mac 侧过目）
+
+| # | 自定 | 理由 |
+| --- | --- | --- |
+| 1 | 封账在「D 日批次全进 core 或已丢弃」之外**再要求该源已有 D 日之后的批次进了 core** | 只看 D 日的批次，接入下午停了，当晚就会把只有半天的数据封掉；又不能回补，这样封账至少等到接入恢复 |
+| 2 | 三张表都要**两个源**同时满足才封 | 同一天的坐席报表三张表状态一致；否则在岗已封、状态未封，页面上一半「定稿」一半「临时」 |
+| 3 | `session_count` 只计在签入那天；`open_session_count` 按当天的片段计（跨午夜未签出的区间两天都计） | 前者与平台 `signin_count` 对账；后者标出「这天的在岗时长里有推算到确认时刻的部分」 |
+| 4 | 两张日 × 坐席表**一个工号一天一行**，`agent_key` 与姓名取当日最后一个重叠的维度版本（与日累计关联规则相同） | 按版本分行时，当天改过名的坐席有两行，`agent_days` 会算 2 |
+| 5 | 小时表：有数据的每一天都写满 24 小时，空小时为 0；列名 `hour_of_day`，维度名 `hour` | 图上空小时是 0 而不是缺口；`hour` 是 SQL 关键字 |
+| 6 | 秒数为片段秒数之和四舍五入取整；签出早于签入的区间算 0 秒 | 未签出的区间算到确认时刻，带小数秒；倒置的区间由 `agent_session_duration_differs` 报告，这里不计负数 |
+| 7 | 对账的平台一侧直接读 `core.fact_agent_day`；阈值 max(300 秒, 2%)，近 7 个已封账日 | 状态表按 DD-101 不带 `signin_count`；阈值是首值，与话单对账同样放 dbt 变量 |
+| 8 | 计算视图每次扫描全部签入区间（按区间推出的日期过滤，分区剪不掉）。按 8 年、每天 450 段估算（120 万段），小时表一次约 7 秒 | 每小时一次，可以接受；真变慢时加「区间最长 N 天」的界，届时再定 |
+
+### 需定
+
+| # | 问题 | 建议 |
+| --- | --- | --- |
+| ① | **M-R03 有七个状态，注册表一条指标只能有一个分子**。列都在状态表里，指标暂未映射 | 拆成七条（每个状态一条，分母都是 `agent_days`），编码由 Mac 侧给；或允许 M-R03 带多个分子，那要改注册表与服务层 |
+| ② | **小时表按周、月汇总**：`required_dimensions: [hour]` 只挡住跨小时相加，挡不住按周把七天的人数加起来（「人·天」） | marts.yaml 加一条「只允许按日」的规则（服务层拒绝 week 以上粒度）；或把 M-R01 跨日定义为日均，另设分母 |
+| ③ | 自定 1 的附加条件是否接受 | 接受；它只会推迟、不会多封 |
+
+**下一步**：Gavin 部署坐席 mart（30 → 45 → 50 → intraday → 46 → nightly → 55，runbook 22）；第三块若还没部署，先部署第三块。

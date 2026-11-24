@@ -703,6 +703,8 @@ metrics:
     depends_unverified: false
     retrospective: false
     published: true
+    mart_table: mart.agents__day_hour__on_duty
+    mart_column: agents_on_duty
     rfp: ""
     notes: "签入签出为区间明细（IDX_04_03_001），故可按班次窗口求交（DD-53）。实时在岗人数另取实时接口，仅供看板"
   - code: M-R02
@@ -722,6 +724,9 @@ metrics:
     depends_unverified: true   # 2026-11-16 · DD-98: hindex/agent date semantics open (ICP Q36-Q38)
     retrospective: false
     published: true
+    mart_table: mart.agents__day_agent__duty
+    mart_numerator: on_duty_seconds
+    mart_denominator: agent_days
     rfp: ""
     notes: "由 fact_agent_session 的区间合计得出，与 IDX_04_02_002 对账。可按班次切分，而 M-R03 M-R04 不可"
   - code: M-R03
@@ -760,6 +765,9 @@ metrics:
     depends_unverified: true   # 2026-11-16 · DD-98: hindex/agent date semantics open (ICP Q36-Q38)
     retrospective: false
     published: true
+    mart_table: mart.agents__day_agent__state
+    mart_numerator: occupied_seconds
+    mart_denominator: occupancy_base_seconds
     rfp: ""
     notes: "三个输入均来自平台历史指标（DD-65），本方只做相除。与 M-R03 同样不可按班次切分，维度中已去掉 dim_shift"
   - code: M-R05

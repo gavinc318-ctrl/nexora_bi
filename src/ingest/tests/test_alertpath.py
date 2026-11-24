@@ -201,6 +201,8 @@ class DigestTest(unittest.TestCase):
             'oss911_test_status{node="agent_day_reconciles_with_legs"} == 1':
                 [({"dag_id": "maintenance_checks", "status": "warn"}, 1.0)],
             'oss911_test_failures{node="agent_day_reconciles_with_legs"}': [({"dag_id": "maintenance_checks"}, 2.0)],
+            'oss911_test_status{node="agent_duty_reconciles_with_day_totals"} == 1':
+                [({"dag_id": "maintenance_checks", "status": "pass"}, 1.0)],
             'oss911_expected_check_state{state!~"normal|disabled"} == 1':
                 [({"check": "maintenance_checks", "state": "stale"}, 1.0)],
         }
@@ -208,6 +210,7 @@ class DigestTest(unittest.TestCase):
         self.assertIn("Clarification icp_cdr_voice: 2 open, the oldest 9.5 days  OVER 7 DAYS", body)
         self.assertIn("Removed agents not returned by icp_agent_day: 3", body)
         self.assertIn("Day-total reconciliation (maintenance_checks): warn, 2 agent-day(s) differ", body)
+        self.assertIn("Sign-in interval reconciliation (maintenance_checks): pass", body)
         self.assertIn("  maintenance_checks: stale", body)
 
     def test_no_exporter_data_is_no_good_news(self):

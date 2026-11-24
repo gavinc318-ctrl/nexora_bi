@@ -22,6 +22,13 @@
         correction: each of the last 7 closed days is recomputed and compared with its latest version, row by
         row; a difference writes the whole day again as close_version + 1, the earlier rows stay (item eight).
         Changes further back are not corrected automatically
+      closing of the agent marts (observed=[sources], DD-101 item five): the two agent sources have no date
+        parameter and cannot be re-swept (DD-98), so "final" cannot mean "re-swept". A day is final when, for each
+        source, every observation batch of that day (meta.ingest_batch mode observation, window_from the day) is in
+        core or discarded -- a batch still pending holds it -- and the source has a batch of a later day in core:
+        ingestion has moved past the day, so its last observations are in (a run that stopped at 15:00 does not let
+        the day close at night as if the evening had been seen). Everything else -- closing in date order, the
+        7-day correction window -- is as above
       Each kind written is one meta.data_publication row; each day written is one meta.mart_day_publication row,
       zero rows included (DD-97 review). Every mart row carries close_version and the publication_seq that wrote it.
 
@@ -76,6 +83,43 @@
 {%- endmacro %}
 
 
+{#- The days of days_relation (a CTE with date_key) whose agent observations are final; see the header (closing of
+    the agent marts). sources: the source_ids; each one's core model is fact_<source without icp_>. -#}
+{% macro mart_observed_days(sources, days_relation) -%}
+{%- set core_model = {'icp_agent_session': 'fact_agent_session', 'icp_agent_day': 'fact_agent_day'} -%}
+{%- for sid in sources if sid not in core_model -%}
+    {{ exceptions.raise_compiler_error("mart_observed_days knows the core model of " ~ core_model.keys() | join(', ')
+       ~ ", not of " ~ sid) }}
+{%- endfor -%}
+    select o.date_key
+      from {{ days_relation }} o
+     where true
+    {%- for sid in sources %}
+       -- {{ sid }}: no batch of the day outside core, and a later day's batch in core
+       and not exists (
+           select 1 from meta.ingest_batch b
+            where b.source_id = '{{ sid }}' and b.mode = 'observation'
+              and b.window_from = to_char(to_date(o.date_key::text, 'YYYYMMDD'), 'YYYY-MM-DD')
+              and not {{ mart_batch_done('b', core_model[sid]) }})
+       and exists (
+           select 1 from meta.ingest_batch b
+            where b.source_id = '{{ sid }}' and b.mode = 'observation'
+              and b.window_from > to_char(to_date(o.date_key::text, 'YYYYMMDD'), 'YYYY-MM-DD')
+              and exists (select 1 from meta.staging_batch_state s
+                           where s.model = '{{ core_model[sid] }}' and s.run_id = b.run_id
+                             and s.batch_seq = b.batch_seq))
+    {%- endfor %}
+{%- endmacro %}
+
+{#- A batch b is done for a core model: the model took it, or a person discarded it in quarantine -#}
+{% macro mart_batch_done(b, model) -%}
+(exists (select 1 from meta.staging_batch_state s
+          where s.model = '{{ model }}' and s.run_id = {{ b }}.run_id and s.batch_seq = {{ b }}.batch_seq)
+ or exists (select 1 from meta.quarantine_batch q
+             where q.run_id = {{ b }}.run_id and q.batch_seq = {{ b }}.batch_seq and q.state = 'discarded'))
+{%- endmacro %}
+
+
 {#- The calc view's columns, in order (the mart table is these plus close_version and publication_seq) -#}
 {% macro mart_columns(calc) -%}
     {%- if execute -%}
@@ -85,8 +129,13 @@
 
 
 {#- Pre-hook: decide the days, compute their rows, drop corrections that change nothing, open the publications,
-    delete the provisional rows of the days about to be written. -#}
-{% macro mart_plan(calc, source_id) -%}
+    delete the provisional rows of the days about to be written. Closing: source_id names the source whose re-sweep
+    decides it (mart_final_days); observed, a list of agent sources, closes by observation instead
+    (mart_observed_days). -#}
+{% macro mart_plan(calc, source_id=none, observed=none) -%}
+{%- if execute and (source_id is none) == (observed is none) -%}
+    {{ exceptions.raise_compiler_error("mart_plan needs either source_id (re-sweep) or observed (agent sources)") }}
+{%- endif -%}
 {%- set kind = var('mart_kind', none) -%}
 {%- if execute and kind not in ('intraday', 'nightly') -%}
     {{ exceptions.raise_compiler_error("mart models need var mart_kind: intraday or nightly (got " ~ kind ~ ")") }}
@@ -119,7 +168,8 @@ select date_key, 'intraday', 0
   from open_days
  where date_key >= to_char({{ today }} - 6, 'YYYYMMDD')::integer;
 {%- else %},
-final as ({{ mart_final_days(source_id, 'open_days') }}),
+final as ({{ mart_observed_days(observed, 'open_days') if observed is not none
+               else mart_final_days(source_id, 'open_days') }}),
 blocked as (
     select min(o.date_key) as date_key from open_days o
      where o.date_key not in (select * from final)

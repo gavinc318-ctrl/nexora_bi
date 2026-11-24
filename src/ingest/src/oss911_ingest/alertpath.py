@@ -45,6 +45,10 @@ TASKS = ("heartbeat_check", "digest")
 HIDDEN_LABELS = {"__name__", "alertname", "alertstate", "severity", "job", "instance", "env", "site", "prometheus"}
 STEP = 60                       # seconds between the points of the day's range queries
 WARN_LOOKBACK_DAYS = 14         # how far back "unchanged since" looks (Prometheus keeps 15 days on development)
+# The reconciliations with the platform, WARN tests each listed in the digest's daily-only part (a difference is a
+# question to the platform, not an incident): the dbt test and how the digest names it
+RECONCILIATIONS = (("agent_day_reconciles_with_legs", "Day-total reconciliation"),
+                   ("agent_duty_reconciles_with_day_totals", "Sign-in interval reconciliation"))
 
 
 def utcnow() -> datetime:
@@ -310,12 +314,13 @@ class Digest:
         removed = self.prom.query('oss911_agents_not_returned{roster="removed"} > 0', self.end)
         out += [f"  Removed agents not returned by {l.get('source_id')}: {fmt_num(v)}" for l, v in removed] or \
                (["  Removed agents not returned: none"] if self.served("agents") else [self.no_data("agents")])
-        rec = self.prom.query('oss911_test_status{node="agent_day_reconciles_with_legs"} == 1', self.end)
-        fails = {l.get("dag_id"): v for l, v in
-                 self.prom.query('oss911_test_failures{node="agent_day_reconciles_with_legs"}', self.end)}
-        out += [f"  Day-total reconciliation ({l.get('dag_id')}): {l.get('status')}"
-                + (f", {fmt_num(fails[l.get('dag_id')])} agent-day(s) differ" if fails.get(l.get("dag_id")) else "")
-                for l, _ in rec] or ["  Day-total reconciliation: no result"]
+        for node, what in RECONCILIATIONS:
+            rec = self.prom.query(f'oss911_test_status{{node="{node}"}} == 1', self.end)
+            fails = {l.get("dag_id"): v for l, v in
+                     self.prom.query(f'oss911_test_failures{{node="{node}"}}', self.end)}
+            out += [f"  {what} ({l.get('dag_id')}): {l.get('status')}"
+                    + (f", {fmt_num(fails[l.get('dag_id')])} agent-day(s) differ" if fails.get(l.get("dag_id")) else "")
+                    for l, _ in rec] or [f"  {what}: no result"]
         return out
 
     def checks(self) -> list[str]:

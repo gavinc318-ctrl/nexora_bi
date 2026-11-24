@@ -72,3 +72,5 @@ expected_checks:
      node: agent_day_columns_match_contract, period_minutes: 1440, allowed_delay_minutes: 180}
   - {id: nightly/agent_day_reconciles_with_legs, kind: check, dag_id: maintenance_checks,
      node: agent_day_reconciles_with_legs, period_minutes: 1440, allowed_delay_minutes: 180}
+  - {id: nightly/agent_duty_reconciles_with_day_totals, kind: check, dag_id: maintenance_checks,
+     node: agent_duty_reconciles_with_day_totals, period_minutes: 1440, allowed_delay_minutes: 180}

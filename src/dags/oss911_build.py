@@ -16,7 +16,9 @@ Like the ingestion DAGs, generated from the DAG manifest /opt/oss911/release/dag
                            batches_reach_core: CDR batches older than a day that never reached core.fact_call_leg; and
                            mart_closing_not_behind: a mart table whose last closed day is more than 3 days back
                            (both ERROR); agent_day_totals_decrease over every day; agent_day_reconciles_with_legs
-                           (WARN, DD-100): day totals against the call records on the closed days of the last week
+                           (WARN, DD-100): day totals against the call records on the closed days of the last week;
+                           agent_duty_reconciles_with_day_totals (WARN, DD-101): sign-in intervals against the
+                           platform's signed-in time and sign-in count, same days
   publish_marts_intraday   hourly: the days not closed yet, as provisional rows (close_version 0), and their tests
   publish_marts_nightly    daily: fact_call brought up to date with the legs, then the days whose re-sweep has reached
                            core (every source day from the source's first re-sweep day on, var resweep_from) are
@@ -138,5 +140,5 @@ with DAG(dag_id="maintenance_checks", description="Call-level consistency tests 
          default_args=NO_RETRY_ARGS, tags=["maintenance"]) as maintenance_checks:
     _task("full_checks", "test --select fact_call_recomputes_from_legs fact_call_for_every_call batches_reach_core "
                          "mart_closing_not_behind agent_day_columns_match_contract agent_day_totals_decrease "
-                         "agent_day_reconciles_with_legs "
+                         "agent_day_reconciles_with_legs agent_duty_reconciles_with_day_totals "
                          "--vars '{full_check: true}'")

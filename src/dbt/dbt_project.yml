@@ -45,6 +45,10 @@ vars:
   # agent_day_reconciles_with_legs (DD-100 item five, review note item two): a day differs when its inbound calls and
   # the agent's answered legs differ by more than max(min_calls, ratio x legs); over the closed days of the last N days
   agent_reconcile: {min_calls: 2, ratio: 0.02, days: 7}
+  # agent_duty_reconciles_with_day_totals (DD-101 item seven): a day differs when its sign-in counts differ or its
+  # interval total and the platform's signed-in time differ by more than max(min_seconds, ratio x signed-in time);
+  # over the duty mart's closed days of the last N days. First values, like agent_reconcile
+  agent_duty_reconcile: {min_seconds: 300, ratio: 0.02, days: 7}
 
 models:
   oss911:
