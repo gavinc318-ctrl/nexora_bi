@@ -1,4 +1,5 @@
-# 22-containers -- containerised components: Keycloak, SeaweedFS, Prometheus (with the alert rules, DD-100)
+# 22-containers -- containerised components: Keycloak, SeaweedFS, Prometheus (with the alert rules, DD-100) and
+# Alertmanager (DD-100 block three)
 #
 # Three supporting components, all managed as Quadlet (systemd units) -- not podman run, and not the
 # deprecated podman generate systemd. Start at boot, dependency order and restart policy are left to
@@ -11,7 +12,8 @@
 #   After changing a digest in inventory, rerun this playbook and expect a change (troubleshooting entry 28).
 #
 # * Verification always checks behaviour: Keycloak -- whether its database really has tables (proving it
-#   is not the embedded H2); SeaweedFS -- a write/read round trip; Prometheus -- its own "up" metric.
+#   is not the embedded H2); SeaweedFS -- a write/read round trip; Prometheus -- its own "up" metric;
+#   Alertmanager -- Prometheus has found it. Delivery to people is 56-alerting's to verify.
 #   "The container is running" is too easy to satisfy and proves nothing.
 
 - name: Containerised components
@@ -82,6 +84,7 @@
             _kc_image: "{{ 'quay.io/keycloak/keycloak@' ~ container_images.keycloak.digest if container_images.keycloak.digest | length > 0 else container_images.keycloak.ref }}"
             _sw_image: "{{ 'docker.io/chrislusf/seaweedfs@' ~ container_images.seaweedfs.digest if container_images.seaweedfs.digest | length > 0 else container_images.seaweedfs.ref }}"
             _pr_image: "{{ 'docker.io/prom/prometheus@' ~ container_images.prometheus.digest if container_images.prometheus.digest | length > 0 else container_images.prometheus.ref }}"
+            _am_image: "{{ 'docker.io/prom/alertmanager@' ~ container_images.alertmanager.digest if container_images.alertmanager.digest | length > 0 else container_images.alertmanager.ref }}"
 
         # ---------- Keycloak database and account ----------
         - name: Query whether the Keycloak database user exists
@@ -234,6 +237,55 @@
             mode: "0644"
           register: _promrules
 
+        # ---------- Alertmanager configuration (DD-100 block three): checked with the image's own amtool ----------
+        # Same pattern as the rules: a configuration Alertmanager refuses would leave it down, and every alert with it
+        - name: Create the Alertmanager configuration directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+          loop:
+            - "{{ oss911_etc }}/alertmanager"
+            - "{{ oss911_etc }}/alertmanager-candidate"
+
+        - name: Write the candidate Alertmanager configuration
+          ansible.builtin.template:
+            src: ../files/alertmanager/alertmanager.yml.j2
+            dest: "{{ oss911_etc }}/alertmanager-candidate/alertmanager.yml"
+            owner: root
+            group: root
+            mode: "0644"
+
+        - name: Check the candidate configuration with amtool
+          ansible.builtin.command:
+            cmd: >-
+              podman run --rm --network none --entrypoint /bin/amtool
+              -v {{ oss911_etc }}/alertmanager-candidate:/c:ro,Z {{ _am_image }}
+              check-config /c/alertmanager.yml
+          register: _amtool
+          changed_when: false
+          failed_when: false
+
+        - name: Assert the Alertmanager configuration is valid
+          ansible.builtin.assert:
+            that: ["_amtool.rc == 0"]
+            fail_msg: >-
+              amtool refused the Alertmanager configuration (infra/files/alertmanager/alertmanager.yml.j2); nothing was
+              deployed. Output: {{ (_amtool.stdout ~ ' ' ~ _amtool.stderr) | trim }}
+            success_msg: "amtool: the Alertmanager configuration is valid"
+
+        - name: Deploy the Alertmanager configuration
+          ansible.builtin.copy:
+            src: "{{ oss911_etc }}/alertmanager-candidate/alertmanager.yml"
+            remote_src: true
+            dest: "{{ oss911_etc }}/alertmanager/alertmanager.yml"
+            owner: root
+            group: root
+            mode: "0644"
+          register: _amcfg
+
         # ---------- Quadlet units ----------
         - name: Deploy the Quadlet units
           ansible.builtin.template:
@@ -242,7 +294,7 @@
             owner: root
             group: root
             mode: "0644"
-          loop: [keycloak, seaweedfs, prometheus]
+          loop: [keycloak, seaweedfs, prometheus, alertmanager]
           register: _quadlets
 
         - name: Reload systemd
@@ -250,15 +302,18 @@
             daemon_reload: true
           when: _quadlets.changed
 
-        - name: Start the three components
+        - name: Start the four components
           ansible.builtin.systemd_service:
             name: "{{ item }}.service"
-            # A changed env file (e.g. a rotated database password) restarts Keycloak only
+            # A changed env file (e.g. a rotated database password) restarts Keycloak only; a changed configuration
+            # restarts its own component only
             state: >-
-              {{ 'restarted' if (_quadlets.changed or _promcfg.changed
+              {{ 'restarted' if (_quadlets.results | selectattr('item', 'equalto', item) | map(attribute='changed')
+                                 | first
                                  or (item == 'keycloak' and _kcenv_w.changed)
-                                 or (item == 'prometheus' and _promrules.changed)) else 'started' }}
-          loop: [keycloak, seaweedfs, prometheus]
+                                 or (item == 'prometheus' and (_promcfg.changed or _promrules.changed))
+                                 or (item == 'alertmanager' and _amcfg.changed)) else 'started' }}
+          loop: [keycloak, seaweedfs, prometheus, alertmanager]
 
         # ---------- Verification: check behaviour, not "is running" ----------
         - name: Wait for Keycloak to be ready
@@ -396,3 +451,38 @@
               Alert rules loaded: {{ _promloaded.json.data.groups | map(attribute='rules') | map('length') | sum }}
               rules in 5 groups. Exporter target: see http://127.0.0.1:{{ prometheus_port }}/targets
               (job oss911_monitor is down until 55-monitor has run)
+
+        # ---------- Alertmanager: ready, and found by Prometheus ----------
+        - name: Wait for Alertmanager to be ready
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ alertmanager_port }}/-/ready"
+          register: _amready
+          retries: 20
+          delay: 3
+          until: _amready.status | default(0) == 200
+          failed_when: false
+
+        - name: Query the Alertmanagers Prometheus sends to
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ prometheus_port }}/api/v1/alertmanagers"
+            return_content: true
+          register: _promam
+          retries: 20
+          delay: 3
+          until: (_promam.json.data.activeAlertmanagers | default([]) | length) > 0
+          failed_when: false
+
+        - name: Assert Alertmanager runs and Prometheus sends to it
+          ansible.builtin.assert:
+            that:
+              - _amready.status | default(0) == 200
+              - (_promam.json.data.activeAlertmanagers | default([]) | length) > 0
+            fail_msg: >-
+              Alertmanager /-/ready answered {{ _amready.status | default('nothing') }}; Prometheus's active
+              Alertmanagers: {{ _promam.json.data.activeAlertmanagers | default([]) }}, dropped:
+              {{ _promam.json.data.droppedAlertmanagers | default([]) }}. Look at journalctl -u alertmanager -n 40; an
+              empty active list with Alertmanager ready means Prometheus cannot resolve the name alertmanager on the
+              internal network.
+            success_msg: >-
+              Alertmanager ready; Prometheus sends to {{ _promam.json.data.activeAlertmanagers | map(attribute='url')
+              | join(', ') }}. Delivery to the gateway: 56-alerting.yml

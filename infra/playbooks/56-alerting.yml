@@ -1,0 +1,286 @@
+# 56-alerting -- the alert path's delivery side and timed jobs (DD-100 block three)
+#
+# Basis: DD-100 and its review note (2026-11-22), items three to five · LD-01 10.2
+# Prerequisites: 30-python (venv-ingest 0.5.0: the entry point oss911-alertpath) · 22-containers (Alertmanager, and
+#                Prometheus sending to it) · 55-monitor (/etc/oss911/monitoring.yml: the report time zone; the exporter
+#                serving the timed jobs' state)
+#
+# * The delivery side. Production: the delivery service (LD-01 10.2, not built yet); this playbook then only writes the
+#   timed jobs' settings. Development (fake_gateway.enabled): the fake gateway of test/fake_gateway, as its own account
+#   oss911gw on the host's address on the container network, where Alertmanager's webhook reaches it. It sends nothing
+#   and writes what it would send, per recipient and channel, to /var/lib/oss911gw/outbox.jsonl. Recipients:
+#   inventory alert_recipients, as /etc/oss911/alert-recipients.json (read again at every message: no restart).
+# * Two timed jobs, as the exporter's account oss911mon (oss911-alertpath, settings in /etc/oss911/alertpath.conf):
+#   oss911-heartbeat-check.timer every minute -- the heartbeat alert must keep arriving at the delivery side, or level
+#   page is told directly, not through Alertmanager; oss911-digest.timer daily at digest_time -- the previous day.
+#   Each writes a state file under /var/lib/oss911mon/alertpath that the exporter serves and rules watch.
+# * Verification end to end: the heartbeat has arrived at the delivery side; with the fake gateway, a test alert
+#   posted to Alertmanager comes out in the outbox for the recipients of its level; the digest can be built.
+# * Single node: the whole machine down is noticed by no one -- known limitation of the development machine (runbook 21,
+#   section three), removed in production by two nodes checking each other's heartbeat.
+
+- name: Alert path
+  hosts: all
+  gather_facts: false   # no facts used (same reasoning as 40-schema.yml)
+  become: true
+
+  vars:
+    oss911_etc: /etc/oss911
+    repo_root: "{{ playbook_dir }}/../.."
+    ingest_venv: "{{ venv_root }}/venv-ingest"
+    state_dir: /var/lib/oss911mon/alertpath
+    gw_dir: "{{ venv_root }}/fake-gateway"
+
+  tasks:
+
+    # ========== Preconditions ==========
+    - name: Query the timed jobs' program, the monitoring configuration and Alertmanager
+      ansible.builtin.shell:
+        cmd: |
+          {{ ingest_venv }}/bin/oss911-alertpath --version 2>&1 || echo "no-alertpath"
+          test -f {{ oss911_etc }}/monitoring.yml && echo "config-ok" || echo "no-config"
+          echo "alertmanager-$(systemctl is-active alertmanager)"
+      register: _pre
+      changed_when: false
+      check_mode: false
+
+    - name: Assert the prerequisites are deployed
+      ansible.builtin.assert:
+        that:
+          - "'no-alertpath' not in _pre.stdout"
+          - "'config-ok' in _pre.stdout_lines"
+          - "'alertmanager-active' in _pre.stdout_lines"
+        fail_msg: >-
+          {{ _pre.stdout_lines | join(' | ') }}. oss911-alertpath comes with oss911-ingest 0.5.0 (30-python.yml),
+          monitoring.yml with 55-monitor.yml, Alertmanager with 22-containers.yml.
+        success_msg: "{{ _pre.stdout_lines | join(', ') }}"
+
+    # ========== The delivery side: the fake gateway (development only) ==========
+    - name: Fake delivery gateway
+      when: fake_gateway.enabled | bool
+      block:
+        - name: Create the fake gateway's system account
+          ansible.builtin.user:
+            name: oss911gw
+            system: true
+            shell: /usr/sbin/nologin
+            home: /var/lib/oss911gw
+            create_home: false
+
+        - name: Create the fake gateway's program directory
+          ansible.builtin.file:
+            path: "{{ gw_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Install the fake gateway (test/fake_gateway/server.py)
+          ansible.builtin.copy:
+            src: "{{ repo_root }}/test/fake_gateway/server.py"
+            dest: "{{ gw_dir }}/server.py"
+            owner: root
+            group: root
+            mode: "0644"
+          register: _gwcode
+
+        # Names and addresses of people: readable by the gateway only
+        - name: Write the recipients configuration
+          ansible.builtin.copy:
+            dest: "{{ oss911_etc }}/alert-recipients.json"
+            content: "{{ alert_recipients | to_nice_json(indent=2) }}\n"
+            owner: root
+            group: oss911gw
+            mode: "0640"
+
+        - name: Deploy the fake gateway's unit
+          ansible.builtin.template:
+            src: ../files/systemd/oss911-fake-gateway.service.j2
+            dest: /etc/systemd/system/oss911-fake-gateway.service
+            owner: root
+            group: root
+            mode: "0644"
+          register: _gwunit
+
+        - name: Reload systemd
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+          when: _gwunit.changed
+
+        - name: Enable and (re)start the fake gateway
+          ansible.builtin.systemd_service:
+            name: oss911-fake-gateway
+            enabled: true
+            state: "{{ 'restarted' if _gwcode.changed or _gwunit.changed else 'started' }}"
+
+        - name: Wait for the fake gateway to answer
+          ansible.builtin.uri:
+            url: "{{ alert_gateway_url }}/healthz"
+          register: _gwhealth
+          retries: 10
+          delay: 2
+          until: _gwhealth.status | default(0) == 200
+
+    # ========== The timed jobs ==========
+    - name: Write the timed jobs' settings (non-secret)
+      ansible.builtin.copy:
+        dest: "{{ oss911_etc }}/alertpath.conf"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Managed by infra/playbooks/56-alerting.yml, do not edit by hand. Settings of oss911-alertpath: the heartbeat
+          # check and the daily digest (src/ingest/src/oss911_ingest/alertpath.py). Nothing secret.
+          ALERT_GATEWAY_URL={{ alert_gateway_url }}
+          PROMETHEUS_URL=http://127.0.0.1:{{ prometheus_port }}
+          ALERTPATH_STATE_DIR={{ state_dir }}
+          MONITOR_CONFIG={{ oss911_etc }}/monitoring.yml
+          NODE_NAME={{ inventory_hostname }}
+          HEARTBEAT_SOURCE={{ heartbeat_source }}
+          HEARTBEAT_MAX_AGE_SECONDS={{ heartbeat_max_age_seconds }}
+          HEARTBEAT_RENOTIFY_SECONDS={{ heartbeat_renotify_seconds }}
+
+    - name: Create the state directory
+      ansible.builtin.file:
+        path: "{{ state_dir }}"
+        state: directory
+        owner: oss911mon
+        group: oss911mon
+        mode: "0755"
+
+    # The digest runs once a day: without a state its absence could not be told from "not due yet". Its first state
+    # is the installation, so OSS911DigestMissing counts from here; never overwritten (force: false)
+    - name: Give the digest its first state
+      ansible.builtin.copy:
+        dest: "{{ state_dir }}/digest.json"
+        force: false
+        owner: oss911mon
+        group: oss911mon
+        mode: "0644"
+        content: >-
+          {{ {'task': 'digest', 'last_run': now(utc=true).strftime('%Y-%m-%dT%H:%M:%S+00:00'), 'ok': 1,
+              'installed': true, 'last_day': none} | to_json }}
+
+    - name: Deploy the timed jobs' units
+      ansible.builtin.template:
+        src: "../files/systemd/{{ item }}.j2"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - oss911-heartbeat-check.service
+        - oss911-heartbeat-check.timer
+        - oss911-digest.service
+        - oss911-digest.timer
+      register: _units
+
+    - name: Reload systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: _units.changed
+
+    - name: Enable and start the timers
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        state: "{{ 'restarted' if _units.changed else 'started' }}"
+      loop: [oss911-heartbeat-check.timer, oss911-digest.timer]
+
+    # ========== Verification ==========
+    - name: One heartbeat check as oss911mon
+      ansible.builtin.command:
+        cmd: "{{ ingest_venv }}/bin/oss911-alertpath heartbeat-check"
+      become_user: oss911mon
+      register: _hbonce
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Assert the heartbeat check runs
+      ansible.builtin.assert:
+        that: ["_hbonce.rc == 0"]
+        fail_msg: "oss911-alertpath heartbeat-check exited {{ _hbonce.rc }}: {{ (_hbonce.stdout ~ ' ' ~ _hbonce.stderr) | trim }}"
+        success_msg: "The heartbeat check runs as oss911mon"
+
+    # Prometheus evaluates every 15 s and Alertmanager sends the heartbeat every minute
+    - name: Wait for the heartbeat at the delivery side
+      ansible.builtin.uri:
+        url: "{{ alert_gateway_url }}/heartbeat?source={{ heartbeat_source | urlencode }}"
+        return_content: true
+      register: _hb
+      retries: 18
+      delay: 10
+      until: (_hb.json.last_received | default(none)) is not none
+      failed_when: false
+
+    - name: Assert the heartbeat arrives
+      ansible.builtin.assert:
+        that: ["(_hb.json.last_received | default(none)) is not none"]
+        fail_msg: >-
+          No heartbeat from {{ heartbeat_source }} at {{ alert_gateway_url }} after 3 minutes ({{ _hb.json | default(_hb.msg | default('')) }}).
+          The path is Prometheus (rule OSS911Heartbeat) -> Alertmanager (receiver heartbeat) -> the delivery side.
+          Look at: curl -s 127.0.0.1:{{ alertmanager_port }}/api/v2/alerts, journalctl -u alertmanager -n 40
+          (webhook errors), journalctl -u oss911-fake-gateway -n 20.
+        success_msg: "Heartbeat from {{ heartbeat_source }} last arrived at {{ _hb.json.last_received }}"
+
+    # A test alert through Alertmanager to the recipients of its level: only with the fake gateway, which sends nothing.
+    # It ends by itself after two minutes (its resolved message follows in the outbox)
+    - name: Delivery test through Alertmanager
+      when: fake_gateway.enabled | bool
+      block:
+        - name: Name the test alert
+          ansible.builtin.set_fact:
+            _marker: "deploy-{{ now(utc=true).strftime('%Y%m%dT%H%M%S') }}"
+
+        - name: Post a test alert to Alertmanager
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ alertmanager_port }}/api/v2/alerts"
+            method: POST
+            body_format: json
+            body:
+              - labels: {alertname: OSS911DeliveryTest, severity: notify, prometheus: "{{ inventory_hostname }}",
+                         check: "{{ _marker }}"}
+                annotations: {summary: "Delivery test of 56-alerting.yml"}
+                # now() is naive local time, which timestamp() reads correctly; now(utc=true) is naive UTC and would
+                # be read as local time -- three hours early here
+                endsAt: "{{ '%Y-%m-%dT%H:%M:%SZ' | strftime((now().timestamp() + 120) | int, utc=true) }}"
+            status_code: 200
+          changed_when: false
+
+        - name: Wait for it in the outbox
+          ansible.builtin.command:
+            cmd: grep -c -- "{{ _marker }}" /var/lib/oss911gw/outbox.jsonl
+          register: _outbox
+          retries: 12
+          delay: 10
+          until: _outbox.stdout | default('0') | int > 0
+          changed_when: false
+          failed_when: false
+          check_mode: false
+
+        - name: Assert the test alert was delivered to its recipients
+          ansible.builtin.assert:
+            that: ["_outbox.stdout | default('0') | int > 0"]
+            fail_msg: >-
+              The test alert {{ _marker }} did not reach /var/lib/oss911gw/outbox.jsonl in two minutes. Look at
+              journalctl -u alertmanager -n 40 (webhook to {{ alert_gateway_url }}) and journalctl -u oss911-fake-gateway.
+              If received.jsonl has it and outbox.jsonl does not, no recipient takes level notify (alert_recipients).
+            success_msg: "Test alert delivered: {{ _outbox.stdout }} outbox line(s) for level notify"
+
+    - name: Build the digest of yesterday (printed, not sent)
+      ansible.builtin.command:
+        cmd: "{{ ingest_venv }}/bin/oss911-alertpath digest --print"
+      become_user: oss911mon
+      register: _digest
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Assert the digest can be built
+      ansible.builtin.assert:
+        that: ["_digest.rc == 0", "'INCOMPLETE' not in _digest.stdout"]
+        fail_msg: "oss911-alertpath digest --print: {{ (_digest.stdout ~ ' ' ~ _digest.stderr) | trim }}"
+        success_msg: >-
+          {{ _digest.stdout_lines | first }}. Next digest: {{ digest_time }} {{ system_timezone }}
+          (systemctl list-timers 'oss911-*')

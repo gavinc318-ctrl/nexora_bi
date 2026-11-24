@@ -2573,3 +2573,65 @@ Gavin 已部署 19c326d（40 → 30 → 45 → 50，17:02 重启假接口）。�
 
 **下一步**：Gavin 部署第二块（21 → 40 → 30 → 45 → 50 → 22 → 55 → 60，runbook 21 第二节）；我开工第三块
 （Alertmanager、假网关、心跳定时检查、每日汇总）。
+
+## 2026-11-24 开发机：监控通道第三块已实现（DD-100）——Alertmanager、假网关、心跳检查、每日汇总；待真机部署
+
+第二块真机未部署前，Gavin 贴来 `meta.check_result`：落库正常，`maintenance_checks` 04:30 一次 7 项全过（11-15 缺口清掉后封账已追上）。
+两条常驻 WARN 查明为老数据：坐席 102 删除后的 53 条腿（10-27、10-28，见 10-28 节）；3 通缺首腿（10-19 至 10-21，首腿一个多月未到，
+不会自愈）。由此发现 `fact_call_leg_without_first_leg` 只返回一行汇总，`failures` 恒为 1，「WARN 增加」对它永远不响——本块改为每通一行。
+
+### 内容
+
+- **Alertmanager** v0.34.2（容器，digest 钉死，单实例、关闭集群通信）；配置 `infra/files/alertmanager/alertmanager.yml.j2`，
+  22 部署前用镜像自带 amtool 检查。按级别三路：heartbeat 每分钟、page 重发 4 小时、notify 24 小时；同名告警合成一条
+- Prometheus：`alerting` 指向 `alertmanager:9093`，采集 Alertmanager，外部标签加 `prometheus`（心跳按它区分来源）
+- **假网关** `test/fake_gateway/server.py`（标准库，系统 python3，账号 oss911gw，56 部署为 `oss911-fake-gateway.service`）：
+  接口 `/alertmanager`、`/direct`、`/heartbeat`；不发送，按收件人与渠道写 `outbox.jsonl`，原始消息写 `received.jsonl`
+- **收件人配置**：inventory `alert_recipients` → `/etc/oss911/alert-recipients.json`（级别、渠道、夜间不发短信），开发机只有占位
+- **`oss911-alertpath`**（接入程序包第三入口，0.5.0）：`heartbeat-check`（每分钟）与 `digest`（每日 08:00），各写状态文件，
+  导出程序导出为 `oss911_alertpath_*`；规则 5 条（停跑、无状态、连不上投递端为 page；汇总缺失或失败为 notify），规则共 27 条
+- **剧本 56-alerting**（新）：假网关、`alertpath.conf`、两个定时器；验证心跳到达、经 Alertmanager 的测试告警进 outbox、汇总可生成
+- 需定 ①（封账 3 天写两处）：测试改读 dbt 变量 `closing_lag_days`，55 部署时核对它与监控配置的同名阈值，不等即拒绝
+- `compliance/components.csv` 与 MANIFEST 登记 Alertmanager；runbook 21 第三节
+
+### 临时库验证
+
+rootless 起 Prometheus（真规则文件）、Alertmanager（真配置）、假网关，加 0.5.0 导出程序连临时库：
+- 心跳约 1 分钟后到达假网关；测试告警经 Alertmanager 进 outbox（notify，只邮件）
+- **停掉 Alertmanager**（08:44:14）：检查任务每 30 秒跑一次，08:48:47 发出 `path_failure`（page，邮件加短信）一次，之后不重复；
+  重启后下一次检查发 `path_recovered`，积压告警随即补发
+- 按「告警加位置」分组时一次补发了 20 条短信（5 张表封账落后、6 项检查从未运行、4 个源停滞）；改为按告警名分组后为 5 条
+- 汇总：临时库数据旧，16 条 page 告警逐条列出时段与「仍在响」；待澄清最老 25.8 天标出超 7 天；覆盖率 1.4% 并注明「无法担保」。
+  发现导出程序无数据时汇总写「All normal」「no open item」——已改：各节先确认导出程序对应查询当时无错，否则写 NO DATA
+- 单元测试：接入程序 138 个（新增 15 个汇总与心跳、1 个状态指标、1 个封账阈值核对）；假网关 4 个；promtool 27 条规则、7 组测试
+- dbt：两项改动的测试在临时库编译运行；首腿测试每通一行
+
+### 开发机自定（请 Mac 侧过目）
+
+| # | 自定 | 理由 |
+| --- | --- | --- |
+| 1 | Alertmanager **只按级别路由**，一个 webhook；谁收、哪个渠道、夜间是否发短信由**投递端**按收件人配置决定 | 收件人属投递服务（LD-01 10.2）；Alertmanager 里按人建 receiver，改人要重启它，生产投递服务接手时还得拆 |
+| 2 | **同名告警合成一条**（`group_by: [alertname]`），标题写第一处并注明「另有几处」 | 演练里一次补发 20 条短信 |
+| 3 | 投递端接口定为三个：`POST /alertmanager`（webhook v4）、`POST /direct`（`kind level source subject body`）、`GET /heartbeat?source=` | 假网关与将来的投递服务同一接口，上游不改；见需定 ① |
+| 4 | 心跳检查与每日汇总作为接入程序包**第三入口** `oss911-alertpath`，以 oss911mon 身份由 systemd 定时器运行；不用 Airflow | 心跳检查要在 Airflow 停摆时照样跑；汇总与导出程序同属监控 |
+| 5 | 心跳超过 **300 秒**未到即判断链路断，page 直发；持续时**每 4 小时**再发，恢复时发一次；数值在 inventory | 每分钟一次心跳，5 分钟容得下 Alertmanager 重启与一次投递重试 |
+| 6 | 检查任务与汇总**写状态文件，由导出程序导出、规则盯住**；状态文件缺失 15 分钟也报（absent） | 「检查者」自己停了也要有人知道：链路盯检查者，检查者盯链路 |
+| 7 | **汇总只读 Prometheus**，不连库；所以不新增授权，权限验证仍 222 项 | Prometheus 有当天每分钟的告警与指标（留存 15 天），一个来源 |
+| 8 | 汇总五节：告警（含已恢复、时段、分钟数）、WARN（变化的列前后值，不变的一行写自何时未变，回看 14 天）、只进汇总的三项、日终不正常的预期检查、覆盖率；任一节读不到则标 INCOMPLETE；无数据写 NO DATA；同一天只发一次 | 评审第四条「含已恢复的问题」；「没有消息不等于没有问题」 |
+| 9 | 汇总的首个状态在安装时写入，`OSS911DigestMissing` 从安装算起（26 小时） | 否则装好到次日 08:00 之间无法区分「未到时间」与「没跑」 |
+| 10 | 告警与汇总的文字用**英文**（交付代码的规则） | 见需定 ③ |
+| 11 | 56 在开发机上经 Alertmanager API 发一条测试告警（2 分钟后自动结束），确认进了 outbox；生产不发 | 「告警可送达」要有实测，不只看进程在跑 |
+| 12 | 22 的重启改为**各组件只因自己的变化重启**（原来任一 Quadlet 变化就三个全重启） | 加 Alertmanager 时不该连带重启 Keycloak |
+
+### 需定
+
+| # | 问题 | 建议 |
+| --- | --- | --- |
+| ① | **统一投递服务的接口**：以假网关的三个接口为准吗？收件人配置归投递服务管（M-?），还是继续由部署剧本写文件？ | 接口照假网关；收件人将来进 M- 管理界面，现在由 inventory 写 |
+| ② | **夜间短信**：默认 22:00–07:00 不发短信，page 级也不发（`sms_at_night: false`）。运维方未确认前，夜间 page 只有邮件 | 运维方确认值班安排后改 inventory |
+| ③ | **告警与汇总的语言**：现为英文。是否需要阿拉伯文或中英双语？ | 先英文；若要阿拉伯文，在投递端做模板，不改规则 |
+| ④ | **生产两节点心跳互查**：两台 Prometheus 各配一套 Alertmanager 还是组集群；各节点 `heartbeat_source` 指向对端 | 归 LD-08；开发机单节点，整机宕机无人发现是已知局限（runbook 21 第三节） |
+
+**部署后预期多一封 notify 邮件**：首腿测试改为每通一行后，真机的 `failures` 由 1 变 3，`OSS911WarnIncreased` 会响一次。
+
+**下一步**：Gavin 部署第三块（30 → 45 → 50 → 22 → 55 → 56，runbook 21 第三节），含停掉 Alertmanager 的验证；我开工坐席 mart（DD-101）。

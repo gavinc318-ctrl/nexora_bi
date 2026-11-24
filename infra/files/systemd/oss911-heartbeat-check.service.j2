@@ -1,0 +1,20 @@
+# Managed by infra/playbooks/56-alerting.yml, do not edit by hand
+# The heartbeat check of the alert path (DD-100 block three, review note item five): started every minute by
+# oss911-heartbeat-check.timer. Settings in /etc/oss911/alertpath.conf, read by the program; state in
+# /var/lib/oss911mon/alertpath, served by the exporter.
+[Unit]
+Description=OSS911 BI alert path heartbeat check (dev)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=oss911mon
+Group=oss911mon
+ExecStart={{ venv_root }}/venv-ingest/bin/oss911-alertpath heartbeat-check
+TimeoutStartSec=90
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/oss911mon

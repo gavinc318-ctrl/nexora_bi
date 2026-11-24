@@ -19,6 +19,8 @@ twice. What it reads:
   partitions     pg_inherits           days until the last monthly partition of each partitioned table ends
   checks         meta.check_result     per dbt node: latest status and failures, the previous failures; per
                                        expected check (contracts/monitoring.yml): its state and the age of its result
+  (no query)     state files           the alert path's timed jobs (oss911-alertpath): when each last ran and whether
+                                       it succeeded -- the heartbeat checker is watched through the alert path
 
 Failure of one query leaves out that query's metrics -- never a value from an earlier refresh -- and sets
 oss911_monitor_query_errors{query} to 1 (DD-100 review, item two). Results are cached for 60 s: the scrape interval
@@ -49,6 +51,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import yaml
 
 from . import __version__
+from .alertpath import states as alertpath_states
 from .config import ConfigError, monitor_settings
 
 CACHE_SECONDS = 60
@@ -661,6 +664,11 @@ class Collector:
             out.add("oss911_monitor_query_errors",
                     "1 when the query failed in the last refresh: its metrics are left out, never served stale",
                     {"query": name}, flag)
+        for task, st in alertpath_states(self.settings.state_dir).items():
+            out.add("oss911_alertpath_last_run_timestamp_seconds",
+                    "Unix time the alert path's timed job last ran (heartbeat_check, digest)", {"task": task},
+                    st["last_run"])
+            out.add("oss911_alertpath_last_run_ok", "1 when that run succeeded", {"task": task}, st["ok"])
         out.add("oss911_monitor_refresh_duration_seconds", "Duration of the last refresh", {},
                 round(self._clock() - started, 3))
         out.add("oss911_monitor_refresh_timestamp_seconds", "Unix time of the last refresh", {}, round(started, 3))

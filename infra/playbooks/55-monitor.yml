@@ -73,6 +73,8 @@
           MONITOR_PORT={{ monitor_port }}
           MONITOR_CONFIG={{ monitor_config }}
           MONITOR_MANIFEST={{ venv_root }}/release/dags.json
+          # State files of the alert path's timed jobs (56-alerting.yml), served as oss911_alertpath_* metrics
+          MONITOR_STATE_DIR=/var/lib/oss911mon/alertpath
       register: _monconf
 
     - name: Merge the release's monitoring configuration with the installed one
@@ -84,6 +86,7 @@
           - "{{ rel_dir }}/contracts/monitoring.yml"
           - "{{ monitor_config }}"
           - "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%S+00:00') }}"
+          - "{{ rel_dir }}/dbt/dbt_project.yml"
       register: _moncfg
       changed_when: false
       failed_when: false

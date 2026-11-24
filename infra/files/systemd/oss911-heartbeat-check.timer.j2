@@ -1,0 +1,10 @@
+# Managed by infra/playbooks/56-alerting.yml, do not edit by hand
+[Unit]
+Description=OSS911 BI alert path heartbeat check, every minute (dev)
+
+[Timer]
+OnCalendar=*-*-* *:*:30
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

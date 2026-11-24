@@ -1,0 +1,11 @@
+# Managed by infra/playbooks/56-alerting.yml, do not edit by hand
+# Daily at {{ digest_time }} in the report time zone. Persistent: a run missed while the machine was off runs at boot.
+[Unit]
+Description=OSS911 BI daily digest at {{ digest_time }} {{ system_timezone }} (dev)
+
+[Timer]
+OnCalendar=*-*-* {{ digest_time }}:00 {{ system_timezone }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

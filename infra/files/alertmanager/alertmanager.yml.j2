@@ -1,0 +1,52 @@
+# Managed by infra/playbooks/22-containers.yml, do not edit on the host. Checked with amtool check-config before it is
+# deployed.
+#
+# Alertmanager of the monitoring channel (DD-100 block three). It groups, repeats and silences what Prometheus fires
+# and hands every notification to the delivery side over one webhook ({{ alert_gateway_url }}): the fake gateway on
+# the development machine, the delivery service in production (LD-01 10.2). Who receives what -- and by SMS or e-mail,
+# and at night -- is decided there from the recipients configuration, not here: this file only routes by level.
+#
+#   heartbeat  OSS911Heartbeat, always firing: sent every minute, never resolved. The heartbeat check on the host
+#              (oss911-heartbeat-check.timer) asks the delivery side when it last arrived
+#   page       grouped per alert name, sent at once, repeated every {{ alert_repeat_interval.page }} while firing
+#   notify     the same, repeated every {{ alert_repeat_interval.notify }}
+# Resolved alerts are sent too (send_resolved), except the heartbeat's.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: notify
+  # One notification per alert name, listing every place (source, table, check) in its body: one source outage raises
+  # the same alert for five tables, which is one SMS, not five (rehearsal 2026-11-24: twenty SMS in one burst)
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: {{ alert_repeat_interval.notify }}
+  routes:
+    - matchers: ['severity="heartbeat"']
+      receiver: heartbeat
+      group_by: [alertname]
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
+    - matchers: ['severity="page"']
+      receiver: page
+      group_wait: 10s
+      repeat_interval: {{ alert_repeat_interval.page }}
+    - matchers: ['severity="notify"']
+      receiver: notify
+
+receivers:
+  - name: heartbeat
+    webhook_configs:
+      - url: "{{ alert_gateway_url }}/alertmanager"
+        send_resolved: false
+  - name: page
+    webhook_configs:
+      - url: "{{ alert_gateway_url }}/alertmanager"
+        send_resolved: true
+  - name: notify
+    webhook_configs:
+      - url: "{{ alert_gateway_url }}/alertmanager"
+        send_resolved: true

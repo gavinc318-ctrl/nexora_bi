@@ -6,6 +6,8 @@
                        (development) or by operations (production; the playbook only checks it)
     monitor.conf 0644  the monitoring exporter: database, listen address, files     written by 55-monitor.yml
     monitor.env  0600  its database login user and password                        written by 40-schema.yml
+    alertpath.conf 0644  the heartbeat check and the daily digest: delivery side,   written by 56-alerting.yml
+                       Prometheus, state directory, heartbeat source and ages
 
 All are KEY=VALUE lines, the format systemd and "set -a; . file" read too. The program reads them itself:
 no password passes through the DAG, a template or the Airflow parent process (LD-01 2.5).
@@ -99,6 +101,7 @@ class MonitorSettings:
     port: int
     config_path: str         # the monitoring configuration of the release (contracts/monitoring.yml, installed)
     manifest_path: str       # the DAG manifest (sources, schedules, re-sweep days)
+    state_dir: str           # the alert path's state files (oss911-alertpath), served as metrics
 
 
 def monitor_settings() -> MonitorSettings:
@@ -118,4 +121,36 @@ def monitor_settings() -> MonitorSettings:
                     password=require(cred, "MONITOR_DB_PASSWORD", "monitor.env"))
     return MonitorSettings(db=db, listen=require(conf, "MONITOR_LISTEN", "monitor.conf"), port=nums["MONITOR_PORT"],
                            config_path=require(conf, "MONITOR_CONFIG", "monitor.conf"),
-                           manifest_path=require(conf, "MONITOR_MANIFEST", "monitor.conf"))
+                           manifest_path=require(conf, "MONITOR_MANIFEST", "monitor.conf"),
+                           state_dir=conf.get("MONITOR_STATE_DIR") or "/var/lib/oss911mon/alertpath")
+
+
+@dataclass(frozen=True)
+class AlertPathSettings:
+    gateway_url: str         # the delivery side: the fake gateway (development) or the delivery service
+    prometheus_url: str
+    state_dir: str
+    monitor_config: str      # the installed monitoring configuration: the report time zone
+    node: str                # this node, named in the messages
+    heartbeat_source: str    # whose heartbeat this node checks: its own on one node, the peer's in production
+    heartbeat_max_age: int   # seconds without a heartbeat before the path counts as broken
+    renotify: int            # seconds between two "path broken" messages while it lasts
+
+
+def alertpath_settings() -> AlertPathSettings:
+    """The heartbeat check's and the digest's settings (DD-100 block three): alertpath.conf, nothing secret"""
+    conf = read_env_file("alertpath.conf")
+    nums = {}
+    for key in ("HEARTBEAT_MAX_AGE_SECONDS", "HEARTBEAT_RENOTIFY_SECONDS"):
+        value = require(conf, key, "alertpath.conf")
+        if not value.isdigit() or int(value) == 0:
+            raise ConfigError(f"{key} in alertpath.conf must be a positive number")
+        nums[key] = int(value)
+    return AlertPathSettings(
+        gateway_url=require(conf, "ALERT_GATEWAY_URL", "alertpath.conf").rstrip("/"),
+        prometheus_url=require(conf, "PROMETHEUS_URL", "alertpath.conf").rstrip("/"),
+        state_dir=require(conf, "ALERTPATH_STATE_DIR", "alertpath.conf"),
+        monitor_config=require(conf, "MONITOR_CONFIG", "alertpath.conf"),
+        node=require(conf, "NODE_NAME", "alertpath.conf"),
+        heartbeat_source=require(conf, "HEARTBEAT_SOURCE", "alertpath.conf"),
+        heartbeat_max_age=nums["HEARTBEAT_MAX_AGE_SECONDS"], renotify=nums["HEARTBEAT_RENOTIFY_SECONDS"])

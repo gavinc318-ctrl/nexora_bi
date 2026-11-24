@@ -139,6 +139,7 @@ class CollectorTest(unittest.TestCase):
         class S:
             config_path = str(d / "monitoring.yml")
             manifest_path = str(d / "dags.json")
+            state_dir = str(d / "alertpath")
         self.settings = S
         self.saved = monitor.QUERIES
 
@@ -198,20 +199,50 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(len(calls), 2)
 
 
+class AlertPathStateTest(unittest.TestCase):
+    """The alert path's state files are served; a task without a state file has no series (the rules' absent())"""
+
+    setUp = CollectorTest.setUp
+    tearDown = CollectorTest.tearDown
+
+    def test_state_files_served(self):
+        d = Path(self.settings.state_dir)
+        d.mkdir()
+        (d / "heartbeat_check.json").write_text('{"last_run": "2026-11-24T05:00:00+00:00", "ok": 0}',
+                                                encoding="utf-8")
+        monitor.QUERIES = []
+        with redirect_stderr(io.StringIO()):
+            text = Collector(self.settings, connect=lambda: _Conn()).refresh()
+        self.assertIn('oss911_alertpath_last_run_timestamp_seconds{task="heartbeat_check"} 1795496400', text)
+        self.assertIn('oss911_alertpath_last_run_ok{task="heartbeat_check"} 0', text)
+        self.assertNotIn('task="digest"', text)
+
+
 class InstallTest(unittest.TestCase):
     """infra/files/monitoring_install.py: deployed_at kept for known checks, set for new ones"""
 
-    def run_install(self, old_text):
+    def install(self, old_text, dbt_project=REPO / "src" / "dbt" / "dbt_project.yml"):
         with tempfile.TemporaryDirectory() as d:
             old = Path(d) / "old.yml"
             if old_text is not None:
                 old.write_text(old_text, encoding="utf-8")
             env = dict(os.environ, PYTHONPATH=str(REPO / "src" / "ingest" / "src"))
-            r = subprocess.run([sys.executable, str(REPO / "infra" / "files" / "monitoring_install.py"),
-                                str(RELEASE_CONFIG), str(old), "2026-11-24T12:00:00+03:00"],
-                               capture_output=True, text=True, env=env)
+            return subprocess.run([sys.executable, str(REPO / "infra" / "files" / "monitoring_install.py"),
+                                   str(RELEASE_CONFIG), str(old), "2026-11-24T12:00:00+03:00", str(dbt_project)],
+                                  capture_output=True, text=True, env=env)
+
+    def run_install(self, old_text):
+        r = self.install(old_text)
         self.assertEqual(r.returncode, 0, r.stderr)
         return yaml.safe_load(r.stdout)
+
+    def test_closing_threshold_must_match_the_dbt_variable(self):
+        with tempfile.TemporaryDirectory() as d:
+            bad = Path(d) / "dbt_project.yml"
+            bad.write_text("vars:\n  closing_lag_days: 4\n", encoding="utf-8")
+            r = self.install(None, bad)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("closing_lag_days", r.stderr)
 
     def test_first_and_second_install(self):
         first = self.run_install(None)

@@ -1,0 +1,21 @@
+# Managed by infra/playbooks/56-alerting.yml, do not edit by hand
+# The daily digest (DD-100 review note, item four): the previous calendar day in the report time zone, read from
+# Prometheus, sent through the delivery side. Started by oss911-digest.timer; by hand:
+#   sudo systemctl start oss911-digest              (a day already sent is not sent again)
+#   sudo -u oss911mon {{ venv_root }}/venv-ingest/bin/oss911-alertpath digest --print     (show, do not send)
+[Unit]
+Description=OSS911 BI daily digest (dev)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=oss911mon
+Group=oss911mon
+ExecStart={{ venv_root }}/venv-ingest/bin/oss911-alertpath digest
+TimeoutStartSec=600
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/oss911mon

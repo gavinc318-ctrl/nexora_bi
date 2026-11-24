@@ -2,10 +2,13 @@
 deployed_at (DD-100 review note, item three: a new check's grace period starts when it is deployed).
 
 Usage:  <venv-ingest>/bin/python monitoring_install.py <release monitoring.yml> <installed monitoring.yml> <now>
+                                                        <release dbt_project.yml>
 
 Prints the file to install. An expected check already in the installed file keeps its deployed_at; a new one gets
 <now> (an ISO 8601 time with offset). The file is validated with the exporter's own rules (oss911_ingest.monitor,
-load_config) before it is printed, so 55-monitor never installs one the exporter would refuse. Exit code 0 with
+load_config) before it is printed, so 55-monitor never installs one the exporter would refuse. The closing threshold
+is written twice -- thresholds.closing_lag_days here for the alert, the dbt variable closing_lag_days for the nightly
+test mart_closing_not_behind -- so a release where the two differ is refused (NOTES 2026-11-23, open item one). Exit code 0 with
 the file on stdout; 1 with the reason on stderr. 55-monitor.yml runs this on the target with venv-ingest.
 """
 
@@ -18,10 +21,11 @@ from oss911_ingest.monitor import MonitorConfigError, load_config
 
 
 def main(argv):
-    if len(argv) != 4:
-        print("usage: monitoring_install.py <release monitoring.yml> <installed monitoring.yml> <now>", file=sys.stderr)
+    if len(argv) != 5:
+        print("usage: monitoring_install.py <release monitoring.yml> <installed monitoring.yml> <now>"
+              " <release dbt_project.yml>", file=sys.stderr)
         return 1
-    _, new_path, old_path, now = argv
+    _, new_path, old_path, now, dbt_path = argv
     try:
         datetime.fromisoformat(now)
     except ValueError:
@@ -50,6 +54,13 @@ def main(argv):
         load_config(out)
     except (MonitorConfigError, yaml.YAMLError) as exc:
         print(f"the monitoring configuration is not valid: {exc}", file=sys.stderr)
+        return 1
+    with open(dbt_path, encoding="utf-8") as fh:
+        dbt_lag = ((yaml.safe_load(fh) or {}).get("vars") or {}).get("closing_lag_days")
+    lag = (doc.get("thresholds") or {}).get("closing_lag_days")
+    if dbt_lag != lag:
+        print(f"thresholds.closing_lag_days is {lag!r} but the dbt variable closing_lag_days is {dbt_lag!r}"
+              f" ({dbt_path}): the alert and the nightly test mart_closing_not_behind would disagree", file=sys.stderr)
         return 1
     sys.stdout.write(out)
     return 0

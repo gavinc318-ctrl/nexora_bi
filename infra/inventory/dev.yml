@@ -302,6 +302,10 @@ all:
       prometheus:
         ref: "docker.io/prom/prometheus:v2.55.1"
         digest: "sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3"
+      # DD-100 block three: the delivery of Prometheus's alerts (grouping, silences, repeats)
+      alertmanager:
+        ref: "docker.io/prom/alertmanager:v0.34.2"
+        digest: "sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b"
 
     # Containers do not connect to PostgreSQL directly; they use the host pgBouncer's session pool (the DD-67 topology --
     # Keycloak is an application too and gets no exception). The address is the internal network's gateway --
@@ -349,6 +353,39 @@ all:
     monitor_listen: "{{ podman_internal_gateway }}"
     monitor_port: 9188
     prometheus_retention: 15d           # 15 days is enough on the development machine; production follows LD-08's retention requirements
+
+    # ---- Alert path (DD-100 block three, 22-containers and 56-alerting) ----
+    # Prometheus -> Alertmanager -> webhook -> the delivery side -> people. The delivery side is the delivery service of
+    # LD-01 10.2 in production (not built yet) and, until then, the fake gateway of test/fake_gateway, which writes what
+    # it would send to a file. Both offer the same interface: Alertmanager's webhook on /alertmanager, the timed jobs'
+    # direct messages on /direct, the heartbeat's last arrival on /heartbeat.
+    alertmanager_port: 9093             # published on 127.0.0.1 only (its UI and amtool); Prometheus uses the container name
+    # Bound like the exporter: the host's address on the container network, reached by the Alertmanager container and
+    # by the timed jobs on the host
+    alert_gateway_url: "http://{{ podman_internal_gateway }}:9196"
+    fake_gateway:
+      enabled: true                     # development only; production sets false and alert_gateway_url to the service
+      listen: "{{ podman_internal_gateway }}"
+      port: 9196
+    # How often Alertmanager repeats an alert that keeps firing (the daily digest does not rely on this)
+    alert_repeat_interval: {page: 4h, notify: 24h}
+    # The heartbeat check (oss911-heartbeat-check.timer, every minute): the heartbeat alert travels the whole path once
+    # a minute; older than this at the delivery side, the path counts as broken and level page is told directly
+    heartbeat_max_age_seconds: 300
+    heartbeat_renotify_seconds: 14400   # told again every 4 hours while it lasts
+    # Whose heartbeat this node checks: itself on the single development node; in production each node the other's
+    heartbeat_source: "{{ inventory_hostname }}"
+    digest_time: "08:00"                # the daily digest, report time zone (system_timezone), for the day before
+    # Who receives what (DD-100 item six: configuration, to be confirmed by operations -- who receives, and whether SMS
+    # goes out at night). channels: which channel each level uses; night: when SMS is held back for recipients without
+    # sms_at_night. Written by 56-alerting.yml as /etc/oss911/alert-recipients.json for the delivery side.
+    # Development: placeholders only (example.invalid, a number that is no one's).
+    alert_recipients:
+      channels: {page: [email, sms], notify: [email], digest: [email]}
+      night: {start: "22:00", end: "07:00", timezone: "{{ system_timezone }}"}
+      recipients:
+        - {name: dev-ops, email: oss911-ops@example.invalid, sms: "+966500000000", levels: [page, notify, digest],
+           sms_at_night: false}
 
     # ---- Container networks: the two production segments simulated on one host ----
     podman_networks:

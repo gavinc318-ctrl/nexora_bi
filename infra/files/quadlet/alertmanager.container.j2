@@ -1,0 +1,23 @@
+# Managed by infra/playbooks/22-containers.yml, do not edit by hand
+# Alertmanager (DD-100 block three). Prometheus reaches it by its container name on the internal network; the port is
+# published on the host's loopback only (its UI, amtool). Single instance: no cluster gossip (an empty
+# --cluster.listen-address turns it off; production's two nodes are a decision of LD-08, not made here).
+[Unit]
+Description=Alertmanager (OSS911 dev)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image={{ _am_image }}
+ContainerName=alertmanager
+Network=internal
+PublishPort=127.0.0.1:{{ alertmanager_port }}:9093
+Volume=/etc/oss911/alertmanager:/etc/alertmanager:ro,Z
+Volume=alertmanager-data:/alertmanager
+Exec=--config.file=/etc/alertmanager/alertmanager.yml --storage.path=/alertmanager --cluster.listen-address=
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

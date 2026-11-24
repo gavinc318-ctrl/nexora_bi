@@ -112,3 +112,52 @@ tests:
         exp_alerts:
           - exp_labels: {severity: page, job: haproxy, instance: h}
             exp_annotations: {summary: "Scrape target haproxy (h) is down"}
+
+  # The alert path's timed jobs: stopped, failing, never ran
+  - interval: 1m
+    input_series:
+      - series: 'oss911_alertpath_last_run_timestamp_seconds{job="oss911_monitor",instance="m",task="heartbeat_check"}'
+        values: '0 60 120 120x10'
+      - series: 'oss911_alertpath_last_run_ok{job="oss911_monitor",instance="m",task="heartbeat_check"}'
+        values: '1 1 0x10'
+      - series: 'oss911_alertpath_last_run_ok{job="oss911_monitor",instance="m",task="digest"}'
+        values: '1x12'
+    alert_rule_test:
+      # last run at 2m: more than 300 s from 8m on, firing 2m later
+      - eval_time: 9m
+        alertname: OSS911HeartbeatCheckStopped
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: OSS911HeartbeatCheckStopped
+        exp_alerts:
+          - exp_labels: {severity: page, job: oss911_monitor, instance: m, task: heartbeat_check}
+            exp_annotations: {summary: "The heartbeat check has not run for 8m 0s: a broken alert path would go unnoticed"}
+      - eval_time: 6m
+        alertname: OSS911HeartbeatCheckMissing
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: OSS911AlertPathCheckFailing
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: OSS911AlertPathCheckFailing
+        exp_alerts:
+          - exp_labels: {severity: page, job: oss911_monitor, instance: m, task: heartbeat_check}
+            exp_annotations: {summary: "The heartbeat check fails: it cannot reach the delivery side, or cannot notify through it"}
+      - eval_time: 10m
+        alertname: OSS911DigestFailed
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="oss911_monitor",instance="m"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: OSS911HeartbeatCheckMissing
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: OSS911HeartbeatCheckMissing
+        exp_alerts:
+          - exp_labels: {severity: page, task: heartbeat_check}
+            exp_annotations: {summary: "The heartbeat check has no state: it never ran, or the exporter cannot read its state file"}
+

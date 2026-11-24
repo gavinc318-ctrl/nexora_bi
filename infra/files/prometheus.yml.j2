@@ -1,19 +1,27 @@
 # Managed by infra/playbooks/22-containers.yml, do not edit by hand
 #
 # Targets live here rather than scattered around, so that "what does monitoring cover" has exactly one answer:
-# Prometheus itself, HAProxy, and the OSS911 exporter (DD-100). Exporters for the database and other components are
-# added as each goes live.
+# Prometheus itself, HAProxy, the OSS911 exporter and Alertmanager (DD-100). Exporters for the database and other
+# components are added as each goes live.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
     env: dev
     site: MAK
+    # Which Prometheus raised an alert: the delivery side records the heartbeat per this label, and in production
+    # each node's heartbeat check asks for the other's (DD-100 review note, item five)
+    prometheus: {{ inventory_hostname }}
 
 # Alert rules of the monitoring channel (DD-100), deployed next to this file by 22-containers after promtool checks
-# and tests them. Alertmanager (the delivery) comes with block three; until then the alerts show at /alerts only.
+# and tests them; firing alerts go to Alertmanager (block three), by its container name on the internal network.
 rule_files:
   - /etc/prometheus/rules/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
 
 scrape_configs:
   - job_name: prometheus
@@ -33,3 +41,9 @@ scrape_configs:
     scrape_timeout: 30s
     static_configs:
       - targets: ['{{ podman_internal_gateway }}:{{ monitor_port }}']
+
+  # Alertmanager itself: down is OSS911TargetDown -- delivered only if it comes back; the heartbeat check notices
+  # sooner, without it
+  - job_name: alertmanager
+    static_configs:
+      - targets: ['alertmanager:9093']

@@ -1,0 +1,26 @@
+# Managed by infra/playbooks/56-alerting.yml, do not edit by hand
+# DEVELOPMENT ONLY (fake_gateway.enabled): the fake delivery gateway of test/fake_gateway, standing in for the delivery
+# service of LD-01 10.2. It sends nothing; what it would send is in /var/lib/oss911gw/outbox.jsonl.
+[Unit]
+Description=OSS911 BI fake delivery gateway (dev only)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=oss911gw
+Group=oss911gw
+ExecStart=/usr/bin/python3 {{ venv_root }}/fake-gateway/server.py --listen {{ fake_gateway.listen }} --port {{ fake_gateway.port }} --recipients /etc/oss911/alert-recipients.json --spool /var/lib/oss911gw
+StateDirectory=oss911gw
+StateDirectoryMode=0750
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

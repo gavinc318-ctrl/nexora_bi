@@ -13,6 +13,7 @@ SeaweedFS,对象存储,L2,Apache 2.0,是,以单一维护者为主,2011,独立服
 WeasyPrint,PDF 渲染,L4,BSD 3-Clause,是,Kozea 与社区,2011,Python 库 · 直接 import,宽松许可可 import,中风险 · 需持续关注,待冻结,DD-16
 python-docx,Word 渲染,L4,MIT,是,社区,2013,Python 库 · 直接 import,宽松许可可 import,低风险,待冻结,DD-16
 Prometheus,监控采集与告警评估,L6,Apache 2.0,是,CNCF,2012,独立服务,无,低风险,待冻结,DD-43
+Alertmanager,告警分组、静默、重复与投递（webhook 发往投递端）,L6,Apache 2.0,是,CNCF（Prometheus 项目）,2015,独立服务 · 经网络协议交互,无,低风险,v0.34.2,DD-100
 Ansible (ansible-core),部署自动化,L6,GPLv3,是,Red Hat,2012,命令行工具,不链接,低风险,待冻结,DD-11
 Podman,容器运行时,L6,Apache 2.0,是,Red Hat,2018,独立进程,无,低风险,待冻结,DD-11
 React,前端与移动薄壳,L5,MIT,是,Meta 与社区,2013,前端库 · 直接引用,宽松许可可引用,低风险,待冻结,DD-14 · DD-30

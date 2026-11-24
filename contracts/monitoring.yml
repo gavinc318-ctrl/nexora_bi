@@ -10,8 +10,9 @@ version: 1
 report_timezone: Asia/Riyadh
 
 thresholds:
-  closing_lag_days: 3             # a mart table's latest closed day this many days back or more (page). The nightly
-                                  # test mart_closing_not_behind uses the same 3 days
+  closing_lag_days: 3             # a mart table's latest closed day more than this many days back (page). The nightly
+                                  # test mart_closing_not_behind uses the dbt variable closing_lag_days: 55-monitor
+                                  # refuses a release where the two differ
   batch_backlog_seconds: 3600     # a processable batch a model has not taken in after an hour (page)
   agent_missing_consecutive: 3    # an agent asked for and missing from this many responses in a row (notify)
   partition_min_days_ahead: 20    # the last monthly partition of a table ends within this many days (page)

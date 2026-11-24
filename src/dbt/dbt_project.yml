@@ -37,6 +37,10 @@ vars:
   # a fake ICP whose idle time could go down (fixed 2026-11-22, running there from 2026-11-23 17:02 on, so that day
   # mixes the two); production has no earlier day totals
   agent_day_totals_checked_from: 20261124
+  # mart_closing_not_behind: a mart table whose latest closed day is more than this many days back fails the nightly
+  # test. The monitoring channel's alert OSS911ClosingBehind uses closing_lag_days of contracts/monitoring.yml: the two
+  # must be equal, and 55-monitor refuses a release where they are not (infra/files/monitoring_install.py)
+  closing_lag_days: 3
   check_result_keep_days: 90  # meta.check_result retention (DD-100 item 7); the function refuses fewer than 90
   # agent_day_reconciles_with_legs (DD-100 item five, review note item two): a day differs when its inbound calls and
   # the agent's answered legs differ by more than max(min_calls, ratio x legs); over the closed days of the last N days

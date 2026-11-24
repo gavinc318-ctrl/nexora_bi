@@ -6,8 +6,10 @@
 #           partitions running out, an ERROR test failing, an expected check stale or never run, and the
 #           monitoring itself failing
 #   notify  e-mail: WARN results that grew, agents not returned, a reference copy gone stale, quarantine waiting
+#   heartbeat  OSS911Heartbeat only: always firing, Alertmanager sends it every minute; the heartbeat check on the host
+#           asks the delivery side when it last arrived and tells people directly when it stops (block three)
 # What only the daily digest reports (the oldest clarification item, removed agents not returned, the day-total
-# reconciliation) has no rule here: the digest reads it (block three).
+# reconciliation, WARN results that stay as they are) has no rule here: the digest reads it from Prometheus.
 #
 # Business thresholds are never written here: every comparison is against oss911_threshold, which the exporter
 # exports from the release (contracts/monitoring.yml) or the database -- one authority. What is written here are the
@@ -196,7 +198,7 @@ groups:
         annotations:
           summary: "{{ $labels.dag_id }}: WARN test {{ $labels.node }} grew to {{ $value }} rows"
 
-  # ---------------------------------------------------------------- heartbeat (block three: Alertmanager, the gateway)
+  # ---------------------------------------------------------------- the alert path (block three)
   - name: oss911-heartbeat
     rules:
       # Always firing. It travels the whole delivery path continuously; the gateway side checks that it keeps
@@ -206,3 +208,39 @@ groups:
         labels: {severity: heartbeat}
         annotations:
           summary: "Heartbeat of the OSS911 alert path"
+
+      # The checker of the path is watched through the path: a timer that stopped, or never ran, or cannot reach the
+      # delivery side (oss911-alertpath writes a state file each run, the exporter serves it). The windows are the
+      # rules' own: the check runs every minute, the digest once a day
+      - alert: OSS911HeartbeatCheckStopped
+        expr: time() - oss911_alertpath_last_run_timestamp_seconds{task="heartbeat_check"} > 300
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "The heartbeat check has not run for {{ $value | humanizeDuration }}: a broken alert path would go unnoticed"
+
+      - alert: OSS911HeartbeatCheckMissing
+        expr: absent(oss911_alertpath_last_run_timestamp_seconds{task="heartbeat_check"})
+        for: 15m
+        labels: {severity: page}
+        annotations:
+          summary: "The heartbeat check has no state: it never ran, or the exporter cannot read its state file"
+
+      - alert: OSS911AlertPathCheckFailing
+        expr: oss911_alertpath_last_run_ok{task="heartbeat_check"} == 0
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "The heartbeat check fails: it cannot reach the delivery side, or cannot notify through it"
+
+      - alert: OSS911DigestMissing
+        expr: time() - oss911_alertpath_last_run_timestamp_seconds{task="digest"} > 26 * 3600
+        labels: {severity: notify}
+        annotations:
+          summary: "The daily digest has not run for {{ $value | humanizeDuration }}"
+
+      - alert: OSS911DigestFailed
+        expr: oss911_alertpath_last_run_ok{task="digest"} == 0
+        labels: {severity: notify}
+        annotations:
+          summary: "The daily digest's last run failed (journalctl -u oss911-digest)"
