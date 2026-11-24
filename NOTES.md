@@ -2789,3 +2789,78 @@ M-R04 为此要求分子分母同为空；这六条若要同样处理，需每�
 假接口从不给空值，真机上是否出现待接真实接口后看；现按 DD-101 注实现。
 
 **下一步**：Gavin 部署本补丁（45 → 50 → intraday → 46 → nightly，runbook 22 补丁节）；我列第 10 步的方案与需定（DD-102），先不动手。
+
+## 2026-11-24 开发机：第 10 步方案与需定（DD-102）——请 Mac 侧答复后动手
+
+按「先列方案与需定」的要求，未写代码。现状：服务层（FastAPI，`/v1/query` `/v1/metrics` `/v1/dimensions/*/members` `/v1/me`，
+127.0.0.1:8090）与 Keycloak 的门户 client `oss911-portal`（public、令牌 aud 带 svc client、开发期开着 password grant）已有；
+HAProxy 在宿主机（21 部署），只做数据库 TCP 与一个 stats 监听；开发机**没有装 Node**。
+
+### 方案：分四块，每块单独部署、单独验证
+
+**① 报表定义与两个接口**（不涉前端，先做）
+- 定义放 `reports/<id>.yaml`，与 `metrics/` 同级（口径侧的 YAML，注释中文）。字段：`id`、`title {ar, en}`、`domain`、`roles`、
+  `metrics`（编码）、`dimensions`、`defaults`（日期范围 yesterday · last_7_days · last_30_days · today，粒度，`data_version`）、
+  `filters`（允许的维度）、`blocks`（表或图：`kind table|chart`，`chart bar|stacked_bar|line`，用哪几个指标、哪个维度作轴）、
+  `source_note {ar, en}`（如「来源：话务平台，不可下钻」）、`refresh`（`on_open` 或 `interval` 加秒数）、`print`（纵向或横向）
+- 结构变更 0018：`meta.report_definition`（id、definition jsonb、roles、published、definition_sha256、synced_at），只读给服务层
+- 46 同步时一并校验与写入（`metrics_to_json.py` 加一节）：指标存在且已发布、已实现；维度是各指标 mart 表的维度；required_dimensions
+  在每个块里都作输出维度；**报表的可见角色必须是每个指标所在表可读角色的子集**——否则目录里看得见、一查就 403
+- 服务层：`GET /v1/reports?locale=`（当前角色可见的目录：id、标题、域）、`GET /v1/reports/{id}?locale=`（定义，指标名按语言从注册表
+  填好）；无权或不存在都返回 403 `report_not_permitted` 并写审计（不区分，免得探出有哪些报表）
+- 单元与库测试，同现有服务层
+
+**② 前端工程、构建、许可扫描、上线路径**
+- 源码 `src/portal`：Vite + React + TypeScript；`package-lock.json` 入库，`npm ci` 安装
+- Node：官方 LTS 二进制包（22.x）按校验和装到开发机 `/opt/oss911-build/node`，只供构建；不进生产。构建产物（静态文件）进发布目录
+- **许可扫描**：读 `package-lock.json`（v3 每个包带 license 字段），整棵树逐包核对允许清单（MIT、Apache-2.0、BSD-2/3-Clause、ISC、
+  0BSD、CC0-1.0；字体 OFL-1.1，见需定 ⑤），清单外或缺字段即构建失败；生成 `compliance/portal-npm-licenses.csv`（包、版本、许可、
+  是否只在构建期用），直接依赖另登记 `compliance/components.csv`
+- 静态文件进程：服务层包加第二个入口 `oss911-portal`（Starlette 的静态文件，已在 venv-svc 里，不新增组件），独立 systemd 服务，
+  127.0.0.1:8091；带哈希的资源长期缓存，`index.html` 不缓存，其余路径回落到 `index.html`；严格 CSP（只许同源，无外网资源）
+- 同源分流：HAProxy 加一个 HTTP 前端（开发机 127.0.0.1:8000）：`/v1/` → 服务层，其余 → 门户进程。Keycloak 仍在自己的源
+- Keycloak：门户 client 加 PKCE S256 必须、redirect 与 web origin 改为门户地址；password grant 只在开发期 inventory 打开
+- 新剧本 62-portal：构建（控制节点）→ 许可扫描 → 部署静态文件 → 服务与分流 → 验证（首页 200、`/v1/me` 经分流 401）
+
+**③ 门户框架**
+- 登录：`oidc-client-ts`（授权码加 PKCE）。令牌只在内存；刷新页面时以 `prompt=none` 静默取回（Keycloak 会话 cookie），失败才去登录页。
+  PKCE 的 verifier 在跳转期间必须暂存，放 sessionStorage，回调后即删
+- 路由：首页（按角色：接警员 → 本人当日，主管 → 中心当日，管理员 → 目录）、报表目录、报表页、指标字典页
+- 报表页按定义通用渲染：筛选栏、Ant Design 表、ECharts 图、四个元字段、「当日临时值」标记、来源标注；打印样式（A4，表头跨页重复）
+- 双语：i18next 语言文件只放界面固定文字（ar、en）；Ant Design 语言包随切换；`dir=rtl` 由 Ant Design ConfigProvider 与 `<html dir>` 同时切；
+  数字与日期统一经一个格式化函数，显式 `latn` 数字与年-月-日；混排文本用 `<bdi>`
+
+**④ 七个样例与端到端测试**
+- 样例按现有 mart 映射（LD-05A 多数行尚空，见需定 ⑨）：
+
+| 报表 | 指标 | 维度 | 可见 |
+| --- | --- | --- | --- |
+| R-01 每日话务量汇总（并入 R-06 作一栏） | M-C01 · M-C02 · M-C03 · M-C06 · M-C07 · M-C15 | 日 | 主管、管理员 |
+| R-09 服务水平达成 | M-C05 · M-C06 | 日 × 首队列 | 主管、管理员 |
+| R-04 坐席呈现与处理对比 | M-C09 · M-C10 · M-C12 · M-C07 | 坐席 | 接警员（本人）、主管、管理员 |
+| R-05 挂断方分析 | M-C11 | 挂断方 | 主管、管理员 |
+| R-21 坐席在岗与工时 | M-R02（按坐席）；M-R01（按小时，第二个块） | 坐席；小时 | 主管、管理员（小时表只给这两者） |
+| R-26 坐席状态时长分解 | M-R10 至 M-R15 · M-R04 | 坐席 | 接警员（本人）、主管、管理员；来源标注 |
+| D-06 话务性能趋势 | M-C01 · M-C02 · M-C05 | 日（近 30 天，`latest`，今天为临时值） | 主管、管理员 |
+
+- Playwright（Chromium）在 `test/e2e`：四个角色各登录一次，核对目录与页面里可见与不可见的报表；阿语界面截图比对镜像；接警员改地址栏
+  （改报表 id、改查询里的工号）——须由服务层拒绝：断言请求真的发出去了并得到 403，而不是前端没发
+
+### 需定
+
+| # | 问题 | 建议 |
+| --- | --- | --- |
+| ① | 报表定义的位置、格式与注册表：`reports/*.yaml` → 结构变更 0018 `meta.report_definition`，由 46 同步 | 照此；报表定义与指标同属口径，一处同步、一处校验 |
+| ② | 报表可见角色超出其指标表的可读角色时 | 46 拒绝同步，不在运行时裁掉报表里的块 |
+| ③ | 无权与不存在的报表是否同一错误 | 同为 403 `report_not_permitted`，写审计 |
+| ④ | 同源分流放在宿主机 HAProxy（加 HTTP 前端），还是另起一个 | 放 HAProxy：已是部署组件，生产两节点本来要它；TLS 以后也在这里终结（LD-07） |
+| ⑤ | 许可允许清单；字体的 OFL-1.1 算不算「宽松」；只在构建期用的包（Vite、TypeScript）也按同一清单卡 | 清单如上；OFL 允许（字体通行许可，可随包分发）；构建期的包也卡，但在清单里标为不随产品分发 |
+| ⑥ | 字体 | Noto Sans Arabic 加 Noto Sans（OFL-1.1，经 `@fontsource` 包随构建打入）；备选 IBM Plex Sans Arabic |
+| ⑦ | Node 与 npm 缓存：八年维护期内离网重建前端要什么 | Node 二进制包与 npm 离线缓存登记为构建物料，进离线介质的「构建」一栏（不进生产机）；MANIFEST 是否单列一节请定 |
+| ⑧ | OIDC 库 | `oidc-client-ts`（Apache-2.0，不绑 Keycloak 版本）；备选 `keycloak-js` |
+| ⑨ | LD-05A 里 R-04 R-05 R-09 R-21 R-26 D-06 的指标、维度列多为空：上表的映射可否作样例 | 先按上表做，版式不求精；LD-05A 补齐后改定义即可，不改前端 |
+| ⑩ | 报表标题与来源标注只要阿、英两种 | 是；中文不进门户 |
+| ⑪ | Playwright 与它下载的浏览器 | 开发工具链，不进 MANIFEST；只在开发机装 |
+| ⑫ | `compliance/components.csv` 里 Superset | 状态改「未采用」，注 DD-102；同次登记 React、Ant Design、ECharts、i18next、react-i18next、oidc-client-ts、字体 |
+
+**顺序**：①（服务层与注册表，最先能验）→ ② → ③ → ④。①不依赖其余需定，⑦⑧ 在 ② 之前答复即可。
