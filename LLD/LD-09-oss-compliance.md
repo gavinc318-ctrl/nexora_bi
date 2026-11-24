@@ -49,6 +49,8 @@ format: converted from docx, content unchanged
 
 【2026-11-22 补充，DD-100；2026-11-24 更正】监控告警通道新增一项组件：Alertmanager（Apache 2.0，Prometheus 项目，独立容器，经网络协议交互），宽松许可，不改变第 4 章的判定；版本与 digest 已由开发机登记入 compliance/components.csv 与 MANIFEST。原拟引入的 Python 库 prometheus_client 未采用：导出程序只输出 gauge，文本格式自行实现，不增加依赖。
 
+【2026-11-24 补充，DD-102】展现层的前端依赖：React、TypeScript（仅构建期）、Ant Design、Apache ECharts、i18next 与 react-i18next，按各项目声明为 MIT 或 Apache 2.0。与服务端组件不同，前端依赖会被打包进交付的静态文件、随产品分发，因此许可核对的对象是整棵依赖树而不只是直接依赖：开发机在锁定依赖时做许可扫描，结果登记 compliance/components.csv，出现非宽松许可即不得引入。Superset 第一版不部署，其在清单中的状态相应改为未采用并注明原因（DD-102）。
+
 ## 4  许可判定与传染性分析
 
 ### 4.1  先厘清本项目中「传染」的实际含义
