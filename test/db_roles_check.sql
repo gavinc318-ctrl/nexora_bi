@@ -1,5 +1,5 @@
 -- =====================================================================
--- Verification of database roles and grants (structural changes 0002 to 0017 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
+-- Verification of database roles and grants (structural changes 0002 to 0018 · DD-74 · DD-75 · DD-76 · DD-88 · DD-89)
 --
 -- It verifies the five privilege roles themselves: inside a transaction the script creates one temporary
 -- login user per role, the superuser session does SET ROLE to that login user, and then runs statements
@@ -333,14 +333,15 @@ SELECT pg_temp.expect_denied($$DELETE FROM meta.sql_grant WHERE false$$); -- rev
 SELECT pg_temp.expect_denied($$DELETE FROM meta.field_visibility WHERE false$$);
 SELECT pg_temp.expect_denied($$UPDATE meta.watermark_state SET updated_at = now() WHERE false$$);
 -- Quarantine decisions (DD-76): only the four decision columns can change; a reason is required; the decision is written once
+-- Only the fixture's batches: a real batch already decided (any run's batch 1) would raise the final-decision error
 SELECT pg_temp.expect_error ($$UPDATE meta.quarantine_batch SET state = 'released', handled_by = 'x', handled_at = now()
-                               WHERE batch_seq = 1$$, '%ck_quarantine_handled%');
+                               WHERE run_id = '00000000-0000-0000-0000-0000000000c1' AND batch_seq = 1$$, '%ck_quarantine_handled%');
 SELECT pg_temp.expect_ok    ($$UPDATE meta.quarantine_batch SET state = 'released', handled_by = 'x', handled_at = now(),
-                               handling_reason = 'confirmed with the source' WHERE batch_seq = 1$$);
+                               handling_reason = 'confirmed with the source' WHERE run_id = '00000000-0000-0000-0000-0000000000c1' AND batch_seq = 1$$);
 SELECT pg_temp.expect_error ($$UPDATE meta.quarantine_batch SET state = 'discarded', handled_by = 'x', handled_at = now(),
-                               handling_reason = 'changed my mind' WHERE batch_seq = 1$$, :'err_quarantine_final');
-SELECT pg_temp.expect_denied($$UPDATE meta.quarantine_batch SET failure_reason = 'x' WHERE batch_seq = 2$$);
-SELECT pg_temp.expect_denied($$DELETE FROM meta.quarantine_batch WHERE batch_seq = 2$$);
+                               handling_reason = 'changed my mind' WHERE run_id = '00000000-0000-0000-0000-0000000000c1' AND batch_seq = 1$$, :'err_quarantine_final');
+SELECT pg_temp.expect_denied($$UPDATE meta.quarantine_batch SET failure_reason = 'x' WHERE run_id = '00000000-0000-0000-0000-0000000000c1' AND batch_seq = 2$$);
+SELECT pg_temp.expect_denied($$DELETE FROM meta.quarantine_batch WHERE run_id = '00000000-0000-0000-0000-0000000000c1' AND batch_seq = 2$$);
 -- Runtime parameter change log (DD-75): insert only, reason required
 SELECT pg_temp.expect_ok    ($$INSERT INTO audit.runtime_param_change_log (source_id, param_name, old_value, new_value, changed_by, reason)
                                VALUES ('x', 'interval_minutes', '5', '10', 'x', 'source rate limit')$$);
@@ -474,6 +475,21 @@ SELECT pg_temp.expect_error ($$INSERT INTO meta.mart_rule (mart_table, grain, ro
 SELECT pg_temp.expect_error ($$INSERT INTO meta.mart_rule (mart_table, grain, roles, row_filter, dimensions, rules_sha256)
                                VALUES ('mart.zz_check', 'x', '{auditor}', 'none', '{"date": "date_key"}', 'x')$$,
                              '%ck_mart_rule_roles%');
+
+-- report definitions (0018): the service layer reads them, only 46-metrics (the owner) writes them
+SET ROLE :"query_user";
+SELECT pg_temp.expect_ok    ($$SELECT * FROM meta.report_definition LIMIT 1$$);
+SELECT pg_temp.expect_denied($$UPDATE meta.report_definition SET roles = '{admin}' WHERE false$$);
+RESET ROLE;
+SET ROLE :"transform_user";
+SELECT pg_temp.expect_denied($$DELETE FROM meta.report_definition WHERE false$$);
+RESET ROLE;
+SELECT pg_temp.expect_error ($$INSERT INTO meta.report_definition (report_id, kind, roles, published, definition, definition_sha256)
+                               VALUES ('R-99', 'dashboard', '{admin}', true, '{"id": "R-99"}', 'x')$$,
+                             '%ck_report_definition_kind%');
+SELECT pg_temp.expect_error ($$INSERT INTO meta.report_definition (report_id, kind, roles, published, definition, definition_sha256)
+                               VALUES ('R-99', 'report', '{admin}', true, '{"id": "R-98"}', 'x')$$,
+                             '%ck_report_definition_body%');
 
 -- M-10 marks supervisors over an interval, with a reason (DD-94 items six, sixteen · change 0008); clearing closes
 -- valid_to, nothing is deleted or rewritten; two marks of one agent never overlap

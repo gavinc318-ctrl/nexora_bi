@@ -1,0 +1,27 @@
+# R-21 坐席在岗与工时统计（LD-05A；DD-102 框架样例）。上：各小时在岗人数，范围超过一日为日均（M-R01，DD-101 注）；
+# 下：按坐席的在岗时长。小时表不对接警员开放，故整张报表只给主管与管理员。
+id: R-21
+kind: report
+domain: resources
+title: {en: Call-Takers on Duty, ar: null}
+title_ar_state: draft
+roles: [supervisor, admin]
+published: true
+defaults: {range: yesterday, data_version: as_closed}
+refresh: {mode: on_open}
+print: {orientation: portrait}
+source_note: null
+formats: {M-R01: decimal, M-R02: duration}
+queries:
+  hourly: {metrics: [M-R01], dimensions: [hour]}
+  duty:   {metrics: [M-R02], dimensions: [agent]}
+views:
+  - kind: chart
+    title: {en: "Call-takers on duty by hour", ar: null}
+    query: hourly
+    chart: bar
+    x: hour
+    series: [M-R01]
+  - kind: table
+    title: {en: "Time on duty by call-taker", ar: null}
+    queries: [duty]

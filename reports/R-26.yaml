@@ -1,0 +1,29 @@
+# R-26 坐席状态时长分解（LD-05A；DD-102 框架样例）。来源是平台日累计（DD-65），页面常驻来源标注、随页脚打印。
+# 平台给空值的项显示为空、不显示 0：分子分母都不计（DD-101 注 2026-11-25）。
+id: R-26
+kind: report
+domain: resources
+title: {en: "How Call-Takers' Time Was Spent", ar: null}
+title_ar_state: draft
+roles: [call_taker, supervisor, admin]
+published: true
+defaults: {range: yesterday, data_version: as_closed}
+refresh: {mode: on_open}
+print: {orientation: landscape}
+source_note: {en: "Source: telephony platform day totals; cannot be broken down into individual state changes", ar: null}
+filters:
+  - {dimension: agent, roles: [supervisor, admin]}
+formats: {M-R10: duration, M-R11: duration, M-R12: duration, M-R13: duration, M-R14: duration, M-R15: duration}
+queries:
+  state: {metrics: [M-R10, M-R11, M-R12, M-R13, M-R14, M-R15, M-R04], dimensions: [agent]}
+views:
+  - kind: table
+    queries: [state]
+  - kind: chart
+    title: {en: "Time by state", ar: null}
+    query: state
+    chart: bar
+    stack: stacked
+    horizontal: true
+    x: agent
+    series: [M-R10, M-R11, M-R12, M-R13, M-R14, M-R15]

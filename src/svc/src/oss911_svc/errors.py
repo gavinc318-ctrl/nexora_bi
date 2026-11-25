@@ -30,6 +30,8 @@ TableNotPermitted = _error("TableNotPermitted", 403, "table_not_permitted")
 FieldNotPermitted = _error("FieldNotPermitted", 403, "field_not_permitted")
 DepartmentUnmapped = _error("DepartmentUnmapped", 403, "department_unmapped")
 IdentityUnmapped = _error("IdentityUnmapped", 403, "identity_unmapped")
+# Not visible to the role, unpublished, or no such report: one answer, so a refusal does not tell which reports exist
+ReportNotPermitted = _error("ReportNotPermitted", 403, "report_not_permitted")
 MetricUnknown = _error("MetricUnknown", 404, "metric_unknown")
 MetricVersionUnknown = _error("MetricVersionUnknown", 404, "metric_version_unknown")
 MetricNotImplemented = _error("MetricNotImplemented", 404, "metric_not_implemented")
@@ -41,5 +43,5 @@ Timeout = _error("Timeout", 504, "timeout")
 AuditUnavailable = _error("AuditUnavailable", 500, "audit_unavailable")
 
 ALL = [RequestInvalid, Unauthenticated, RoleMissing, RoleAmbiguous, TableNotPermitted, FieldNotPermitted,
-       DepartmentUnmapped, IdentityUnmapped, MetricUnknown, MetricVersionUnknown, MetricNotImplemented, DimensionInvalid,
+       DepartmentUnmapped, IdentityUnmapped, ReportNotPermitted, MetricUnknown, MetricVersionUnknown, MetricNotImplemented, DimensionInvalid,
        IncompatibleGrain, MetricVersionBoundary, ResultTooLarge, Timeout, AuditUnavailable]

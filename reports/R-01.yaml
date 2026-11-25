@@ -1,0 +1,29 @@
+# R-01 每日话务量汇总（LD-05A；DD-102 框架样例）。R-06 的未接通重复主叫并入作一栏（M-C15）。
+# 第一版按日，不含班次与坐席组（话务 mart 尚无这两个维度）。三个取数块各读一张表，按日拼成一张表。
+id: R-01
+kind: report
+domain: calls
+title: {en: Daily Call Volume Summary, ar: null}
+title_ar_state: draft
+roles: [supervisor, admin]
+published: true
+defaults: {range: yesterday, data_version: as_closed}
+refresh: {mode: on_open}
+print: {orientation: landscape}
+source_note: null
+formats: {M-C06: duration, M-C07: duration}
+queries:
+  volume: {metrics: [M-C01, M-C02, M-C03, M-C04], dimensions: [date]}
+  wait:   {metrics: [M-C06], dimensions: [date]}          # 日 × 队列表按日汇总
+  talk:   {metrics: [M-C07], dimensions: [date]}          # 日 × 坐席表按日汇总
+  repeat: {metrics: [M-C15], dimensions: [date]}
+views:
+  - kind: table
+    queries: [volume, wait, talk, repeat]
+  # 三项并列而不堆叠：放弃是呼入的子集，堆起来的高度没有含义（LD-05A 不用饼图的同一理由）
+  - kind: chart
+    title: {en: "Inbound, answered and abandoned", ar: null}
+    query: volume
+    chart: bar
+    x: date
+    series: [M-C01, M-C02, M-C03]

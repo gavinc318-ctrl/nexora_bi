@@ -132,3 +132,9 @@
   summary: Monitoring foundation (DD-100 block one) -- meta.check_result (dbt results per node and invocation, monthly partitions, 90 days) with its retention function; the partition function accepts meta; partial index on unlinked agent legs; read-only grants to oss911_monitor (the role is created by 40-schema)
   files:
     - changes/0017_monitoring_foundation.sql
+
+- id: "0018"
+  run_as: owner
+  summary: Report definitions (DD-102) -- meta.report_definition, the read-only copy of reports/*.yaml written by 46-metrics; the service layer answers GET /v1/reports and /v1/reports/{id} from it
+  files:
+    - changes/0018_report_definition.sql

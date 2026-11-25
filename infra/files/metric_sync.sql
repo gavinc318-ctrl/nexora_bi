@@ -24,11 +24,14 @@
 -- old columns are kept). Metrics without mart_table are synced and reported as not implemented (DD-97 item four).
 -- metrics/marts.yaml, checked against the database the same way, then replaces meta.mart_rule (change 0013): one
 -- row per declared table; a table no longer declared is removed -- the query API stops reading it (DD-99).
+-- reports/*.yaml (checked in metrics_to_json.py against the metrics and marts of the same release) then replaces
+-- meta.report_definition (change 0018) the same way: a report no longer in reports/ is removed (DD-102).
 -- Concurrent deployments are serialized by a transaction-level advisory lock.
 --
 -- Output: "<code>|<inserted|updated|unchanged|redefined|new_version>|<version>|<implemented|not_implemented>" per
 -- metric, then "<code>|not_in_release|<version>|" for registry metrics this release does not list (kept), then
--- "<mart table>|rule_inserted|rule_updated|rule_unchanged|rule_removed" per mart table.
+-- "<mart table>|rule_inserted|rule_updated|rule_unchanged|rule_removed" per mart table, then
+-- "<report id>|report_inserted|report_updated|report_unchanged|report_removed" per report.
 -- =====================================================================
 \set QUIET on
 \pset tuples_only on
@@ -40,6 +43,7 @@ SET LOCAL ROLE oss911_owner;
 
 CREATE TEMP TABLE metric_sync_result (code text, action text, version integer, implemented text) ON COMMIT DROP;
 CREATE TEMP TABLE mart_rule_result (mart_table text, action text) ON COMMIT DROP;
+CREATE TEMP TABLE report_result (report_id text, action text) ON COMMIT DROP;
 
 DO $$
 DECLARE
@@ -210,9 +214,37 @@ SELECT mart_table, CASE WHEN inserted THEN 'rule_inserted' ELSE 'rule_updated' E
 UNION ALL
 SELECT m.mart_table, 'rule_unchanged' FROM m WHERE m.mart_table NOT IN (SELECT mart_table FROM upserted);
 
+-- The report definitions into meta.report_definition (change 0018); reports no longer in reports/ are removed
+WITH m AS (
+    SELECT t.key AS report_id, t.value AS d
+      FROM jsonb_each(coalesce(current_setting('oss911.metrics')::jsonb -> 'reports', '{}')) t
+),
+removed AS (
+    DELETE FROM meta.report_definition x WHERE x.report_id NOT IN (SELECT report_id FROM m)
+    RETURNING x.report_id
+),
+upserted AS (
+    INSERT INTO meta.report_definition AS x (report_id, kind, roles, published, definition, definition_sha256)
+    SELECT m.report_id, m.d->>'kind', ARRAY(SELECT jsonb_array_elements_text(m.d->'roles')),
+           (m.d->>'published')::boolean, m.d - 'definition_sha256', m.d->>'definition_sha256'
+      FROM m
+    ON CONFLICT (report_id) DO UPDATE
+       SET kind = excluded.kind, roles = excluded.roles, published = excluded.published,
+           definition = excluded.definition, definition_sha256 = excluded.definition_sha256, synced_at = now()
+     WHERE x.definition_sha256 IS DISTINCT FROM excluded.definition_sha256
+    RETURNING x.report_id, (xmax = 0) AS inserted
+)
+INSERT INTO report_result
+SELECT report_id, 'report_removed' FROM removed
+UNION ALL
+SELECT report_id, CASE WHEN inserted THEN 'report_inserted' ELSE 'report_updated' END FROM upserted
+UNION ALL
+SELECT m.report_id, 'report_unchanged' FROM m WHERE m.report_id NOT IN (SELECT report_id FROM upserted);
+
 SELECT code || '|' || action || '|' || version || '|' || implemented FROM metric_sync_result ORDER BY code;
 SELECT r.metric_code || '|not_in_release|' || max(r.metric_version) || '|'
   FROM meta.metric_registry r
  WHERE r.metric_code NOT IN (SELECT jsonb_array_elements(current_setting('oss911.metrics')::jsonb -> 'metrics')->>'code')
  GROUP BY r.metric_code ORDER BY 1;
 SELECT mart_table || '|' || action FROM mart_rule_result ORDER BY mart_table;
+SELECT report_id || '|' || action FROM report_result ORDER BY report_id;

@@ -256,9 +256,14 @@
           - _calls.stdout_lines | select('match', '^ct101[|]200[|]1[|]101[|]self:101$') | list | length == 1
           - _calls.stdout_lines | select('match', '^sup1[|]200[|][0-9]+[|].*[|]all$') | list | length == 1
           - _calls.stdout_lines | select('match', '^disp1[|]403[|]table_not_permitted$') | list | length == 1
+          # The report catalogue by role and one refusal (DD-102; reports/ synced by 46-metrics)
+          - _calls.stdout_lines | select('match', '^ct101[|]reports[|]R-04,R-26[|]R-21:403:report_not_permitted$') | list | length == 1
+          - _calls.stdout_lines | select('match', '^sup1[|]reports[|]D-06,R-01,R-04,R-05,R-09,R-21,R-26[|]R-21:200$') | list | length == 1
+          - _calls.stdout_lines | select('match', '^disp1[|]reports[|][|]R-21:403:report_not_permitted$') | list | length == 1
         fail_msg: >-
-          Expected: ct101 only agent 101 (self:101), sup1 every agent (all), disp1 refused (table_not_permitted).
+          Expected: ct101 only agent 101 (self:101), sup1 every agent (all), disp1 refused (table_not_permitted);
+          reports: ct101 R-04,R-26 and refused R-21, sup1 all seven, disp1 none (run 46-metrics first).
           Got: {{ _calls.stdout_lines | default([]) }} {{ _calls.stderr | default('') }}.
           If ct101 got identity_unmapped: agent 101 is not in core.dim_agent (the reference data build).
-        success_msg: "ct101 sees only agent 101, sup1 every agent, disp1 is refused the agent table"
+        success_msg: "ct101 sees only agent 101, sup1 every agent, disp1 is refused the agent table; the report catalogue holds by role"
       when: _calls is not skipped

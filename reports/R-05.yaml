@@ -1,0 +1,27 @@
+# R-05 挂断方分析（LD-05A；DD-102 框架样例）。第一版只到中心级。M-C11 的分母是当日全部已结束通话，
+# 表要求按挂断方输出（marts.yaml required_dimensions）。
+id: R-05
+kind: report
+domain: calls
+title: {en: Who Ended the Call, ar: null}
+title_ar_state: draft
+roles: [supervisor, admin]
+published: true
+defaults: {range: last_7_days, data_version: as_closed}
+refresh: {mode: on_open}
+print: {orientation: portrait}
+source_note: null
+queries:
+  share:     {metrics: [M-C11], dimensions: [released_by]}
+  share_day: {metrics: [M-C11], dimensions: [date, released_by]}
+views:
+  - kind: table
+    queries: [share]
+  - kind: chart
+    title: {en: "Share by day", ar: null}
+    query: share_day
+    chart: bar
+    stack: stacked
+    x: date
+    split: released_by
+    series: [M-C11]

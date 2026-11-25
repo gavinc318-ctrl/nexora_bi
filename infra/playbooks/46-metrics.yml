@@ -1,8 +1,9 @@
-# 46-metrics -- sync metrics/metrics.yaml into meta.metric_registry and metrics/marts.yaml into meta.mart_rule
+# 46-metrics -- sync metrics/metrics.yaml into meta.metric_registry, metrics/marts.yaml into meta.mart_rule and
+#   reports/*.yaml into meta.report_definition
 #
 # Basis: DD-97 (2026-11-16 nine items) · DD-05 · LD-03 chapters 5, 6
 # Prerequisites: 40-schema (structural change 0012: the registry keyed by metric and version) ·
-#                (0013: meta.mart_rule) · 45-contracts (the release directory, which holds metrics/) · the mart tables the metrics point at
+#                (0013: meta.mart_rule) · (0018: meta.report_definition) · 45-contracts (the release directory, which holds metrics/) · the mart tables the metrics point at
 #                (built by dbt: 50-dags installs the models, the first mart build creates them)
 #
 # * metrics/metrics.yaml in the repository is the authority; meta.metric_registry is a read-only copy written only
@@ -13,6 +14,8 @@
 #   pointing at existing columns -- are in the header of metric_sync.sql.
 # * metrics_pre_production (inventory): true until go-live -- a definition may change without a new version
 #   (DD-97 item five); false afterwards, when such a change fails the deployment (LD-03 chapter 6).
+# * Report definitions (DD-102) are checked against the metrics and marts of the same release: metrics published
+#   and implemented, a report's roles within those of every table it reads. One of them wrong: nothing is synced.
 # * Metrics without mart_table are synced and reported as not implemented: the service layer answers
 #   metric_not_implemented for them, not an empty result (DD-97 item four).
 
@@ -32,7 +35,7 @@
       vars:
         rel_create: false
 
-    - name: Convert and check metrics.yaml and marts.yaml (and the parameters against the dbt variables)
+    - name: Convert and check metrics.yaml, marts.yaml and the reports (and the parameters against the dbt variables)
       ansible.builtin.command:
         argv:
           - "{{ ingest_venv }}/bin/python"
@@ -41,21 +44,23 @@
           - "{{ rel_dir }}/metrics/metrics.yaml"
           - "{{ rel_dir }}/metrics/marts.yaml"
           - "{{ rel_dir }}/dbt/dbt_project.yml"
+          - "{{ rel_dir }}/reports"
       register: _metrics
       changed_when: false
       failed_when: false
       check_mode: false
 
-    - name: Assert metrics.yaml and marts.yaml are valid
+    - name: Assert metrics.yaml, marts.yaml and the reports are valid
       ansible.builtin.assert:
         that:
           - _metrics.rc == 0
         fail_msg: |-
-          metrics/metrics.yaml or metrics/marts.yaml has problems; nothing was synced:
+          metrics/metrics.yaml, metrics/marts.yaml or reports/ has problems; nothing was synced:
           {{ _metrics.stderr }}
         success_msg: >-
           metrics.yaml: {{ (_metrics.stdout | from_json).metrics | length }} metrics;
-          marts.yaml: {{ (_metrics.stdout | from_json).marts | length }} mart tables
+          marts.yaml: {{ (_metrics.stdout | from_json).marts | length }} mart tables;
+          reports: {{ (_metrics.stdout | from_json).reports | length }}
 
     # The JSON goes in on stdin, ahead of the script, as a dollar-quoted literal: as a psql -v argument it would hit
     # the kernel's limit on one argument (128 KiB) as metrics are added. metrics_to_json.py refuses text containing
@@ -80,22 +85,23 @@
           {{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/metric_sync.sql') }}
       become_user: postgres
       register: _sync
-      changed_when: _sync.stdout_lines | select('search', '[|](inserted|updated|redefined|new_version)[|]|[|]rule_(inserted|updated|removed)$') | list | length > 0
+      changed_when: _sync.stdout_lines | select('search', '[|](inserted|updated|redefined|new_version)[|]|[|](rule|report)_(inserted|updated|removed)$') | list | length > 0
 
     - name: Show what changed
       ansible.builtin.debug:
-        msg: "{{ _sync.stdout_lines | reject('search', '[|]unchanged[|]|[|]rule_unchanged$') | list
-                 or ['every metric and mart rule unchanged'] }}"
+        msg: "{{ _sync.stdout_lines | reject('search', '[|]unchanged[|]|[|](rule|report)_unchanged$') | list
+                 or ['every metric, mart rule and report unchanged'] }}"
 
     - name: Summarize
       ansible.builtin.debug:
         msg: >-
-          {{ _sync.stdout_lines | reject('search', '[|]not_in_release[|]|[|]rule_') | list | length }} metrics in the registry
+          {{ _sync.stdout_lines | reject('search', '[|]not_in_release[|]|[|](rule|report)_') | list | length }} metrics in the registry
           ({{ 'before go-live: definitions may change in place' if metrics_pre_production | bool
               else 'after go-live: a definition change needs a new version' }});
           implemented: {{ _sync.stdout_lines | select('search', '[|]implemented$') | map('regex_replace', '[|].*$', '') | join(', ') or 'none yet' }};
           not implemented: {{ _sync.stdout_lines | select('search', '[|]not_implemented$') | list | length }};
-          mart tables the query API may read: {{ _sync.stdout_lines | select('search', '[|]rule_(inserted|updated|unchanged)$') | list | length }}.
+          mart tables the query API may read: {{ _sync.stdout_lines | select('search', '[|]rule_(inserted|updated|unchanged)$') | list | length }};
+          reports: {{ _sync.stdout_lines | select('search', '[|]report_(inserted|updated|unchanged)$') | list | length }}.
           {% if _sync.stdout_lines | select('search', '[|]not_in_release[|]') | list | length > 0 %}
           In the registry but not in metrics.yaml (kept): {{ _sync.stdout_lines | select('search', '[|]not_in_release[|]')
           | map('regex_replace', '[|].*$', '') | join(', ') }}{% endif %}

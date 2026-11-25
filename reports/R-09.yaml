@@ -1,0 +1,28 @@
+# R-09 话务服务水平达成（LD-05A；DD-102 框架样例）。目标秒数是 M-C05 的注册表参数（x_seconds），
+# 不做成筛选项；接口随定义返回各指标的参数，页面在指标名旁显示。已不在配置中的队列归 unlinked（DD-95）。
+id: R-09
+kind: report
+domain: calls
+title: {en: Service Level, ar: null}
+title_ar_state: draft
+roles: [supervisor, admin]
+published: true
+defaults: {range: last_7_days, data_version: as_closed}
+refresh: {mode: on_open}
+print: {orientation: landscape}
+source_note: null
+filters:
+  - {dimension: queue}
+formats: {M-C06: duration}
+queries:
+  service: {metrics: [M-C05, M-C06], dimensions: [date, queue]}
+views:
+  - kind: table
+    queries: [service]
+  - kind: chart
+    title: {en: "Service level by day", ar: null}
+    query: service
+    chart: line
+    x: date
+    split: queue
+    series: [M-C05]

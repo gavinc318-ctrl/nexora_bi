@@ -133,6 +133,7 @@
               "metric_unknown",
               "metric_version_boundary",
               "metric_version_unknown",
+              "report_not_permitted",
               "request_invalid",
               "result_too_large",
               "role_ambiguous",
@@ -708,6 +709,231 @@
         "title": "QueryResponse",
         "type": "object"
       },
+      "ReportDefinitionResponse": {
+        "properties": {
+          "defaults": {
+            "additionalProperties": true,
+            "description": "range (today · yesterday · last_7_days · last_30_days), data_version",
+            "title": "Defaults",
+            "type": "object"
+          },
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "filters": {
+            "description": "Dimensions my role may filter on",
+            "items": {
+              "type": "string"
+            },
+            "title": "Filters",
+            "type": "array"
+          },
+          "formats": {
+            "additionalProperties": {
+              "enum": [
+                "integer",
+                "decimal",
+                "percent",
+                "duration"
+              ],
+              "type": "string"
+            },
+            "title": "Formats",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "report",
+              "dashboard"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ReportMetric"
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "print": {
+            "additionalProperties": true,
+            "title": "Print",
+            "type": "object"
+          },
+          "queries": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "description": "Name -> {metrics, dimensions, granularity}: one POST /v1/query each",
+            "title": "Queries",
+            "type": "object"
+          },
+          "refresh": {
+            "additionalProperties": true,
+            "description": "{\"mode\": \"on_open\"} or {\"mode\": \"interval\", \"seconds\": n}",
+            "title": "Refresh",
+            "type": "object"
+          },
+          "source_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Note"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "title_ar_state": {
+            "enum": [
+              "draft",
+              "confirmed"
+            ],
+            "title": "Title Ar State",
+            "type": "string"
+          },
+          "views": {
+            "description": "Tables and charts in order (reports/README.md)",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Views",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "domain",
+          "title",
+          "title_ar_state",
+          "defaults",
+          "refresh",
+          "print",
+          "source_note",
+          "filters",
+          "queries",
+          "views",
+          "formats",
+          "metrics"
+        ],
+        "title": "ReportDefinitionResponse",
+        "type": "object"
+      },
+      "ReportMetric": {
+        "properties": {
+          "aggregation": {
+            "title": "Aggregation",
+            "type": "string"
+          },
+          "depends_unverified": {
+            "title": "Depends Unverified",
+            "type": "boolean"
+          },
+          "metric_version": {
+            "description": "The latest version; a query without a version uses each day's own",
+            "title": "Metric Version",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "name_ar_state": {
+            "title": "Name Ar State",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "name_ar_state",
+          "aggregation",
+          "depends_unverified",
+          "metric_version",
+          "params"
+        ],
+        "title": "ReportMetric",
+        "type": "object"
+      },
+      "ReportSummary": {
+        "properties": {
+          "domain": {
+            "description": "calls · incidents · resources · performance · operations",
+            "title": "Domain",
+            "type": "string"
+          },
+          "id": {
+            "examples": [
+              "R-01"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "report",
+              "dashboard"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "title_ar_state": {
+            "enum": [
+              "draft",
+              "confirmed"
+            ],
+            "title": "Title Ar State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "domain",
+          "title",
+          "title_ar_state"
+        ],
+        "title": "ReportSummary",
+        "type": "object"
+      },
+      "ReportsResponse": {
+        "properties": {
+          "reports": {
+            "items": {
+              "$ref": "#/components/schemas/ReportSummary"
+            },
+            "title": "Reports",
+            "type": "array"
+          }
+        },
+        "required": [
+          "reports"
+        ],
+        "title": "ReportsResponse",
+        "type": "object"
+      },
       "TableAccess": {
         "properties": {
           "readable": {
@@ -797,7 +1023,7 @@
   "info": {
     "description": "Metrics by dimensions over the published mart tables (DD-99 · LD-04 3.5). Every response or refusal is audited; refusals carry their own error code.",
     "title": "OSS911 BI query API",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1332,6 +1558,264 @@
         "summary": "Query",
         "tags": [
           "query"
+        ]
+      }
+    },
+    "/v1/reports": {
+      "get": {
+        "operationId": "report_catalogue_v1_reports_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "default": "en",
+              "enum": [
+                "ar",
+                "en"
+              ],
+              "title": "Locale",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Gateway Timeout"
+          }
+        },
+        "summary": "Report Catalogue",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/v1/reports/{report_id}": {
+      "get": {
+        "operationId": "report_definition_v1_reports__report_id__get",
+        "parameters": [
+          {
+            "description": "R-nn or D-nn",
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "description": "R-nn or D-nn",
+              "maxLength": 16,
+              "title": "Report Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "default": "en",
+              "enum": [
+                "ar",
+                "en"
+              ],
+              "title": "Locale",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportDefinitionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Gateway Timeout"
+          }
+        },
+        "summary": "Report Definition",
+        "tags": [
+          "reports"
         ]
       }
     }

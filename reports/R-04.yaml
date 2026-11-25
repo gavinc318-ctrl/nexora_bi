@@ -1,0 +1,30 @@
+# R-04 坐席呼叫呈现与处理对比（LD-05A；DD-102 框架样例）。接警员只见本人一行（服务层按 self 过滤），
+# 坐席筛选只给主管与管理员；姓名列的可见性由服务层裁定（marts.yaml sensitive_columns）。
+id: R-04
+kind: report
+domain: calls
+title: {en: Calls Offered and Handled per Call-Taker, ar: null}
+title_ar_state: draft
+roles: [call_taker, supervisor, admin]
+published: true
+defaults: {range: yesterday, data_version: as_closed}
+refresh: {mode: on_open}
+print: {orientation: portrait}
+source_note: null
+filters:
+  - {dimension: agent, roles: [supervisor, admin]}
+formats: {M-C07: duration}
+queries:
+  handling: {metrics: [M-C09, M-C10, M-C12, M-C07], dimensions: [agent]}
+views:
+  - kind: table
+    queries: [handling]
+  - kind: chart
+    title: {en: "Handled and not answered", ar: null}
+    query: handling
+    chart: bar
+    stack: stacked
+    horizontal: true
+    x: agent
+    series: [M-C10, M-C12]
+    sort: {by: M-C09, order: desc}

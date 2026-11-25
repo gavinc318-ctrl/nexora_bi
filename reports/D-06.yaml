@@ -1,0 +1,35 @@
+# D-06 话务性能趋势（LD-05A；DD-102 框架样例）。近 30 日：已封账的日子是定稿值，今天是当日临时值（latest），
+# 每 5 分钟重取。某面板取数失败只该面板显示错误。
+id: D-06
+kind: dashboard
+domain: calls
+title: {en: Call Performance Trends, ar: null}
+title_ar_state: draft
+roles: [supervisor, admin]
+published: true
+defaults: {range: last_30_days, data_version: latest}
+refresh: {mode: interval, seconds: 300}
+print: {orientation: portrait}
+source_note: null
+queries:
+  volume:  {metrics: [M-C01, M-C02, M-C03, M-C04], dimensions: [date]}
+  service: {metrics: [M-C05], dimensions: [date]}
+views:
+  - kind: chart
+    title: {en: "Inbound, answered and abandoned", ar: null}
+    query: volume
+    chart: bar
+    x: date
+    series: [M-C01, M-C02, M-C03]
+  - kind: chart
+    title: {en: "Answer rate", ar: null}
+    query: volume
+    chart: line
+    x: date
+    series: [M-C04]
+  - kind: chart
+    title: {en: "Service level", ar: null}
+    query: service
+    chart: line
+    x: date
+    series: [M-C05]

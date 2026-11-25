@@ -1,9 +1,11 @@
-"""The query API (DD-99 · LD-04 3.5): four endpoints under /v1.
+"""The query API (DD-99 · LD-04 3.5 · DD-102): six endpoints under /v1.
 
     POST /v1/query                          metrics by dimensions over a date range
     GET  /v1/metrics                        the metric dictionary: names, versions, implemented, readable by me
     GET  /v1/dimensions/{dimension}/members the members of a dimension of a metric's table, in my scope
     GET  /v1/me                             what the service made of my token: role, department, agent, scopes
+    GET  /v1/reports                        the reports and dashboards my role sees (reports.py)
+    GET  /v1/reports/{id}                   one definition: what to query and how to lay it out
 
 Every request: verify the token (who) -> settle the one business role -> open the analytic connection: one short
 REPEATABLE READ READ ONLY transaction -> read the registry and the read rules -> resolve the permission context once
@@ -36,7 +38,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import __version__, audit
+from . import __version__, audit, reports
 from .auth import Identity, Principal, TokenVerifier
 from .cache_key import cache_key
 from .catalog import Catalog
@@ -172,6 +174,45 @@ class MeResponse(BaseModel):
     tables: list[TableAccess]
 
 
+class ReportSummary(BaseModel):
+    id: str = Field(examples=["R-01"])
+    kind: Literal["report", "dashboard"]
+    domain: str = Field(description="calls · incidents · resources · performance · operations")
+    title: str
+    title_ar_state: Literal["draft", "confirmed"]
+
+
+class ReportsResponse(BaseModel):
+    reports: list[ReportSummary]
+
+
+class ReportMetric(BaseModel):
+    name: str
+    name_ar_state: str
+    aggregation: str
+    depends_unverified: bool
+    metric_version: int = Field(description="The latest version; a query without a version uses each day's own")
+    params: dict[str, Any]
+
+
+class ReportDefinitionResponse(BaseModel):
+    id: str
+    kind: Literal["report", "dashboard"]
+    domain: str
+    title: str
+    title_ar_state: Literal["draft", "confirmed"]
+    defaults: dict[str, Any] = Field(description="range (today · yesterday · last_7_days · last_30_days), data_version")
+    refresh: dict[str, Any] = Field(description='{"mode": "on_open"} or {"mode": "interval", "seconds": n}')
+    print: dict[str, Any]
+    source_note: str | None
+    filters: list[str] = Field(description="Dimensions my role may filter on")
+    queries: dict[str, dict[str, Any]] = Field(description="Name -> {metrics, dimensions, granularity}: one "
+                                                           "POST /v1/query each")
+    views: list[dict[str, Any]] = Field(description="Tables and charts in order (reports/README.md)")
+    formats: dict[str, Literal["integer", "decimal", "percent", "duration"]]
+    metrics: dict[str, ReportMetric]
+
+
 class ErrorBody(BaseModel):
     error: Literal[tuple(sorted({e.code for e in ALL_ERRORS} | {"internal_error"}))]   # type: ignore[valid-type]
     message: str
@@ -213,9 +254,11 @@ def create_app(settings: Settings | None = None, verifier: TokenVerifier | None 
         rec = audit.AccessRecord(
             subject=identity.subject, display=identity.display, role=principal.role if principal else "none",
             department=ctx.department if ctx else None,
-            object_ref=(result or {}).get("_table") or object_ref, metric_codes=metric_codes,
+            object_ref=(result or {}).get("_table") or object_ref,
+            metric_codes=(result or {}).get("_codes") or metric_codes,
             sensitive_fields=(result or {}).get("_sensitive") or None,
-            row_count=len(result.get("rows", result.get("members", result.get("metrics", [])))) if result else None,
+            row_count=(result["_row_count"] if "_row_count" in result else
+                       len(result.get("rows", result.get("members", result.get("metrics", []))))) if result else None,
             duration_ms=int((time.monotonic() - started) * 1000), client=identity.client, request_digest=digest)
         try:
             audit.write(connect_audit, rec)
@@ -341,6 +384,18 @@ def create_app(settings: Settings | None = None, verifier: TokenVerifier | None 
                     "agent_no": ctx.agent_no, "department": ctx.department, "problems": ctx.problems(),
                     "tables": tables}
         return handle(authorization, work, "/v1/me", None, None)
+
+    @app.get("/v1/reports", response_model=ReportsResponse, responses=ERROR_RESPONSES, tags=["reports"])
+    def report_catalogue(locale: Literal["ar", "en"] = "en", authorization: str | None = Header(None)):
+        return handle(authorization, lambda conn, catalog, ctx: reports.catalogue(catalog, ctx, locale),
+                      "/v1/reports", None, None)
+
+    @app.get("/v1/reports/{report_id}", response_model=ReportDefinitionResponse, responses=ERROR_RESPONSES,
+             tags=["reports"])
+    def report_definition(report_id: str = Path(max_length=16, description="R-nn or D-nn"),
+                          locale: Literal["ar", "en"] = "en", authorization: str | None = Header(None)):
+        return handle(authorization, lambda conn, catalog, ctx: reports.definition(catalog, ctx, report_id, locale),
+                      f"/v1/reports/{report_id}", None, None)
 
     return app
 
