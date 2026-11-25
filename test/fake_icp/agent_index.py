@@ -179,8 +179,28 @@ def day_totals(seed: int, agent: int, now: datetime) -> dict[str, str]:
     return v
 
 
-def respond(seed: int, body: dict | None, now: datetime, inject: list[str]) -> tuple[str, str, list | None]:
-    """(retcode, message, result) for a hindex/agent request."""
+def check_nulls(nulls) -> str | None:
+    """None when nulls is a valid agent_null control value: a list of {day: YYYY-MM-DD, agent, index}."""
+    if not isinstance(nulls, list):
+        return "agent_null must be a list of {day, agent, index}"
+    for x in nulls:
+        if not isinstance(x, dict) or set(x) != {"day", "agent", "index"}:
+            return "each agent_null entry is {day, agent, index}"
+        try:
+            datetime.strptime(str(x["day"]), "%Y-%m-%d")
+        except ValueError:
+            return f"agent_null day must be YYYY-MM-DD: {x['day']!r}"
+        if not isinstance(x["agent"], int) or isinstance(x["agent"], bool):
+            return f"agent_null agent must be an integer: {x['agent']!r}"
+        if x["index"] not in DAY_INDEXES:
+            return f"agent_null index must be a day total (IDX_04_02_001..028): {x['index']!r}"
+    return None
+
+
+def respond(seed: int, body: dict | None, now: datetime, inject: list[str],
+            nulls: list[dict] = ()) -> tuple[str, str, list | None]:
+    """(retcode, message, result) for a hindex/agent request. nulls: day totals answered as null while the platform's
+    day is the one named -- unlike inject, they hold for every request of that day, so the day closes with them."""
     if body is None:
         return "000-002", "The interface parameters are invalid.", None
     if str(body.get("ccId", 0)) != "1" or str(body.get("vdnId", 0)) != "1":
@@ -192,6 +212,7 @@ def respond(seed: int, body: dict | None, now: datetime, inject: list[str]) -> t
     if len(ids) > MAX_OBJECTS:
         return "000-002", f"objectIds holds more than {MAX_OBJECTS} IDs.", None
     known = set(gen.AGENT_IDS)
+    today = (now + DAY_OFFSET).strftime("%Y-%m-%d")
     result = []
     for a in ids:
         idxs = []
@@ -201,6 +222,8 @@ def respond(seed: int, body: dict | None, now: datetime, inject: list[str]) -> t
                 val = None
             elif i == SESSION_INDEX:
                 val = sessions_so_far(seed, a, now)
+            elif any(n["agent"] == a and n["index"] == i and n["day"] == today for n in nulls):
+                val = None
             else:
                 val = totals.get(i)
             idxs.append({"id": i, "val": val})

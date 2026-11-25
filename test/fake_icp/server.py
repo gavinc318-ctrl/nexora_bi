@@ -58,6 +58,7 @@ class State:
         self.inject: list[str] = []               # 下一次下载要混入的边界数据，用一次即清
         self.calls = {"auth": 0, "cdr": 0, "cdr_rejected_concurrent": 0, "synwas": 0, "hindex": 0}
         self.agent_inject: list[str] = []         # 下一次 hindex/agent 要混入的边界数据，用一次即清
+        self.agent_null: list[dict] = []          # 某日某坐席某项一直返回 null，那一天过去即不再生效（不用一次即清）
         self.ref = ref_api.initial(seed, self.now())   # 网关的配置副本（synwas）
 
     def now(self) -> datetime:
@@ -109,7 +110,8 @@ class Handler(BaseHTTPRequestHandler):
                 body = {"seed": st.seed, "emit_mode": st.emit_mode, "token_ttl": st.token_ttl,
                         "now": st.now().strftime(gen.TS_FMT), "now_overridden": st.now_override is not None,
                         "delay_seconds": st.delay_seconds, "fail_next": list(st.fail_next),
-                        "inject": list(st.inject), "agent_inject": list(st.agent_inject), "calls": dict(st.calls),
+                        "inject": list(st.inject), "agent_inject": list(st.agent_inject),
+                        "agent_null": [dict(x) for x in st.agent_null], "calls": dict(st.calls),
                         "ref": {"cti": dict(st.ref["cti"]), "vdn": dict(st.ref["vdn"]),
                                 "agents": len(st.ref["agents"])}}
             return self._json(200, body)
@@ -172,7 +174,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._fail(st.fail_next.pop(0), "injected failure")
             now, seed = st.now(), st.seed
             inject, st.agent_inject = st.agent_inject, []
-        code, message, result = agent_index.respond(seed, self._read_json(), now, inject)
+            nulls = [dict(x) for x in st.agent_null]
+        code, message, result = agent_index.respond(seed, self._read_json(), now, inject, nulls)
         if code != "0":
             return self._fail(code, message)
         self._json(200, {"message": message, "retcode": "0", "result": result})
@@ -267,6 +270,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(400, {"error": f"unknown agent injection: {sorted(bad)}",
                                             "known": sorted(agent_index.INJECTIONS)})
                 st.agent_inject = list(body["agent_inject"])
+            if "agent_null" in body:
+                err = agent_index.check_nulls(body["agent_null"])
+                if err:
+                    return self._json(400, {"error": err})
+                st.agent_null = [dict(x) for x in body["agent_null"]]
             if "ref" in body:
                 err = ref_api.control(st.ref, body, st.now())
                 if err:

@@ -84,6 +84,14 @@ curl -s -X POST localhost:18080/_fake/control -d '{"agent_inject": ["extra_agent
 curl -s -X POST localhost:18080/_fake/control -d '{"agent_inject": ["agent_missing"]}'     # 少返回第一个请求的工号（登记，不隔离）
 ```
 
+某坐席某天的某一项日累计一直返回 null（不是用一次即清：那一天每次请求都是 null，当天就以空值封账；平台的日过去后自动不再生效）。
+用来验证状态时长 M-R10 至 M-R15 的分子与分母都不计这一坐席日（DD-101 注 2026-11-25）。传 `[]` 清除：
+
+```bash
+curl -s -X POST localhost:18080/_fake/control \
+  -d '{"agent_null": [{"day": "2026-11-26", "agent": 101, "index": "IDX_04_02_010"}]}'      # 101 当天的事后处理时长
+```
+
 ## 覆盖的边界情况（NOTES.md 草稿第二节）
 
 | # | 情况 | 怎么造出来 |

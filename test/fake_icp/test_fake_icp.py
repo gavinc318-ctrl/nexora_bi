@@ -13,6 +13,7 @@ import os
 import sys
 import threading
 import unittest
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 
@@ -323,6 +324,20 @@ class FakeICPTest(unittest.TestCase):
         self.assertEqual(self.hindex([101], ["IDX_04_02_001"])["result"][0]["idxs"][0]["val"], "2")   # used once
         self.control(agent_inject=["agent_missing"])
         self.assertEqual([r["id"] for r in self.hindex([101, 102], ["IDX_04_02_001"])["result"]], ["102"])
+
+    def test_hindex_agent_null_holds_for_the_named_day(self):
+        self.control(now="2026-11-20 12:00:00",
+                     agent_null=[{"day": "2026-11-20", "agent": 101, "index": "IDX_04_02_010"}])
+        for _ in range(2):                                              # not used up by one request
+            rec = self.hindex([101, 102], ["IDX_04_02_010", "IDX_04_02_021"])["result"]
+            self.assertEqual([x["val"] for x in rec[0]["idxs"]][0], None)
+            self.assertIsNotNone(rec[0]["idxs"][1]["val"])
+            self.assertIsNotNone(rec[1]["idxs"][0]["val"])
+        self.control(now="2026-11-21 12:00:00")                         # the next platform day: values again
+        self.assertIsNotNone(self.hindex([101], ["IDX_04_02_010"])["result"][0]["idxs"][0]["val"])
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.control(agent_null=[{"day": "2026-11-20", "agent": 101, "index": "IDX_04_03_001"}])
+        self.assertEqual(e.exception.code, 400)
 
     def test_day_totals_do_not_depend_on_when_the_cache_was_filled(self):
         # Two requests in one minute: the later one sees the legs that ended between them, as a fresh one would

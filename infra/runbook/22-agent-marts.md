@@ -163,3 +163,57 @@ SELECT date_key, close_version, count(*) AS rows, sum(day_count) AS day_count
 ```
 
 第 1 版的 `day_count` 为空，第 2 版为 24，今天的临时行为 24。
+
+## 补丁二（DD-101 注 2026-11-25）：状态时长各用自己的分母
+
+- 状态表加六列 `talk_agent_days`、`acw_agent_days`、`rest_agent_days`、`busy_agent_days`、`hold_agent_days`、`idle_agent_days`：
+  该项平台值非空为 1，为空为 0。M-R10 至 M-R15 的分母由 `agent_days` 改为各自这一列——平台某项给了空值的坐席日，分子分母
+  都不计（原来分母照计，均值偏低）。上线前改，不升口径版本
+- 加列走上一节同样的路径：已封账的行新列为空，夜间修正给最近 7 个已封账日写新版本
+
+```bash
+cd ~/src/nexora_bi/infra
+ansible-playbook playbooks/45-contracts.yml -e ansible_connection=local -K
+ansible-playbook playbooks/50-dags.yml      -e ansible_connection=local -K     # 不能跳过：dbt 工程由它装
+af dags trigger publish_marts_intraday          # 给状态表加六列；等它 success
+ansible-playbook playbooks/46-metrics.yml   -e ansible_connection=local -K
+af dags trigger publish_marts_nightly
+```
+
+| 步骤 | 预期 |
+| --- | --- |
+| 46 | M-R10 至 M-R15 `redefined`、implemented；其余 unchanged |
+| nightly | 状态表最近 7 个已封账日各多一个版本；另两张表不变 |
+
+```bash
+sudo -u postgres psql -d oss911 -P pager=off -c "
+SELECT date_key, close_version, count(*) AS rows, sum(agent_days) AS agent_days,
+       sum(talk_agent_days) AS talk, sum(acw_agent_days) AS acw, sum(idle_agent_days) AS idle
+  FROM mart.agents__day_agent__state GROUP BY 1, 2 ORDER BY 1, 2"
+```
+
+新版本里 talk、acw、idle 与 `agent_days` 相等（假接口不给空值）；加列前的版本为空。
+
+### 空值注入（必查项，真机接入后同样要做）
+
+假接口要重启才有 `agent_null`（`test/fake_icp/README.md`）。让某坐席**今天**的事后处理时长一直为空，今天封账后核对：
+
+```bash
+curl -s -X POST localhost:18080/_fake/control \
+  -d "{\"agent_null\": [{\"day\": \"$(TZ=Asia/Riyadh date +%F)\", \"agent\": 101, \"index\": \"IDX_04_02_010\"}]}"
+```
+
+次日夜间发布后：
+
+```bash
+sudo -u postgres psql -d oss911 -P pager=off -c "
+SELECT date_key, close_version, sum(agent_days) AS agent_days, sum(acw_agent_days) AS acw_days,
+       sum(talk_agent_days) AS talk_days, count(*) FILTER (WHERE acw_seconds IS NULL) AS acw_null,
+       count(*) FILTER (WHERE occupied_seconds IS NULL) AS occupancy_null
+  FROM mart.agents__day_agent__state
+ WHERE date_key = to_char(now() at time zone 'Asia/Riyadh' - interval '1 day', 'YYYYMMDD')::integer
+ GROUP BY 1, 2"
+```
+
+`acw_days` 比 `agent_days` 少 1，`talk_days` 不少；`acw_null` 与 `occupancy_null` 都是 1（M-R04 三项缺一即分子分母同空）。
+注入只对那一天生效，过了午夜（利雅得）自动失效。
